@@ -8,7 +8,6 @@ const canvas = ref<HTMLCanvasElement>()
 // shallowRef: Vue не должен оборачивать wasm-объект в Proxy.
 const engine = shallowRef<Engine>()
 const error = ref<string>()
-// Реактивное состояние pointer lock: мышь захвачена canvas'ом.
 const locked = ref(false)
 
 let rafId = 0
@@ -104,7 +103,6 @@ onBeforeUnmount(() => {
 
 <template>
   <canvas ref="canvas" class="game" @click="requestLock" />
-  <!-- Подсказка и прицел только когда движок запущен; клики проходят на canvas. -->
   <div v-if="engine && !locked" class="hint">Кликни, чтобы играть</div>
   <div v-if="engine && locked" class="crosshair" />
   <div v-if="error" class="error">Не удалось запустить движок: {{ error }}</div>

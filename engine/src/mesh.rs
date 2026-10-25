@@ -10,7 +10,6 @@ impl Vertex {
     const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
         wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
 
-    /// Раскладка вершинного буфера для пайплайна.
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
@@ -30,7 +29,6 @@ const SIDE_Z: [f32; 3] = [0.40, 0.27, 0.13];
 /// Вершины каждой грани идут против часовой стрелки, если смотреть снаружи.
 pub fn cube() -> (Vec<Vertex>, Vec<u16>) {
     let h = 0.5;
-    // (цвет, 4 угла грани в порядке CCW снаружи)
     let faces: [([f32; 3], [[f32; 3]; 4]); 6] = [
         // +Y (верх)
         (GRASS, [[-h, h, h], [h, h, h], [h, h, -h], [-h, h, -h]]),
@@ -57,13 +55,11 @@ pub fn cube() -> (Vec<Vertex>, Vec<u16>) {
     for (color, corners) in faces {
         let base = vertices.len() as u16;
         vertices.extend(corners.map(|position| Vertex { position, color }));
-        // Два треугольника на грань: 0-1-2 и 0-2-3.
         indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     }
     (vertices, indices)
 }
 
-/// Байтовое представление вершин для загрузки в GPU-буфер.
 pub fn vertex_bytes(vertices: &[Vertex]) -> Vec<u8> {
     vertices
         .iter()
@@ -72,7 +68,6 @@ pub fn vertex_bytes(vertices: &[Vertex]) -> Vec<u8> {
         .collect()
 }
 
-/// Байтовое представление индексов для загрузки в GPU-буфер.
 pub fn index_bytes(indices: &[u16]) -> Vec<u8> {
     indices.iter().flat_map(|i| i.to_le_bytes()).collect()
 }

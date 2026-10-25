@@ -38,7 +38,6 @@ pub struct Engine {
     camera: Camera,
     /// Коды (`KeyboardEvent.code`) зажатых сейчас клавиш.
     keys: HashSet<String>,
-    /// Время прошлого кадра; `None` до первого кадра.
     last_time: Option<f32>,
 }
 
@@ -107,7 +106,7 @@ impl Engine {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        // Uniform: матрица view-projection, 64 байта.
+        // 64 байта = mat4x4<f32> view-projection.
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
             size: 64,
@@ -295,7 +294,6 @@ impl Engine {
     }
 }
 
-/// Буфер глубины под текущий размер canvas.
 fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("depth"),
