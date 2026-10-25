@@ -8,6 +8,7 @@ use crate::camera::Camera;
 use crate::mesh::{self, Vertex};
 use crate::mesher::mesh_section;
 use crate::section::SECTION_SIZE;
+use crate::texture::{self, LAYER_COUNT, MIP_LEVELS, TILE_SIZE};
 use crate::world::World;
 
 const SKY: wgpu::Color = wgpu::Color {
@@ -28,6 +29,8 @@ pub struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    /// Формат view кадра: всегда sRGB, даже если поверхность без него.
+    render_format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
@@ -71,12 +74,16 @@ impl Engine {
             .await?;
 
         let caps = surface.get_capabilities(&adapter);
+        // Канвас WebGPU не умеет sRGB-форматы поверхности (только `*8unorm`), зато
+        // разрешает sRGB-view через `view_formats`. Без него линейный цвет шейдера
+        // ушёл бы на экран без перевода в sRGB, и картинка потемнела бы.
         let format = caps
             .formats
             .iter()
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
+        let render_format = format.add_srgb_suffix();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -85,7 +92,11 @@ impl Engine {
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: caps.alpha_modes[0],
             color_space: wgpu::SurfaceColorSpace::Auto,
-            view_formats: vec![],
+            view_formats: if render_format == format {
+                vec![]
+            } else {
+                vec![render_format]
+            },
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
@@ -101,26 +112,69 @@ impl Engine {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let block_textures = create_block_textures(&device, &queue);
+        // Nearest внутри уровня — чёткие пиксели вблизи, как в Minecraft; Linear между
+        // мип-уровнями — без ряби вдали и без видимой границы смены уровня.
+        // Repeat — UV задаются в блоках, так грань больше 1×1 (greedy meshing)
+        // повторит тайл без правок шейдера.
+        let block_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("blocks"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
         let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals"),
             layout: &globals_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: globals_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&block_textures),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&block_sampler),
+                },
+            ],
         });
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
@@ -141,7 +195,7 @@ impl Engine {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs_main"),
-                targets: &[Some(format.into())],
+                targets: &[Some(render_format.into())],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
@@ -167,6 +221,7 @@ impl Engine {
             device,
             queue,
             config,
+            render_format,
             pipeline,
             globals_buffer,
             globals_bind_group,
@@ -237,9 +292,10 @@ impl Engine {
             }
             other => return Err(JsError::new(&format!("surface error: {other:?}"))),
         };
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.render_format),
+            ..Default::default()
+        });
 
         let mut encoder = self
             .device
@@ -316,6 +372,33 @@ fn upload_world(device: &wgpu::Device, world: &World) -> Vec<SectionMesh> {
             })
         })
         .collect()
+}
+
+/// Массив текстур блоков: по слою на тайл, с готовыми мип-уровнями.
+fn create_block_textures(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {
+    let texture = device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("blocks"),
+            size: wgpu::Extent3d {
+                width: TILE_SIZE,
+                height: TILE_SIZE,
+                depth_or_array_layers: LAYER_COUNT,
+            },
+            mip_level_count: MIP_LEVELS,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        &texture::generate(),
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    })
 }
 
 fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
