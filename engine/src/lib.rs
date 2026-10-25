@@ -5,6 +5,7 @@ pub mod block;
 pub mod mesh;
 pub mod mesher;
 pub mod section;
+pub mod texture;
 pub mod world;
 
 #[cfg(target_arch = "wasm32")]

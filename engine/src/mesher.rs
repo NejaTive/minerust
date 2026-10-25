@@ -1,6 +1,6 @@
 use glam::IVec3;
 
-use crate::block::Block;
+use crate::block::{Block, Facing};
 use crate::mesh::Vertex;
 use crate::section::{SECTION_SIZE, Section};
 
@@ -12,41 +12,53 @@ pub struct MeshData {
 struct Face {
     /// Направление на соседа, которого грань касается.
     normal: IVec3,
+    facing: Facing,
     /// Множитель яркости, как в Minecraft без сглаженного света.
     shade: f32,
     /// Углы в единичном кубе блока, против часовой стрелки при взгляде снаружи
-    /// (этого ждут `FrontFace::Ccw` и `cull_mode: Back`).
+    /// (этого ждут `FrontFace::Ccw` и `cull_mode: Back`). У боковых граней порядок
+    /// всегда низ-лево, низ-право, верх-право, верх-лево — на этом держится `CORNER_UVS`.
     corners: [[f32; 3]; 4],
 }
+
+/// UV углов грани в порядке `Face::corners`: у боковых граней v = 0 оказывается
+/// сверху, и кайма травы смотрит вверх.
+const CORNER_UVS: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
 
 const FACES: [Face; 6] = [
     Face {
         normal: IVec3::Y,
+        facing: Facing::Top,
         shade: 1.0,
         corners: [[0., 1., 1.], [1., 1., 1.], [1., 1., 0.], [0., 1., 0.]],
     },
     Face {
         normal: IVec3::NEG_Y,
+        facing: Facing::Bottom,
         shade: 0.5,
         corners: [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],
     },
     Face {
         normal: IVec3::X,
+        facing: Facing::Side,
         shade: 0.6,
         corners: [[1., 0., 1.], [1., 0., 0.], [1., 1., 0.], [1., 1., 1.]],
     },
     Face {
         normal: IVec3::NEG_X,
+        facing: Facing::Side,
         shade: 0.6,
         corners: [[0., 0., 0.], [0., 0., 1.], [0., 1., 1.], [0., 1., 0.]],
     },
     Face {
         normal: IVec3::Z,
+        facing: Facing::Side,
         shade: 0.8,
         corners: [[0., 0., 1.], [1., 0., 1.], [1., 1., 1.], [0., 1., 1.]],
     },
     Face {
         normal: IVec3::NEG_Z,
+        facing: Facing::Side,
         shade: 0.8,
         corners: [[1., 0., 0.], [0., 0., 0.], [0., 1., 0.], [1., 1., 0.]],
     },
@@ -88,17 +100,27 @@ pub fn mesh_section(
                     if block_at(local + face.normal).is_solid() {
                         continue;
                     }
+                    let Some(tile) = block.tile(face.facing) else {
+                        continue;
+                    };
                     // Худший случай — шахматная расстановка: 2048 блоков × 24 = 49 152 вершины.
                     debug_assert!(
                         mesh.vertices.len() + 4 <= usize::from(u16::MAX) + 1,
                         "section mesh overflows u16 indices"
                     );
                     let first = mesh.vertices.len() as u16;
-                    let color = block.color().map(|c| c * face.shade);
-                    mesh.vertices.extend(face.corners.map(|corner| Vertex {
-                        position: (base + glam::Vec3::from(corner)).to_array(),
-                        color,
-                    }));
+                    mesh.vertices
+                        .extend(
+                            face.corners
+                                .iter()
+                                .zip(CORNER_UVS)
+                                .map(|(&corner, uv)| Vertex {
+                                    position: (base + glam::Vec3::from(corner)).to_array(),
+                                    uv,
+                                    shade: face.shade,
+                                    layer: tile.layer(),
+                                }),
+                        );
                     mesh.indices
                         .extend([first, first + 1, first + 2, first, first + 2, first + 3]);
                 }
@@ -113,6 +135,7 @@ mod tests {
     use glam::Vec3;
 
     use super::*;
+    use crate::texture::Tile;
 
     fn air(_: IVec3) -> Block {
         Block::Air
@@ -211,6 +234,43 @@ mod tests {
                 .iter()
                 .all(|&i| usize::from(i) < mesh.vertices.len())
         );
+    }
+
+    #[test]
+    fn grass_faces_use_their_tiles() {
+        let mut section = Section::new();
+        section.set(IVec3::ZERO, Block::Grass);
+        let mesh = mesh_section(&section, IVec3::ZERO, air);
+        for quad in mesh.vertices.chunks(4) {
+            let ys: Vec<f32> = quad.iter().map(|v| v.position[1]).collect();
+            let expected = if ys.iter().all(|&y| y == 1.0) {
+                Tile::GrassTop
+            } else if ys.iter().all(|&y| y == 0.0) {
+                Tile::Dirt
+            } else {
+                Tile::GrassSide
+            };
+            assert!(quad.iter().all(|v| v.layer == expected.layer()));
+        }
+    }
+
+    #[test]
+    fn side_faces_are_upright() {
+        let mut section = Section::new();
+        section.set(IVec3::ZERO, Block::Grass);
+        let mesh = mesh_section(&section, IVec3::ZERO, air);
+        let sides = mesh
+            .vertices
+            .chunks(4)
+            .filter(|quad| quad.iter().any(|v| v.position[1] != quad[0].position[1]));
+        let mut count = 0;
+        for quad in sides {
+            for v in quad {
+                assert_eq!(v.uv[1], 1.0 - v.position[1], "v = 0 must be the top edge");
+            }
+            count += 1;
+        }
+        assert_eq!(count, 4);
     }
 
     #[test]
