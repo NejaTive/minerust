@@ -1,5 +1,14 @@
+mod camera;
+mod mesh;
+
+use std::collections::HashSet;
+
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
+use wgpu::util::DeviceExt;
+
+use camera::Camera;
+use mesh::Vertex;
 
 const SKY: wgpu::Color = wgpu::Color {
     r: 0.53,
@@ -7,6 +16,10 @@ const SKY: wgpu::Color = wgpu::Color {
     b: 0.92,
     a: 1.0,
 };
+
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Верхняя граница шага кадра, чтобы после сворачивания вкладки камера не улетала.
+const MAX_DT: f32 = 0.1;
 
 /// Движок игры. Владеет GPU-ресурсами и рисует кадры на переданном canvas.
 #[wasm_bindgen]
@@ -18,6 +31,15 @@ pub struct Engine {
     pipeline: wgpu::RenderPipeline,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+    depth_view: wgpu::TextureView,
+    camera: Camera,
+    /// Коды (`KeyboardEvent.code`) зажатых сейчас клавиш.
+    keys: HashSet<String>,
+    /// Время прошлого кадра; `None` до первого кадра.
+    last_time: Option<f32>,
 }
 
 #[wasm_bindgen]
@@ -71,10 +93,24 @@ impl Engine {
         };
         surface.configure(&device, &config);
 
-        // Uniform: time, aspect + выравнивание до 16 байт.
+        let depth_view = create_depth_view(&device, width, height);
+
+        let (vertices, indices) = mesh::cube();
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cube vertices"),
+            contents: &mesh::vertex_bytes(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cube indices"),
+            contents: &mesh::index_bytes(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        // Uniform: матрица view-projection, 64 байта.
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
-            size: 16,
+            size: 64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -112,7 +148,7 @@ impl Engine {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[],
+                buffers: &[Some(Vertex::layout())],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -121,8 +157,19 @@ impl Engine {
                 targets: &[Some(format.into())],
                 compilation_options: Default::default(),
             }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
@@ -136,6 +183,13 @@ impl Engine {
             pipeline,
             globals_buffer,
             globals_bind_group,
+            vertex_buffer,
+            index_buffer,
+            index_count: indices.len() as u32,
+            depth_view,
+            camera: Camera::new(),
+            keys: HashSet::new(),
+            last_time: None,
         })
     }
 
@@ -147,13 +201,39 @@ impl Engine {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
+        self.depth_view = create_depth_view(&self.device, width, height);
+    }
+
+    /// Поворот камеры мышью; `dx`/`dy` — `movementX/Y` при pointer lock.
+    pub fn mouse_move(&mut self, dx: f32, dy: f32) {
+        self.camera.rotate(dx, dy);
+    }
+
+    /// Нажатие/отпускание клавиши; `code` — `KeyboardEvent.code` ("KeyW", "Space"…).
+    pub fn set_key(&mut self, code: &str, pressed: bool) {
+        if pressed {
+            self.keys.insert(code.to_owned());
+        } else {
+            self.keys.remove(code);
+        }
+    }
+
+    /// Отпускает все клавиши (потеря pointer lock, blur окна).
+    pub fn release_all_keys(&mut self) {
+        self.keys.clear();
     }
 
     /// Рисует один кадр. `time` — секунды с начала работы страницы.
     pub fn render(&mut self, time: f32) -> Result<(), JsError> {
+        let dt = self
+            .last_time
+            .map_or(0.0, |last| (time - last).clamp(0.0, MAX_DT));
+        self.last_time = Some(time);
+        self.camera.update(&self.keys, dt);
+
         let aspect = self.config.width as f32 / self.config.height as f32;
-        let globals = [time, aspect, 0.0, 0.0];
-        let bytes: Vec<u8> = globals.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let view_proj = self.camera.view_proj(aspect).to_cols_array();
+        let bytes: Vec<u8> = view_proj.iter().flat_map(|v| v.to_le_bytes()).collect();
         self.queue.write_buffer(&self.globals_buffer, 0, &bytes);
 
         let frame = match self.surface.get_current_texture() {
@@ -178,7 +258,9 @@ impl Engine {
 
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
@@ -191,14 +273,43 @@ impl Engine {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
-            pass.draw(0..3, 0..1);
+            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            pass.draw_indexed(0..self.index_count, 0, 0..1);
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
         Ok(())
     }
+}
+
+/// Буфер глубины под текущий размер canvas.
+fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("depth"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
