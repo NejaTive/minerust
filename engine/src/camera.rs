@@ -22,10 +22,10 @@ pub struct Camera {
 }
 
 impl Camera {
-    /// Стартует сзади-сверху от куба в начале координат и смотрит прямо на него.
+    /// Стартует над углом тестового мира 64×32×64 и смотрит на его центр.
     pub fn new() -> Self {
-        let position = Vec3::new(0.0, 1.5, 4.0);
-        let dir = -position;
+        let position = Vec3::new(-20.0, 48.0, -20.0);
+        let dir = Vec3::new(32.0, 16.0, 32.0) - position;
         Self {
             position,
             yaw: dir.z.atan2(dir.x),

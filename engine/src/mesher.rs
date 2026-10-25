@@ -1,0 +1,239 @@
+use glam::IVec3;
+
+use crate::block::Block;
+use crate::mesh::Vertex;
+use crate::section::{SECTION_SIZE, Section};
+
+pub struct MeshData {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u16>,
+}
+
+struct Face {
+    /// Направление на соседа, которого грань касается.
+    normal: IVec3,
+    /// Множитель яркости, как в Minecraft без сглаженного света.
+    shade: f32,
+    /// Углы в единичном кубе блока, против часовой стрелки при взгляде снаружи
+    /// (этого ждут `FrontFace::Ccw` и `cull_mode: Back`).
+    corners: [[f32; 3]; 4],
+}
+
+const FACES: [Face; 6] = [
+    Face {
+        normal: IVec3::Y,
+        shade: 1.0,
+        corners: [[0., 1., 1.], [1., 1., 1.], [1., 1., 0.], [0., 1., 0.]],
+    },
+    Face {
+        normal: IVec3::NEG_Y,
+        shade: 0.5,
+        corners: [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],
+    },
+    Face {
+        normal: IVec3::X,
+        shade: 0.6,
+        corners: [[1., 0., 1.], [1., 0., 0.], [1., 1., 0.], [1., 1., 1.]],
+    },
+    Face {
+        normal: IVec3::NEG_X,
+        shade: 0.6,
+        corners: [[0., 0., 0.], [0., 0., 1.], [0., 1., 1.], [0., 1., 0.]],
+    },
+    Face {
+        normal: IVec3::Z,
+        shade: 0.8,
+        corners: [[0., 0., 1.], [1., 0., 1.], [1., 1., 1.], [0., 1., 1.]],
+    },
+    Face {
+        normal: IVec3::NEG_Z,
+        shade: 0.8,
+        corners: [[1., 0., 0.], [0., 0., 0.], [0., 1., 0.], [1., 1., 0.]],
+    },
+];
+
+/// Строит меш видимых граней секции: грань рисуется, если блок твёрдый,
+/// а сосед в её направлении — нет. Позиции вершин мировые.
+///
+/// `origin` — мировые координаты минимального угла секции в блоках (координаты секции × 16).
+/// `neighbor` вызывается только для локальных координат за краем секции
+/// (одна компонента равна -1 или 16) и возвращает блок там.
+pub fn mesh_section(
+    section: &Section,
+    origin: IVec3,
+    neighbor: impl Fn(IVec3) -> Block,
+) -> MeshData {
+    let mut mesh = MeshData {
+        vertices: Vec::new(),
+        indices: Vec::new(),
+    };
+    let block_at = |local: IVec3| {
+        if Section::contains(local) {
+            section.get(local)
+        } else {
+            neighbor(local)
+        }
+    };
+
+    for y in 0..SECTION_SIZE {
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                let local = IVec3::new(x, y, z);
+                let block = section.get(local);
+                if !block.is_solid() {
+                    continue;
+                }
+                let base = (origin + local).as_vec3();
+                for face in &FACES {
+                    if block_at(local + face.normal).is_solid() {
+                        continue;
+                    }
+                    // Худший случай — шахматная расстановка: 2048 блоков × 24 = 49 152 вершины.
+                    debug_assert!(
+                        mesh.vertices.len() + 4 <= usize::from(u16::MAX) + 1,
+                        "section mesh overflows u16 indices"
+                    );
+                    let first = mesh.vertices.len() as u16;
+                    let color = block.color().map(|c| c * face.shade);
+                    mesh.vertices.extend(face.corners.map(|corner| Vertex {
+                        position: (base + glam::Vec3::from(corner)).to_array(),
+                        color,
+                    }));
+                    mesh.indices
+                        .extend([first, first + 1, first + 2, first, first + 2, first + 3]);
+                }
+            }
+        }
+    }
+    mesh
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec3;
+
+    use super::*;
+
+    fn air(_: IVec3) -> Block {
+        Block::Air
+    }
+
+    fn face_count(mesh: &MeshData) -> usize {
+        mesh.indices.len() / 6
+    }
+
+    fn filled(pred: impl Fn(IVec3) -> bool) -> Section {
+        let mut section = Section::new();
+        for y in 0..SECTION_SIZE {
+            for z in 0..SECTION_SIZE {
+                for x in 0..SECTION_SIZE {
+                    let local = IVec3::new(x, y, z);
+                    if pred(local) {
+                        section.set(local, Block::Stone);
+                    }
+                }
+            }
+        }
+        section
+    }
+
+    #[test]
+    fn empty_section_has_no_faces() {
+        let mesh = mesh_section(&Section::new(), IVec3::ZERO, air);
+        assert_eq!(face_count(&mesh), 0);
+        assert!(mesh.vertices.is_empty());
+    }
+
+    #[test]
+    fn single_block_has_six_faces() {
+        let mut section = Section::new();
+        section.set(IVec3::new(5, 5, 5), Block::Dirt);
+        let mesh = mesh_section(&section, IVec3::ZERO, air);
+        assert_eq!(face_count(&mesh), 6);
+        assert_eq!(mesh.vertices.len(), 24);
+    }
+
+    #[test]
+    fn vertices_are_in_world_space() {
+        let mut section = Section::new();
+        section.set(IVec3::new(1, 2, 3), Block::Dirt);
+        let origin = IVec3::new(16, 0, -32);
+        let mesh = mesh_section(&section, origin, air);
+        let min = Vec3::new(17.0, 2.0, -29.0);
+        for v in &mesh.vertices {
+            let p = Vec3::from(v.position);
+            assert!(p.cmpge(min).all() && p.cmple(min + Vec3::ONE).all(), "{p}");
+        }
+    }
+
+    #[test]
+    fn adjacent_blocks_share_hidden_face() {
+        let mut section = Section::new();
+        section.set(IVec3::new(5, 5, 5), Block::Dirt);
+        section.set(IVec3::new(6, 5, 5), Block::Dirt);
+        let mesh = mesh_section(&section, IVec3::ZERO, air);
+        assert_eq!(face_count(&mesh), 10);
+    }
+
+    #[test]
+    fn solid_section_draws_only_outer_shell() {
+        let mesh = mesh_section(&filled(|_| true), IVec3::ZERO, air);
+        assert_eq!(face_count(&mesh), 6 * 256);
+    }
+
+    #[test]
+    fn solid_section_with_solid_neighbors_has_no_faces() {
+        let mesh = mesh_section(&filled(|_| true), IVec3::ZERO, |local| {
+            let outside = local
+                .to_array()
+                .iter()
+                .filter(|&&c| c == -1 || c == 16)
+                .count();
+            let inside = local
+                .to_array()
+                .iter()
+                .filter(|&&c| (0..16).contains(&c))
+                .count();
+            assert_eq!((outside, inside), (1, 2), "neighbor called for {local}");
+            Block::Stone
+        });
+        assert_eq!(face_count(&mesh), 0);
+    }
+
+    #[test]
+    fn checkerboard_fits_u16() {
+        let section = filled(|p| (p.x + p.y + p.z) % 2 == 0);
+        let mesh = mesh_section(&section, IVec3::ZERO, air);
+        assert_eq!(face_count(&mesh), 2048 * 6);
+        assert_eq!(mesh.vertices.len(), 2048 * 24);
+        assert!(
+            mesh.indices
+                .iter()
+                .all(|&i| usize::from(i) < mesh.vertices.len())
+        );
+    }
+
+    #[test]
+    fn faces_wind_counter_clockwise_from_outside() {
+        let mut section = Section::new();
+        section.set(IVec3::ZERO, Block::Grass);
+        let mesh = mesh_section(&section, IVec3::ZERO, air);
+        let center = Vec3::splat(0.5);
+        let mut normals = Vec::new();
+        for quad in mesh.vertices.chunks(4) {
+            let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(quad[i].position));
+            let winding = (b - a).cross(c - b).normalize();
+            // Сторону грани берём из геометрии: от центра блока к центру грани.
+            let face_center = quad.iter().map(|v| Vec3::from(v.position)).sum::<Vec3>() / 4.0;
+            let normal = (face_center - center) * 2.0;
+            assert!(
+                winding.dot(normal) > 0.999,
+                "winding {winding}, normal {normal}"
+            );
+            normals.push(normal.round().as_ivec3());
+        }
+        normals.sort_by_key(|n| n.to_array());
+        normals.dedup();
+        assert_eq!(normals.len(), 6);
+    }
+}
