@@ -1,0 +1,23 @@
+{
+  "name": "minerust",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run wasm:release && vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "wasm": "wasm-pack build engine --target web --dev",
+    "wasm:release": "wasm-pack build engine --target web --release"
+  },
+  "dependencies": {
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.5",
+    "vue-tsc": "^3.3.13"
+  }
+}
