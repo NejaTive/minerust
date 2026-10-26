@@ -8,6 +8,7 @@ use wgpu::util::DeviceExt;
 use crate::block::Block;
 use crate::camera::Camera;
 use crate::column::COLUMN_SECTIONS;
+use crate::double_tap::DoubleTap;
 use crate::fog::Fog;
 use crate::frustum::Frustum;
 use crate::globals::Globals;
@@ -15,6 +16,7 @@ use crate::loader::{Loader, Progress};
 use crate::mesh::{self, Vertex};
 use crate::mesher::{MeshData, mesh_column, mesh_world_section};
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
+use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player};
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
 use crate::section::SECTION_SIZE;
@@ -52,7 +54,10 @@ const DEFAULT_BLOCK: Block = Block::Grass;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Верхняя граница шага кадра, чтобы после сворачивания вкладки камера не улетала.
+/// Заодно ограничивает число шагов физики за кадр: не больше 6.
 const MAX_DT: f32 = 0.1;
+/// Окно двойного нажатия пробела (полёт ↔ ходьба), с.
+const DOUBLE_TAP_S: f32 = 0.3;
 
 /// Движок игры. Владеет GPU-ресурсами и рисует кадры на переданном canvas.
 #[wasm_bindgen]
@@ -89,7 +94,13 @@ pub struct Engine {
     generate_time: AverageTime,
     mesh_time: AverageTime,
     depth_view: wgpu::TextureView,
+    /// Взгляд игрока. Позицию задаёт `player`: каждый кадр камера ставится в его глаза.
     camera: Camera,
+    player: Player,
+    /// Ноги до последнего шага физики: камера интерполирует от них к `player.feet`.
+    prev_feet: Vec3,
+    clock: Clock,
+    space_tap: DoubleTap,
     /// Коды (`KeyboardEvent.code`) зажатых сейчас клавиш.
     keys: HashSet<String>,
     last_time: Option<f32>,
@@ -102,8 +113,9 @@ impl Engine {
     /// Инициализирует графику на canvas.
     ///
     /// `preferred` — `"webgpu"` (без поддержки в браузере тихо откатывается на WebGL2)
-    /// или `"webgl2"`. `camera` — `[x, y, z, yaw, pitch]` из [`Engine::camera_state`];
-    /// без него камера встаёт на спаун над точкой (0, 0).
+    /// или `"webgl2"`. `camera` — `[x, y, z, yaw, pitch, mode]` из [`Engine::camera_state`]
+    /// (старые 5 значений без `mode` тоже принимаются, режим тогда — ходьба); без него
+    /// игрок встаёт на землю над точкой (0, 0).
     pub async fn create(
         canvas: HtmlCanvasElement,
         preferred: &str,
@@ -117,12 +129,14 @@ impl Engine {
             other => return Err(JsError::new(&format!("unknown graphics API: {other}"))),
         };
         let terrain = Terrain::new(SEED);
-        let camera = match camera {
-            Some(state) => Camera::from_state(&state)
-                .ok_or_else(|| JsError::new("camera state must be 5 finite numbers"))?,
+        let (camera, player) = match camera {
+            Some(state) => restore_player(&state)
+                .ok_or_else(|| JsError::new("camera state must be 5 or 6 finite numbers"))?,
             None => {
+                // `surface_height` — верхний твёрдый блок, ноги встают на его верхнюю грань.
                 let ground = terrain.surface_height(0, 0) as f32;
-                Camera::spawn(Vec3::new(0.5, ground + 20.0, 0.5))
+                let player = Player::new(Vec3::new(0.5, ground + 1.0, 0.5), Mode::Walking);
+                (Camera::spawn(player.eye()), player)
             }
         };
 
@@ -347,6 +361,10 @@ impl Engine {
             mesh_time,
             depth_view,
             camera,
+            prev_feet: player.feet,
+            player,
+            clock: Clock::default(),
+            space_tap: DoubleTap::new(DOUBLE_TAP_S),
             keys: HashSet::new(),
             last_time: None,
             backend,
@@ -367,9 +385,36 @@ impl Engine {
         .to_owned()
     }
 
-    /// Состояние камеры `[x, y, z, yaw, pitch]` для передачи в новый `Engine`.
+    /// Состояние `[x, y, z, yaw, pitch, mode]` для передачи в новый `Engine`: x, y, z —
+    /// глаза игрока, `mode` — 0 ходьба, 1 полёт. Скорость не передаётся.
     pub fn camera_state(&self) -> Vec<f32> {
-        self.camera.state().to_vec()
+        let eye = self.player.eye();
+        let mode = match self.player.mode {
+            Mode::Walking => 0.0,
+            Mode::Flying => 1.0,
+        };
+        vec![
+            eye.x,
+            eye.y,
+            eye.z,
+            self.camera.yaw,
+            self.camera.pitch,
+            mode,
+        ]
+    }
+
+    /// Режим игрока: `"walking"` или `"flying"`.
+    pub fn player_mode(&self) -> String {
+        match self.player.mode {
+            Mode::Walking => "walking",
+            Mode::Flying => "flying",
+        }
+        .to_owned()
+    }
+
+    /// Стоял ли игрок на блоке в последнем шаге физики.
+    pub fn on_ground(&self) -> bool {
+        self.player.on_ground
     }
 
     /// Дальность прорисовки в колонках; значение зажимается в 4..=16. Меняет круг загрузки,
@@ -416,9 +461,15 @@ impl Engine {
     }
 
     /// Нажатие/отпускание клавиши; `code` — `KeyboardEvent.code` ("KeyW", "Space"…).
+    /// Двойной Space переключает ходьбу и полёт.
     pub fn set_key(&mut self, code: &str, pressed: bool) {
         if pressed {
-            self.keys.insert(code.to_owned());
+            // Повтор нажатия без отпускания (автоповтор клавиатуры) — не новое нажатие.
+            let fresh = self.keys.insert(code.to_owned());
+            // Время прошлого кадра, а не события: точность в кадр для окна 0.3 с хватает.
+            if fresh && code == "Space" && self.space_tap.press(self.last_time.unwrap_or(0.0)) {
+                self.player.toggle_mode();
+            }
         } else {
             self.keys.remove(code);
         }
@@ -455,7 +506,7 @@ impl Engine {
             .last_time
             .map_or(0.0, |last| (time - last).clamp(0.0, MAX_DT));
         self.last_time = Some(time);
-        self.camera.update(&self.keys, dt);
+        self.update_player(dt);
         self.stream_columns();
         self.interact(time);
         if self.target != self.outline_block {
@@ -633,7 +684,10 @@ impl Engine {
         {
             let pos = hit.block + hit.normal;
             // `set_block` сам отказывает вне высоты мира и в незагруженной колонке.
-            if !self.world.block(pos).is_solid() && self.world.set_block(pos, self.selected) {
+            if !self.world.block(pos).is_solid()
+                && !self.player.overlaps_block(pos)
+                && self.world.set_block(pos, self.selected)
+            {
                 dirty.extend(affected_sections(pos));
                 target = self.pick();
             }
@@ -656,6 +710,71 @@ impl Engine {
         let min = (key * SECTION_SIZE).as_vec3();
         meshes[key.y as usize] = upload_section(&self.device, &data, min);
     }
+}
+
+impl Engine {
+    /// Шаги физики за время кадра `dt` и камера в интерполированных глазах игрока.
+    fn update_player(&mut self, dt: f32) {
+        let input = self.input();
+        for _ in 0..self.clock.advance(dt) {
+            if !self.body_loaded() {
+                // Под незагруженной колонкой `World::block` — воздух, и игрок провалился
+                // бы сквозь ещё не сгенерированную землю. Стоим, пока она не появится;
+                // скорость сохраняется, чтобы падение продолжилось как было.
+                self.clock.reset();
+                self.prev_feet = self.player.feet;
+                break;
+            }
+            self.prev_feet = self.player.feet;
+            self.player.step(&input, self.camera.yaw, |pos| {
+                self.world.block(pos).is_solid()
+            });
+        }
+        let feet = self.prev_feet.lerp(self.player.feet, self.clock.alpha());
+        self.camera.position = feet + Vec3::Y * EYE_HEIGHT;
+    }
+
+    /// Намерения игрока по зажатым клавишам.
+    fn input(&self) -> Input {
+        let pressed = |code: &str| self.keys.contains(code);
+        let axis = |plus: &str, minus: &str| {
+            f32::from(u8::from(pressed(plus))) - f32::from(u8::from(pressed(minus)))
+        };
+        Input {
+            forward: axis("KeyW", "KeyS"),
+            strafe: axis("KeyD", "KeyA"),
+            jump: pressed("Space"),
+            descend: pressed("ShiftLeft") || pressed("ShiftRight"),
+        }
+    }
+
+    /// Загружены ли все колонки, которые тело может задеть за шаг. Запас в блок по
+    /// горизонтали с лихвой покрывает шаг полёта (8 / 60 блока).
+    fn body_loaded(&self) -> bool {
+        let (min, max) = self.player.aabb();
+        let lo = (min - Vec3::ONE).floor().as_ivec3();
+        let hi = (max + Vec3::ONE).floor().as_ivec3();
+        let (lo, hi) = (column_key(lo.x, lo.z), column_key(hi.x, hi.z));
+        (lo.x..=hi.x).all(|x| (lo.y..=hi.y).all(|z| self.world.column(IVec2::new(x, z)).is_some()))
+    }
+}
+
+/// Камера и игрок из [`Engine::camera_state`]: `[x, y, z, yaw, pitch]` и необязательный
+/// `mode`. `None`, если длина другая или есть не-числа.
+fn restore_player(state: &[f32]) -> Option<(Camera, Player)> {
+    let (view, mode) = match state {
+        [view @ .., mode] if state.len() == 6 => (view, Some(*mode)),
+        _ => (state, None),
+    };
+    let camera = Camera::from_state(view)?;
+    let mode = match mode {
+        None => Mode::Walking,
+        Some(1.0) => Mode::Flying,
+        Some(m) if m.is_finite() => Mode::Walking,
+        Some(_) => return None,
+    };
+    let player = Player::new(camera.position - Vec3::Y * EYE_HEIGHT, mode);
+    Some((camera, player))
 }
 
 /// Ключ колонки, над которой стоит камера.
