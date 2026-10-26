@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import init, { Engine } from '@engine'
-import { type GraphicsApi, loadGraphicsApi, saveGraphicsApi } from '../settings'
+import {
+  type GraphicsApi,
+  loadGraphicsApi,
+  loadRenderDistance,
+  saveGraphicsApi,
+  saveRenderDistance,
+} from '../settings'
 
 /** Порядок полей — как в `Engine.stats()`; время — в микросекундах. */
 export interface WorldStats {
@@ -11,6 +17,8 @@ export interface WorldStats {
   queued: number
   generateUs: number
   meshUs: number
+  /** Секций, прошедших отсечение по пирамиде видимости, в последнем кадре. */
+  drawnSections: number
 }
 
 export interface ApiInfo {
@@ -24,6 +32,7 @@ const emit = defineEmits<{
   stats: [value: WorldStats]
   api: [info: ApiInfo]
   notice: [text: string]
+  'render-distance': [columns: number]
   'toggle-controls': []
 }>()
 
@@ -68,16 +77,40 @@ function onMouseMove(e: MouseEvent) {
   if (locked.value) engine.value?.mouse_move(e.movementX, e.movementY)
 }
 
+const HOTKEYS = new Set(['KeyG', 'KeyH', 'BracketLeft', 'BracketRight'])
+
 /** Хоткеи интерфейса: работают без pointer lock и в движок не попадают. */
 function onHotkey(e: KeyboardEvent): boolean {
-  if (e.code !== 'KeyG' && e.code !== 'KeyH') return false
+  if (!HOTKEYS.has(e.code)) return false
   // Cmd+H / Ctrl+G и т.п. — системные сочетания, их не перехватываем.
   if (e.ctrlKey || e.metaKey || e.altKey) return false
-  if (!e.repeat) {
+  // Дальность при удержании листается автоповтором; G и H — по одному нажатию.
+  if (e.code === 'BracketLeft') changeRenderDistance(-1)
+  else if (e.code === 'BracketRight') changeRenderDistance(1)
+  else if (!e.repeat) {
     if (e.code === 'KeyG') void switchApi()
     else emit('toggle-controls')
   }
   return true
+}
+
+function columnsWord(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'колонка'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'колонки'
+  return 'колонок'
+}
+
+function changeRenderDistance(delta: number) {
+  const current = engine.value
+  if (!current) return
+  // Движок сам зажимает значение в допустимые пределы.
+  current.set_render_distance(current.render_distance() + delta)
+  const columns = current.render_distance()
+  saveRenderDistance(columns)
+  emit('render-distance', columns)
+  emit('notice', `Дальность: ${columns} ${columnsWord(columns)}`)
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -104,9 +137,17 @@ function startLoop() {
     frames++
     if (now - lastFpsTime >= 1000) {
       emit('fps', frames)
-      const [columns, meshedColumns, meshedSections, queued, generateUs, meshUs] =
+      const [columns, meshedColumns, meshedSections, queued, generateUs, meshUs, drawnSections] =
         engine.value!.stats()
-      emit('stats', { columns, meshedColumns, meshedSections, queued, generateUs, meshUs })
+      emit('stats', {
+        columns,
+        meshedColumns,
+        meshedSections,
+        queued,
+        generateUs,
+        meshUs,
+        drawnSections,
+      })
       frames = 0
       lastFpsTime = now
     }
@@ -122,6 +163,8 @@ async function start(camera?: Float32Array) {
     created.free()
     return
   }
+  created.set_render_distance(loadRenderDistance())
+  emit('render-distance', created.render_distance())
   engine.value = created
   const backend = created.backend() as GraphicsApi
   emit('api', { backend, fallback: preferred === 'webgpu' && backend === 'webgl2' })

@@ -11,6 +11,7 @@ const fps = ref(0)
 const api = ref<ApiInfo>()
 const stats = ref<WorldStats>()
 const notice = ref<string>()
+const renderDistance = ref<number>()
 const controlsHidden = ref(loadControlsHidden())
 
 let noticeTimer = 0
@@ -30,8 +31,13 @@ watch(controlsHidden, saveControlsHidden)
     @stats="stats = $event"
     @api="api = $event"
     @notice="showNotice"
+    @render-distance="renderDistance = $event"
     @toggle-controls="controlsHidden = !controlsHidden"
   />
   <Hud :fps="fps" :api="api" :stats="stats" :notice="notice" />
-  <ControlsPanel :hidden="controlsHidden" :backend="api?.backend" />
+  <ControlsPanel
+    :hidden="controlsHidden"
+    :backend="api?.backend"
+    :render-distance="renderDistance"
+  />
 </template>

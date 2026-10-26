@@ -14,8 +14,11 @@ const ms = (us: number) => (us / 1000).toFixed(2)
       {{ API_LABELS[api.backend] }}<template v-if="api.fallback"> (WebGPU недоступен)</template>
     </div>
     <div v-if="stats">
-      Колонки {{ stats.columns }} · с мешем {{ stats.meshedColumns }} ({{ stats.meshedSections }}
-      секций) · в очереди {{ stats.queued }}
+      Колонки {{ stats.columns }} · с мешем {{ stats.meshedColumns }} · в очереди
+      {{ stats.queued }}
+    </div>
+    <div v-if="stats">
+      Секции: с мешем {{ stats.meshedSections }} · нарисовано {{ stats.drawnSections }}
     </div>
     <div v-if="stats">
       Колонка: генерация {{ ms(stats.generateUs) }} мс · меш {{ ms(stats.meshUs) }} мс
