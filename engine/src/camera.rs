@@ -33,6 +33,27 @@ impl Camera {
         }
     }
 
+    /// `[x, y, z, yaw, pitch]` — плоский вид для передачи через JS.
+    pub fn state(&self) -> [f32; 5] {
+        let p = self.position;
+        [p.x, p.y, p.z, self.yaw, self.pitch]
+    }
+
+    /// Обратное к [`Camera::state`]; `None`, если длина не 5 или есть не-числа.
+    pub fn from_state(state: &[f32]) -> Option<Self> {
+        let &[x, y, z, yaw, pitch] = state else {
+            return None;
+        };
+        if !state.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        Some(Self {
+            position: Vec3::new(x, y, z),
+            yaw,
+            pitch: pitch.clamp(-MAX_PITCH, MAX_PITCH),
+        })
+    }
+
     /// Направление взгляда с учётом pitch.
     fn forward(&self) -> Vec3 {
         let (sy, cy) = self.yaw.sin_cos();

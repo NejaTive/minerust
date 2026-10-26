@@ -40,19 +40,42 @@ pub struct Engine {
     /// Коды (`KeyboardEvent.code`) зажатых сейчас клавиш.
     keys: HashSet<String>,
     last_time: Option<f32>,
+    /// Фактический бэкенд адаптера: при предпочтении WebGPU может оказаться GL.
+    backend: wgpu::Backend,
 }
 
 #[wasm_bindgen]
 impl Engine {
-    /// Инициализирует WebGPU (или WebGL2 как запасной вариант) на canvas.
-    pub async fn create(canvas: HtmlCanvasElement) -> Result<Engine, JsError> {
+    /// Инициализирует графику на canvas.
+    ///
+    /// `preferred` — `"webgpu"` (без поддержки в браузере тихо откатывается на WebGL2)
+    /// или `"webgl2"`. `camera` — `[x, y, z, yaw, pitch]` из [`Engine::camera_state`];
+    /// без него камера стартовая.
+    pub async fn create(
+        canvas: HtmlCanvasElement,
+        preferred: &str,
+        camera: Option<Vec<f32>>,
+    ) -> Result<Engine, JsError> {
         console_error_panic_hook::set_once();
+
+        let backends = match preferred {
+            "webgpu" => wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL,
+            "webgl2" => wgpu::Backends::GL,
+            other => return Err(JsError::new(&format!("unknown graphics API: {other}"))),
+        };
+        let camera = match camera {
+            Some(state) => Camera::from_state(&state)
+                .ok_or_else(|| JsError::new("camera state must be 5 finite numbers"))?,
+            None => Camera::new(),
+        };
 
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
 
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        instance_desc.backends = wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL;
+        instance_desc.backends = backends;
+        // Проверка нужна до create_surface: тип контекста canvas фиксируется первым
+        // getContext, и после неудачного "webgpu" тот же canvas не отдаст "webgl2".
         let instance = wgpu::util::new_instance_with_webgpu_detection(instance_desc).await;
         let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas))?;
 
@@ -62,6 +85,7 @@ impl Engine {
                 ..Default::default()
             })
             .await?;
+        let backend = adapter.get_info().backend;
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -227,10 +251,30 @@ impl Engine {
             globals_bind_group,
             section_meshes,
             depth_view,
-            camera: Camera::new(),
+            camera,
             keys: HashSet::new(),
             last_time: None,
+            backend,
         })
+    }
+
+    /// Есть ли в браузере рабочий WebGPU (не только `navigator.gpu`, но и адаптер).
+    pub async fn webgpu_supported() -> bool {
+        wgpu::util::is_browser_webgpu_supported().await
+    }
+
+    /// Фактический графический API: `"webgpu"` или `"webgl2"`.
+    pub fn backend(&self) -> String {
+        match self.backend {
+            wgpu::Backend::BrowserWebGpu => "webgpu",
+            _ => "webgl2",
+        }
+        .to_owned()
+    }
+
+    /// Состояние камеры `[x, y, z, yaw, pitch]` для передачи в новый `Engine`.
+    pub fn camera_state(&self) -> Vec<f32> {
+        self.camera.state().to_vec()
     }
 
     /// Вызывается при изменении размеров canvas (в физических пикселях).
