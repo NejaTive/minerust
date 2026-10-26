@@ -108,6 +108,8 @@ pub struct Engine {
     /// Коды (`KeyboardEvent.code`) зажатых сейчас клавиш.
     keys: HashSet<String>,
     last_time: Option<f32>,
+    /// Пауза: физика, ввод и действия мыши стоят, мир подгружается и рисуется.
+    paused: bool,
     /// Фактический бэкенд адаптера: при предпочтении WebGPU может оказаться GL.
     backend: wgpu::Backend,
 }
@@ -380,6 +382,7 @@ impl Engine {
             space_tap: DoubleTap::new(DOUBLE_TAP_S),
             keys: HashSet::new(),
             last_time: None,
+            paused: false,
             backend,
         })
     }
@@ -532,15 +535,59 @@ impl Engine {
         self.depth_view = create_depth_view(&self.device, width, height);
     }
 
+    /// Пауза: физика, поворот камеры, ввод и действия мыши стоят; подгрузка колонок и
+    /// отрисовка идут. При снятии паузы накопитель физики обнуляется, чтобы игрок не
+    /// «догонял» простой. Включение паузы отпускает клавиши и кнопки мыши.
+    pub fn set_paused(&mut self, paused: bool) {
+        if paused == self.paused {
+            return;
+        }
+        self.paused = paused;
+        if paused {
+            self.release_all_keys();
+        } else {
+            self.clock.reset();
+            // Иначе камера на первом кадре перескочила бы от ног прошлого шага к текущим.
+            self.prev_feet = self.player.feet;
+        }
+    }
+
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
+
+    /// Множитель чувствительности мыши к базовым 0.002 рад/пиксель; зажимается в 0.25..=3.
+    pub fn set_mouse_sensitivity(&mut self, factor: f32) {
+        self.camera.set_sensitivity(factor);
+    }
+
+    pub fn mouse_sensitivity(&self) -> f32 {
+        self.camera.sensitivity()
+    }
+
+    /// Вертикальный угол обзора в градусах; зажимается в 60..=110.
+    pub fn set_fov(&mut self, degrees: f32) {
+        self.camera.set_fov(degrees);
+    }
+
+    pub fn fov(&self) -> f32 {
+        self.camera.fov()
+    }
+
     /// Поворот камеры мышью; `dx`/`dy` — `movementX/Y` при pointer lock.
     pub fn mouse_move(&mut self, dx: f32, dy: f32) {
-        self.camera.rotate(dx, dy);
+        if !self.paused {
+            self.camera.rotate(dx, dy);
+        }
     }
 
     /// Нажатие/отпускание клавиши; `code` — `KeyboardEvent.code` ("KeyW", "Space"…).
     /// Двойной Space переключает ходьбу и полёт.
     pub fn set_key(&mut self, code: &str, pressed: bool) {
         if pressed {
+            if self.paused {
+                return;
+            }
             // Повтор нажатия без отпускания (автоповтор клавиатуры) — не новое нажатие.
             let fresh = self.keys.insert(code.to_owned());
             // Время прошлого кадра, а не события: точность в кадр для окна 0.3 с хватает.
@@ -556,6 +603,9 @@ impl Engine {
     /// игнорируются. Левая ломает блок под прицелом, правая ставит выбранный; при
     /// удержании действие повторяется раз в [`REPEAT_S`].
     pub fn mouse_button(&mut self, button: u8, pressed: bool) {
+        if self.paused && pressed {
+            return;
+        }
         match button {
             0 => self.breaking.set(pressed),
             2 => self.placing.set(pressed),
@@ -583,9 +633,14 @@ impl Engine {
             .last_time
             .map_or(0.0, |last| (time - last).clamp(0.0, MAX_DT));
         self.last_time = Some(time);
-        self.update_player(dt);
+        // На паузе камера и цель под прицелом остаются как были: мир только достраивается.
+        if !self.paused {
+            self.update_player(dt);
+        }
         self.stream_columns();
-        self.interact(time);
+        if !self.paused {
+            self.interact(time);
+        }
         if self.target != self.outline_block {
             if let Some(block) = self.target {
                 self.queue

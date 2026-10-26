@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import init, { Engine } from '@engine'
 import {
   type BlockName,
   type GraphicsApi,
+  MAX_RENDER_DISTANCE,
+  MIN_RENDER_DISTANCE,
+  type Settings,
   loadGraphicsApi,
-  loadRenderDistance,
   saveGraphicsApi,
-  saveRenderDistance,
 } from '../settings'
 import { type SavedColumn, type WorldMeta, type WorldStorage, openStorage } from '../storage'
 
@@ -34,6 +35,8 @@ export interface ApiInfo {
   fallback: boolean
 }
 
+const props = defineProps<{ settings: Settings }>()
+
 const emit = defineEmits<{
   fps: [value: number]
   stats: [value: WorldStats]
@@ -42,7 +45,12 @@ const emit = defineEmits<{
   'render-distance': [columns: number]
   block: [name: BlockName]
   player: [info: PlayerInfo]
-  'toggle-controls': []
+  /** Курсор захвачен (игра идёт) или отпущен (пауза, меню). */
+  lock: [locked: boolean]
+  /** Движок грузится или пересоздаётся, мир менять нельзя. */
+  busy: [busy: boolean]
+  /** Нажата N: подтверждение «Новый мир» показывает меню. */
+  'ask-new-world': []
 }>()
 
 const canvas = ref<HTMLCanvasElement>()
@@ -57,8 +65,12 @@ const locked = ref(false)
 const selectedBlock = ref<BlockName>('grass')
 
 let preferred = loadGraphicsApi()
-// Блокирует G и N, пока движок пересоздаётся.
-let switching = false
+// Блокирует G и N, пока движок пересоздаётся; до конца загрузки true.
+let switching = true
+function setSwitching(value: boolean) {
+  switching = value
+  emit('busy', value)
+}
 let disposed = false
 let rafId = 0
 let resizeObserver: ResizeObserver | undefined
@@ -74,16 +86,53 @@ function resize() {
 // Клавиши, для которых гасим действие браузера по умолчанию (скролл страницы и т.п.).
 const GAME_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
 
-function requestLock() {
-  // В новых браузерах requestPointerLock возвращает Promise, который может реджектиться.
-  const result = canvas.value?.requestPointerLock() as Promise<void> | undefined
-  result?.catch(() => {})
+/**
+ * Захватывает курсор; вызывать из обработчика действия пользователя (клик по кнопке меню).
+ * Возвращает, удалось ли: Chrome около секунды после выхода по Esc отказывает.
+ */
+async function requestLock(): Promise<boolean> {
+  const el = canvas.value
+  if (!el) return false
+  try {
+    // Старые браузеры возвращают undefined, новые — Promise, который может реджектиться.
+    await (el.requestPointerLock() as Promise<void> | undefined)
+  } catch {
+    return false
+  }
+  return true
 }
 
+function releaseCursor() {
+  if (document.pointerLockElement) document.exitPointerLock()
+}
+
+// Пауза следует за курсором: Esc браузер забирает себе и до страницы не доводит, так что
+// единственный надёжный сигнал выхода — это событие.
 function onLockChange() {
   locked.value = document.pointerLockElement === canvas.value
-  if (!locked.value) engine.value?.release_all_keys()
+  engine.value?.set_paused(!locked.value)
+  if (!locked.value) {
+    engine.value?.release_all_keys()
+    void save()
+  }
+  emit('lock', locked.value)
 }
+
+/** Настройки из меню — в движок. Идемпотентно: вызывается и после каждого `Engine.create`. */
+function applySettings(target: Engine) {
+  const s = props.settings
+  target.set_render_distance(s.renderDistance)
+  target.set_ambient_occlusion(s.ambientOcclusion)
+  target.set_mouse_sensitivity(s.mouseSensitivity)
+  target.set_fov(s.fov)
+}
+
+watch(
+  () => ({ ...props.settings }),
+  () => {
+    if (engine.value) applySettings(engine.value)
+  },
+)
 
 function onMouseMove(e: MouseEvent) {
   if (locked.value) engine.value?.mouse_move(e.movementX, e.movementY)
@@ -265,20 +314,19 @@ function importColumns(created: Engine) {
   if (broken > 0) emit('notice', `Повреждённые колонки пропущены: ${broken}`)
 }
 
-const HOTKEYS = new Set(['KeyG', 'KeyH', 'KeyN', 'BracketLeft', 'BracketRight'])
+const HOTKEYS = new Set(['KeyG', 'KeyN', 'BracketLeft', 'BracketRight'])
 
 /** Хоткеи интерфейса: работают без pointer lock и в движок не попадают. */
 function onHotkey(e: KeyboardEvent): boolean {
   if (!HOTKEYS.has(e.code)) return false
   // Cmd+H / Ctrl+G и т.п. — системные сочетания, их не перехватываем.
   if (e.ctrlKey || e.metaKey || e.altKey) return false
-  // Дальность при удержании листается автоповтором; G, H и N — по одному нажатию.
+  // Дальность при удержании листается автоповтором; G и N — по одному нажатию.
   if (e.code === 'BracketLeft') changeRenderDistance(-1)
   else if (e.code === 'BracketRight') changeRenderDistance(1)
   else if (!e.repeat) {
     if (e.code === 'KeyG') void switchApi()
-    else if (e.code === 'KeyN') void newWorld()
-    else emit('toggle-controls')
+    else if (!switching) emit('ask-new-world')
   }
   return true
 }
@@ -292,12 +340,12 @@ function columnsWord(n: number): string {
 }
 
 function changeRenderDistance(delta: number) {
-  const current = engine.value
-  if (!current) return
-  // Движок сам зажимает значение в допустимые пределы.
-  current.set_render_distance(current.render_distance() + delta)
-  const columns = current.render_distance()
-  saveRenderDistance(columns)
+  const columns = Math.min(
+    MAX_RENDER_DISTANCE,
+    Math.max(MIN_RENDER_DISTANCE, props.settings.renderDistance + delta),
+  )
+  if (columns === props.settings.renderDistance) return
+  // Значение лежит в настройках у App; в движок оно попадёт через watch.
   emit('render-distance', columns)
   emit('notice', `Дальность: ${columns} ${columnsWord(columns)}`)
 }
@@ -370,8 +418,9 @@ async function start(seed: number, player?: ArrayLike<number>) {
     return
   }
   importColumns(created)
-  created.set_render_distance(loadRenderDistance())
-  emit('render-distance', created.render_distance())
+  applySettings(created)
+  // Меню открыто (курсор не захвачен) — новый движок тоже начинает с паузы.
+  created.set_paused(!locked.value)
   created.select_block(selectedBlock.value)
   emit('block', selectedBlock.value)
   engine.value = created
@@ -393,11 +442,14 @@ function stop() {
   engine.value = undefined
 }
 
-async function switchApi() {
+/** Переключает графический API; без аргумента — на другой, как клавиша G. */
+async function switchApi(requested?: GraphicsApi) {
   const current = engine.value
   if (switching || !current) return
-  const target: GraphicsApi = current.backend() === 'webgpu' ? 'webgl2' : 'webgpu'
-  switching = true
+  const target: GraphicsApi =
+    requested ?? (current.backend() === 'webgpu' ? 'webgl2' : 'webgpu')
+  if (target === current.backend()) return
+  setSwitching(true)
   try {
     // Проверяем заранее, чтобы не пересоздавать canvas ради того же WebGL2.
     if (target === 'webgpu' && !(await Engine.webgpu_supported())) {
@@ -417,17 +469,15 @@ async function switchApi() {
   } catch (e) {
     error.value = String(e)
   } finally {
-    switching = false
+    setSwitching(false)
   }
 }
 
+/** Подтверждение спрашивает меню; здесь мир заменяется сразу. */
 async function newWorld() {
   const current = engine.value
   if (switching || !current) return
-  // Пока открыт confirm, keyup до страницы не дойдёт: клавиши залипли бы.
-  current.release_all_keys()
-  if (!confirm('Начать новый мир? Текущий будет удалён.')) return
-  switching = true
+  setSwitching(true)
   try {
     // Движок останавливаем до очистки, чтобы автосохранение не записало старый мир
     // поверх пустой базы; начатая запись должна закончиться до `clear`.
@@ -445,7 +495,7 @@ async function newWorld() {
   } catch (e) {
     error.value = String(e)
   } finally {
-    switching = false
+    setSwitching(false)
   }
 }
 
@@ -460,7 +510,6 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('pagehide', onPageHide)
 
-  switching = true
   try {
     await init()
     formatVersion = Engine.format_version()
@@ -470,7 +519,7 @@ onMounted(async () => {
   } catch (e) {
     error.value = String(e)
   } finally {
-    switching = false
+    setSwitching(false)
   }
 })
 
@@ -489,6 +538,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('pagehide', onPageHide)
 })
+
+defineExpose({ requestLock, releaseCursor, switchApi, newWorld })
 </script>
 
 <template>
@@ -496,10 +547,8 @@ onBeforeUnmount(() => {
     :key="canvasKey"
     ref="canvas"
     class="game"
-    @click="requestLock"
     @contextmenu.prevent
   />
-  <div v-if="engine && !locked" class="hint">Кликни, чтобы играть</div>
   <div v-if="engine && locked" class="crosshair" />
   <div v-if="error" class="error">Не удалось запустить движок: {{ error }}</div>
 </template>
@@ -509,17 +558,6 @@ onBeforeUnmount(() => {
   display: block;
   width: 100vw;
   height: 100vh;
-}
-.hint {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 24px;
-  text-shadow: 1px 1px 0 #000;
-  background: rgba(0, 0, 0, 0.45);
-  pointer-events: none;
 }
 .crosshair {
   position: fixed;
