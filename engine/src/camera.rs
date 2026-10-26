@@ -11,6 +11,8 @@ const SPEED: f32 = 8.0;
 /// Поворот камеры, радиан на пиксель движения мыши.
 const SENSITIVITY: f32 = 0.002;
 const MAX_PITCH: f32 = 89.0 * std::f32::consts::PI / 180.0;
+/// Наклон на спауне: −15°, горизонт в верхней части экрана.
+const SPAWN_PITCH: f32 = -15.0 * std::f32::consts::PI / 180.0;
 
 /// Свободная камера как в креативе: yaw/pitch в радианах, Y — вверх.
 pub struct Camera {
@@ -22,14 +24,12 @@ pub struct Camera {
 }
 
 impl Camera {
-    /// Стартует над углом тестового мира 64×32×64 и смотрит на его центр.
-    pub fn new() -> Self {
-        let position = Vec3::new(-20.0, 48.0, -20.0);
-        let dir = Vec3::new(32.0, 16.0, 32.0) - position;
+    /// Камера на спауне `position`: смотрит вдоль +X и чуть вниз, на рельеф впереди.
+    pub fn spawn(position: Vec3) -> Self {
         Self {
             position,
-            yaw: dir.z.atan2(dir.x),
-            pitch: dir.y.atan2(dir.x.hypot(dir.z)),
+            yaw: 0.0,
+            pitch: SPAWN_PITCH,
         }
     }
 

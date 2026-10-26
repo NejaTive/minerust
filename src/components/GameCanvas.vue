@@ -3,6 +3,16 @@ import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import init, { Engine } from '@engine'
 import { type GraphicsApi, loadGraphicsApi, saveGraphicsApi } from '../settings'
 
+/** Порядок полей — как в `Engine.stats()`; время — в микросекундах. */
+export interface WorldStats {
+  columns: number
+  meshedColumns: number
+  meshedSections: number
+  queued: number
+  generateUs: number
+  meshUs: number
+}
+
 export interface ApiInfo {
   backend: GraphicsApi
   /** Просили WebGPU, но браузер его не дал, и движок работает на WebGL2. */
@@ -11,6 +21,7 @@ export interface ApiInfo {
 
 const emit = defineEmits<{
   fps: [value: number]
+  stats: [value: WorldStats]
   api: [info: ApiInfo]
   notice: [text: string]
   'toggle-controls': []
@@ -93,6 +104,9 @@ function startLoop() {
     frames++
     if (now - lastFpsTime >= 1000) {
       emit('fps', frames)
+      const [columns, meshedColumns, meshedSections, queued, generateUs, meshUs] =
+        engine.value!.stats()
+      emit('stats', { columns, meshedColumns, meshedSections, queued, generateUs, meshUs })
       frames = 0
       lastFpsTime = now
     }
