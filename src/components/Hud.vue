@@ -9,6 +9,7 @@ defineProps<{
   block?: BlockName
   player?: PlayerInfo
   notice?: string
+  showDebug: boolean
 }>()
 
 const ms = (us: number) => (us / 1000).toFixed(2)
@@ -17,17 +18,17 @@ const ms = (us: number) => (us / 1000).toFixed(2)
 <template>
   <div class="hud">
     <div>MineRust · {{ fps }} FPS</div>
-    <div v-if="api">
+    <div v-if="showDebug && api">
       {{ API_LABELS[api.backend] }}<template v-if="api.fallback"> (WebGPU недоступен)</template>
     </div>
-    <div v-if="stats">
+    <div v-if="showDebug && stats">
       Колонки {{ stats.columns }} · с мешем {{ stats.meshedColumns }} · в очереди
       {{ stats.queued }}
     </div>
-    <div v-if="stats">
+    <div v-if="showDebug && stats">
       Секции: с мешем {{ stats.meshedSections }} · нарисовано {{ stats.drawnSections }}
     </div>
-    <div v-if="stats">
+    <div v-if="showDebug && stats">
       Колонка: генерация {{ ms(stats.generateUs) }} мс · меш {{ ms(stats.meshUs) }} мс
     </div>
     <div v-if="player">
@@ -49,6 +50,8 @@ const ms = (us: number) => (us / 1000).toFixed(2)
   line-height: 1.4;
   text-shadow: 1px 1px 0 #000;
   pointer-events: none;
+  /* Выше затемнения меню: подсказки видны и на паузе. */
+  z-index: 20;
 }
 .notice {
   margin-top: 4px;
