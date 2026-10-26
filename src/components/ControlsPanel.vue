@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { API_LABELS, type GraphicsApi } from '../settings'
+import { API_LABELS, BLOCK_LABELS, type BlockName, type GraphicsApi } from '../settings'
 
-const props = defineProps<{ hidden: boolean; backend?: GraphicsApi; renderDistance?: number }>()
+const props = defineProps<{
+  hidden: boolean
+  backend?: GraphicsApi
+  renderDistance?: number
+  block?: BlockName
+}>()
 
 const controls = computed(() => [
   { keys: ['Мышь'], action: 'осмотр' },
@@ -11,6 +16,9 @@ const controls = computed(() => [
   { keys: ['W', 'A', 'S', 'D'], action: 'движение' },
   { keys: ['Space'], action: 'вверх' },
   { keys: ['Shift'], action: 'вниз' },
+  { keys: ['ЛКМ'], action: 'сломать' },
+  { keys: ['ПКМ'], action: 'поставить' },
+  { keys: ['1–3'], action: props.block ? `блок: ${BLOCK_LABELS[props.block]}` : 'блок' },
   {
     keys: ['G'],
     action: props.backend ? `графический API: ${API_LABELS[props.backend]}` : 'графический API',

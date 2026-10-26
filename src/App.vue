@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import GameCanvas, { type ApiInfo, type WorldStats } from './components/GameCanvas.vue'
 import Hud from './components/Hud.vue'
 import ControlsPanel from './components/ControlsPanel.vue'
-import { loadControlsHidden, saveControlsHidden } from './settings'
+import { type BlockName, loadControlsHidden, saveControlsHidden } from './settings'
 
 const NOTICE_MS = 2500
 
@@ -12,6 +12,7 @@ const api = ref<ApiInfo>()
 const stats = ref<WorldStats>()
 const notice = ref<string>()
 const renderDistance = ref<number>()
+const block = ref<BlockName>()
 const controlsHidden = ref(loadControlsHidden())
 
 let noticeTimer = 0
@@ -32,12 +33,14 @@ watch(controlsHidden, saveControlsHidden)
     @api="api = $event"
     @notice="showNotice"
     @render-distance="renderDistance = $event"
+    @block="block = $event"
     @toggle-controls="controlsHidden = !controlsHidden"
   />
-  <Hud :fps="fps" :api="api" :stats="stats" :notice="notice" />
+  <Hud :fps="fps" :api="api" :stats="stats" :block="block" :notice="notice" />
   <ControlsPanel
     :hidden="controlsHidden"
     :backend="api?.backend"
     :render-distance="renderDistance"
+    :block="block"
   />
 </template>

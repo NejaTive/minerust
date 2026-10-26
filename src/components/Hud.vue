@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { API_LABELS } from '../settings'
+import { API_LABELS, BLOCK_LABELS, type BlockName } from '../settings'
 import type { ApiInfo, WorldStats } from './GameCanvas.vue'
 
-defineProps<{ fps: number; api?: ApiInfo; stats?: WorldStats; notice?: string }>()
+defineProps<{
+  fps: number
+  api?: ApiInfo
+  stats?: WorldStats
+  block?: BlockName
+  notice?: string
+}>()
 
 const ms = (us: number) => (us / 1000).toFixed(2)
 </script>
@@ -23,6 +29,7 @@ const ms = (us: number) => (us / 1000).toFixed(2)
     <div v-if="stats">
       Колонка: генерация {{ ms(stats.generateUs) }} мс · меш {{ ms(stats.meshUs) }} мс
     </div>
+    <div v-if="block">Блок: {{ BLOCK_LABELS[block] }}</div>
     <div v-if="notice" class="notice">{{ notice }}</div>
   </div>
 </template>
