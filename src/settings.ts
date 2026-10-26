@@ -5,6 +5,15 @@ export const API_LABELS: Record<GraphicsApi, string> = {
   webgl2: 'WebGL2',
 }
 
+/** Блоки, которые игрок ставит; имена — как в `Engine.select_block`. */
+export type BlockName = 'grass' | 'dirt' | 'stone'
+
+export const BLOCK_LABELS: Record<BlockName, string> = {
+  grass: 'трава',
+  dirt: 'земля',
+  stone: 'камень',
+}
+
 const GRAPHICS_API_KEY = 'minerust.graphicsApi'
 const CONTROLS_HIDDEN_KEY = 'minerust.controlsHidden'
 const RENDER_DISTANCE_KEY = 'minerust.renderDistance'

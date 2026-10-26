@@ -5,17 +5,22 @@ use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, Performance};
 use wgpu::util::DeviceExt;
 
+use crate::block::Block;
 use crate::camera::Camera;
+use crate::column::COLUMN_SECTIONS;
 use crate::fog::Fog;
 use crate::frustum::Frustum;
 use crate::globals::Globals;
 use crate::loader::{Loader, Progress};
 use crate::mesh::{self, Vertex};
-use crate::mesher::{MeshData, mesh_column};
+use crate::mesher::{MeshData, mesh_column, mesh_world_section};
+use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
+use crate::raycast::{Hit, raycast};
+use crate::repeat::Repeat;
 use crate::section::SECTION_SIZE;
 use crate::terrain::Terrain;
 use crate::texture::{self, LAYER_COUNT, MIP_LEVELS, TILE_SIZE};
-use crate::world::{World, column_key};
+use crate::world::{World, affected_sections, column_key};
 
 /// Цвет неба в линейном пространстве: рендер идёт в sRGB-view, и при выводе он
 /// станет прежним sRGB (0.53, 0.81, 0.92).
@@ -38,6 +43,13 @@ const START_RADIUS: i32 = 2;
 /// и слабые машины: кадр не проседает, просто круг заполняется дольше.
 const STREAM_BUDGET_MS: f64 = 3.0;
 
+/// Дальность действия игрока, блоков от камеры: как в креативе Minecraft.
+const REACH: f32 = 6.0;
+/// Период повтора ломания и установки при удержании кнопки, с.
+const REPEAT_S: f32 = 0.25;
+/// Блок в руке до первого выбора клавишами 1–3.
+const DEFAULT_BLOCK: Block = Block::Grass;
+
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Верхняя граница шага кадра, чтобы после сворачивания вкладки камера не улетала.
 const MAX_DT: f32 = 0.1;
@@ -52,10 +64,21 @@ pub struct Engine {
     /// Формат view кадра: всегда sRGB, даже если поверхность без него.
     render_format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
+    outline_pipeline: wgpu::RenderPipeline,
+    /// Рёбра рамки вокруг `outline_block`.
+    outline_buffer: wgpu::Buffer,
+    /// Блок, чья рамка сейчас лежит в `outline_buffer`.
+    outline_block: Option<IVec3>,
+    /// Блок под прицелом в последнем кадре; рамка рисуется вокруг него.
+    target: Option<IVec3>,
+    breaking: Repeat,
+    placing: Repeat,
+    /// Блок, который ставит правая кнопка.
+    selected: Block,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
-    /// Меши колонок по ключу колонки; в векторе — только непустые секции.
-    column_meshes: HashMap<IVec2, Vec<SectionMesh>>,
+    /// Меши колонок по ключу колонки, по секции снизу вверх; `None` — пустая секция.
+    column_meshes: HashMap<IVec2, ColumnMeshes>,
     world: World,
     terrain: Terrain,
     loader: Loader,
@@ -258,6 +281,13 @@ impl Engine {
             bind_group_layouts: &[Some(&globals_layout)],
             ..Default::default()
         });
+        let outline_pipeline = create_outline_pipeline(&device, &pipeline_layout, render_format);
+        let outline_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outline"),
+            size: (OUTLINE_VERTICES * OUTLINE_VERTEX_SIZE) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("main"),
             layout: Some(&pipeline_layout),
@@ -298,6 +328,13 @@ impl Engine {
             config,
             render_format,
             pipeline,
+            outline_pipeline,
+            outline_buffer,
+            outline_block: None,
+            target: None,
+            breaking: Repeat::new(REPEAT_S),
+            placing: Repeat::new(REPEAT_S),
+            selected: DEFAULT_BLOCK,
             globals_buffer,
             globals_bind_group,
             column_meshes,
@@ -350,7 +387,7 @@ impl Engine {
     /// секций нарисовано в прошлом кадре]`.
     /// Время — среднее с прошлого вызова (или последнее известное, если работы не было).
     pub fn stats(&mut self) -> Vec<u32> {
-        let sections: usize = self.column_meshes.values().map(Vec::len).sum();
+        let sections = self.column_meshes.values().flatten().flatten().count();
         vec![
             self.world.len() as u32,
             self.column_meshes.len() as u32,
@@ -387,9 +424,29 @@ impl Engine {
         }
     }
 
-    /// Отпускает все клавиши (потеря pointer lock, blur окна).
+    /// Кнопка мыши: `button` — `MouseEvent.button` (0 — левая, 2 — правая), остальные
+    /// игнорируются. Левая ломает блок под прицелом, правая ставит выбранный; при
+    /// удержании действие повторяется раз в [`REPEAT_S`].
+    pub fn mouse_button(&mut self, button: u8, pressed: bool) {
+        match button {
+            0 => self.breaking.set(pressed),
+            2 => self.placing.set(pressed),
+            _ => {}
+        }
+    }
+
+    /// Блок для установки: `"grass"`, `"dirt"` или `"stone"`; иначе ошибка.
+    pub fn select_block(&mut self, name: &str) -> Result<(), JsError> {
+        self.selected = Block::from_name(name)
+            .ok_or_else(|| JsError::new(&format!("unknown block: {name}")))?;
+        Ok(())
+    }
+
+    /// Отпускает все клавиши и кнопки мыши (потеря pointer lock, blur окна).
     pub fn release_all_keys(&mut self) {
         self.keys.clear();
+        self.breaking.reset();
+        self.placing.reset();
     }
 
     /// Рисует один кадр. `time` — секунды с начала работы страницы.
@@ -400,6 +457,14 @@ impl Engine {
         self.last_time = Some(time);
         self.camera.update(&self.keys, dt);
         self.stream_columns();
+        self.interact(time);
+        if self.target != self.outline_block {
+            if let Some(block) = self.target {
+                self.queue
+                    .write_buffer(&self.outline_buffer, 0, &outline_bytes(block));
+            }
+            self.outline_block = self.target;
+        }
 
         let aspect = self.config.width as f32 / self.config.height as f32;
         let fog = Fog::for_radius(self.loader.radius());
@@ -471,6 +536,7 @@ impl Engine {
                 .column_meshes
                 .values()
                 .flatten()
+                .flatten()
                 .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max));
             let mut drawn = 0;
             for mesh in visible {
@@ -480,6 +546,13 @@ impl Engine {
                 drawn += 1;
             }
             self.drawn_sections = drawn;
+
+            // После рельефа: глубина `LessEqual` без записи прячет рёбра за блоками.
+            if self.target.is_some() {
+                pass.set_pipeline(&self.outline_pipeline);
+                pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
+                pass.draw(0..OUTLINE_VERTICES as u32, 0..1);
+            }
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
@@ -531,6 +604,60 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// Блок под прицелом: луч из камеры вдоль взгляда не дальше [`REACH`].
+    fn pick(&self) -> Option<Hit> {
+        raycast(self.camera.position, self.camera.forward(), REACH, |pos| {
+            self.world.block(pos).is_solid()
+        })
+    }
+
+    /// Ломание и установка по кнопкам мыши, затем перестройка задетых секций в этом
+    /// же кадре — вне бюджета подгрузки, чтобы правка была видна сразу.
+    fn interact(&mut self, time: f32) {
+        let mut target = self.pick();
+        let mut dirty = HashSet::new();
+        // `fire` вызывается каждый кадр, даже без цели: так при удержании темп не сбивается.
+        if self.breaking.fire(time)
+            && let Some(hit) = target
+            // Ниже y = 0 — дно мира: `World::block` считает его камнем, и луч в него
+            // попадает, но ломать его нельзя.
+            && hit.block.y >= 0
+            && self.world.set_block(hit.block, Block::Air)
+        {
+            dirty.extend(affected_sections(hit.block));
+            target = self.pick();
+        }
+        if self.placing.fire(time)
+            && let Some(hit) = target
+        {
+            let pos = hit.block + hit.normal;
+            // `set_block` сам отказывает вне высоты мира и в незагруженной колонке.
+            if !self.world.block(pos).is_solid() && self.world.set_block(pos, self.selected) {
+                dirty.extend(affected_sections(pos));
+                target = self.pick();
+            }
+        }
+        for key in dirty {
+            self.remesh_section(key);
+        }
+        self.target = target.map(|hit| hit.block);
+    }
+
+    /// Перестраивает меш секции `(x колонки, номер секции, z колонки)` по текущему миру.
+    /// Колонку без меша пропускает: загрузчик мешует её целиком позже, уже с правкой.
+    fn remesh_section(&mut self, key: IVec3) {
+        let Some(meshes) = self.column_meshes.get_mut(&IVec2::new(key.x, key.z)) else {
+            return;
+        };
+        let Some(data) = mesh_world_section(&self.world, key) else {
+            return;
+        };
+        let min = (key * SECTION_SIZE).as_vec3();
+        meshes[key.y as usize] = upload_section(&self.device, &data, min);
+    }
+}
+
 /// Ключ колонки, над которой стоит камера.
 fn camera_column(camera: &Camera) -> IVec2 {
     let p = camera.position.floor().as_ivec3();
@@ -577,21 +704,22 @@ struct SectionMesh {
     max: Vec3,
 }
 
+/// Меши секций колонки снизу вверх; `None` — секция без видимых граней. Номер
+/// секции нужен, чтобы после правки блока перестроить одну её, а не всю колонку.
+type ColumnMeshes = [Option<SectionMesh>; COLUMN_SECTIONS as usize];
+
 /// Строит меш колонки и загружает её непустые секции на GPU. Загрузчик отдаёт
 /// колонку на меш только вместе с 4 соседями, так что грани на стыках верные сразу.
-fn upload_column(device: &wgpu::Device, world: &World, key: IVec2) -> Vec<SectionMesh> {
+fn upload_column(device: &wgpu::Device, world: &World, key: IVec2) -> ColumnMeshes {
     let column = world
         .column(key)
         .expect("loader meshes only loaded columns");
     let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
-    mesh_column(column, origin, |local| world.block(origin + local))
-        .iter()
-        .enumerate()
-        .filter_map(|(sy, data)| {
-            let min = (origin + IVec3::Y * sy as i32 * SECTION_SIZE).as_vec3();
-            upload_section(device, data, min)
-        })
-        .collect()
+    let data = mesh_column(column, origin, |local| world.block(origin + local));
+    std::array::from_fn(|sy| {
+        let min = (origin + IVec3::Y * sy as i32 * SECTION_SIZE).as_vec3();
+        upload_section(device, &data[sy], min)
+    })
 }
 
 /// `min` — нижний угол секции в мире. `None` для пустой секции: буфер нулевого
@@ -616,6 +744,51 @@ fn upload_section(device: &wgpu::Device, data: &MeshData, min: Vec3) -> Option<S
         index_count: data.indices.len() as u32,
         min,
         max: min + SECTION_SIZE as f32,
+    })
+}
+
+/// Пайплайн рамки вокруг блока под прицелом: линии поверх рельефа с тем же буфером глубины.
+fn create_outline_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("outline.wgsl"));
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("outline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: OUTLINE_VERTEX_SIZE as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+            })],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(format.into())],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::LineList,
+            ..Default::default()
+        },
+        // Рамка раздута над гранями, так что `LessEqual` показывает рёбра на видимых
+        // гранях и прячет те, что за блоком. Без записи: рамка не должна заслонять ничего.
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
     })
 }
 

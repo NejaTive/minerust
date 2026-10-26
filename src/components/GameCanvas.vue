@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import init, { Engine } from '@engine'
 import {
+  type BlockName,
   type GraphicsApi,
   loadGraphicsApi,
   loadRenderDistance,
@@ -33,6 +34,7 @@ const emit = defineEmits<{
   api: [info: ApiInfo]
   notice: [text: string]
   'render-distance': [columns: number]
+  block: [name: BlockName]
   'toggle-controls': []
 }>()
 
@@ -44,6 +46,8 @@ const canvasKey = ref(0)
 const engine = shallowRef<Engine>()
 const error = ref<string>()
 const locked = ref(false)
+// Выбор блока живёт здесь, а не в движке: движок пересоздаётся при смене API.
+const selectedBlock = ref<BlockName>('grass')
 
 let preferred = loadGraphicsApi()
 let switching = false
@@ -75,6 +79,28 @@ function onLockChange() {
 
 function onMouseMove(e: MouseEvent) {
   if (locked.value) engine.value?.mouse_move(e.movementX, e.movementY)
+}
+
+// Только при уже захваченном курсоре: клик, который захватывает курсор, блок не ломает.
+function onMouseDown(e: MouseEvent) {
+  if (locked.value) engine.value?.mouse_button(e.button, true)
+}
+
+// Отпускание передаём всегда: курсор могли отпустить посреди удержания.
+function onMouseUp(e: MouseEvent) {
+  engine.value?.mouse_button(e.button, false)
+}
+
+const BLOCK_KEYS: Record<string, BlockName> = {
+  Digit1: 'grass',
+  Digit2: 'dirt',
+  Digit3: 'stone',
+}
+
+function selectBlock(name: BlockName) {
+  selectedBlock.value = name
+  engine.value?.select_block(name)
+  emit('block', name)
 }
 
 const HOTKEYS = new Set(['KeyG', 'KeyH', 'BracketLeft', 'BracketRight'])
@@ -118,6 +144,12 @@ function onKeyDown(e: KeyboardEvent) {
   if (!locked.value) return
   if (GAME_KEYS.has(e.code)) e.preventDefault()
   if (e.repeat) return
+  // Цифры выбирают блок и в движок как клавиши полёта не попадают.
+  const block = BLOCK_KEYS[e.code]
+  if (block) {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) selectBlock(block)
+    return
+  }
   engine.value?.set_key(e.code, true)
 }
 
@@ -165,6 +197,8 @@ async function start(camera?: Float32Array) {
   }
   created.set_render_distance(loadRenderDistance())
   emit('render-distance', created.render_distance())
+  created.select_block(selectedBlock.value)
+  emit('block', selectedBlock.value)
   engine.value = created
   const backend = created.backend() as GraphicsApi
   emit('api', { backend, fallback: preferred === 'webgpu' && backend === 'webgl2' })
@@ -212,6 +246,8 @@ async function switchApi() {
 onMounted(async () => {
   document.addEventListener('pointerlockchange', onLockChange)
   document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mousedown', onMouseDown)
+  document.addEventListener('mouseup', onMouseUp)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', onBlur)
@@ -232,6 +268,8 @@ onBeforeUnmount(() => {
   stop()
   document.removeEventListener('pointerlockchange', onLockChange)
   document.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('mousedown', onMouseDown)
+  document.removeEventListener('mouseup', onMouseUp)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', onBlur)
@@ -239,7 +277,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <canvas :key="canvasKey" ref="canvas" class="game" @click="requestLock" />
+  <canvas
+    :key="canvasKey"
+    ref="canvas"
+    class="game"
+    @click="requestLock"
+    @contextmenu.prevent
+  />
   <div v-if="engine && !locked" class="hint">Кликни, чтобы играть</div>
   <div v-if="engine && locked" class="crosshair" />
   <div v-if="error" class="error">Не удалось запустить движок: {{ error }}</div>

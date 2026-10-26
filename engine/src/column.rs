@@ -7,6 +7,7 @@ pub const COLUMN_SECTIONS: i32 = 8;
 pub const WORLD_HEIGHT: i32 = COLUMN_SECTIONS * SECTION_SIZE;
 
 /// Колонка 16×128×16: секции снизу вверх, `sections[0]` — y 0..16.
+#[derive(Clone)]
 pub struct Column {
     sections: [Section; COLUMN_SECTIONS as usize],
 }

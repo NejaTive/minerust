@@ -1,9 +1,10 @@
-use glam::IVec3;
+use glam::{IVec2, IVec3};
 
 use crate::block::{Block, Facing};
 use crate::column::{COLUMN_SECTIONS, Column};
 use crate::mesh::Vertex;
 use crate::section::{SECTION_SIZE, Section};
+use crate::world::World;
 
 pub struct MeshData {
     pub vertices: Vec<Vertex>,
@@ -154,6 +155,20 @@ pub fn mesh_column(
             })
         })
         .collect()
+}
+
+/// Меш одной секции по ключу `(x колонки, номер секции 0..8, z колонки)` с соседями
+/// из `world` — для перестройки после правки блока. `None`, если колонка не загружена
+/// или номер секции вне 0..COLUMN_SECTIONS.
+pub fn mesh_world_section(world: &World, key: IVec3) -> Option<MeshData> {
+    if !(0..COLUMN_SECTIONS).contains(&key.y) {
+        return None;
+    }
+    let column = world.column(IVec2::new(key.x, key.z))?;
+    let origin = key * SECTION_SIZE;
+    Some(mesh_section(column.section(key.y), origin, |local| {
+        world.block(origin + local)
+    }))
 }
 
 #[cfg(test)]
@@ -325,11 +340,8 @@ mod tests {
 
     #[test]
     fn no_faces_between_columns() {
-        use glam::IVec2;
-
         use crate::column::WORLD_HEIGHT;
         use crate::terrain::Terrain;
-        use crate::world::World;
 
         // Центр с отрицательными координатами, чтобы задеть и div_euclid на стыках.
         let center = IVec2::new(-1, 2);
@@ -373,5 +385,86 @@ mod tests {
         }
         assert!(expected > 256, "flat terrain would not test side faces");
         assert_eq!(meshed, expected);
+    }
+
+    /// Грани в секции `key`, посчитанные по миру напрямую, без мешера.
+    fn world_faces(world: &World, key: IVec3) -> usize {
+        let origin = key * SECTION_SIZE;
+        let mut count = 0;
+        for y in 0..SECTION_SIZE {
+            for z in 0..SECTION_SIZE {
+                for x in 0..SECTION_SIZE {
+                    let pos = origin + IVec3::new(x, y, z);
+                    if world.block(pos).is_solid() {
+                        count += FACES
+                            .iter()
+                            .filter(|face| !world.block(pos + face.normal).is_solid())
+                            .count();
+                    }
+                }
+            }
+        }
+        count
+    }
+
+    #[test]
+    fn edits_on_seams_remesh_exactly_affected_sections() {
+        use crate::terrain::Terrain;
+        use crate::world::affected_sections;
+
+        let terrain = Terrain::new(1337);
+        let mut world = World::new();
+        for z in -2..=1 {
+            for x in -2..=1 {
+                let key = IVec2::new(x, z);
+                world.insert(key, terrain.generate(key));
+            }
+        }
+        // Секции колонок -1..=0, чьи соседи по граням все загружены.
+        let sections: Vec<IVec3> = (-1..=0)
+            .flat_map(|z| {
+                (-1..=0).flat_map(move |x| (0..COLUMN_SECTIONS).map(move |sy| IVec3::new(x, sy, z)))
+            })
+            .collect();
+
+        let surface = terrain.surface_height(-1, 0);
+        // Угол колонок 0/-1 по x и секций по высоте: под землёй, на стыке трёх секций.
+        let underground = IVec3::new(-1, 32, 0);
+        assert!(surface > 40, "edit must be underground, surface {surface}");
+        let edits = [
+            (underground, Block::Air),
+            // Над поверхностью, на краю колонки по z и на стыке секций сверху.
+            (IVec3::new(-16, 79, -1), Block::Stone),
+            // Ставим обратно рядом с выкопанным: грани должны исчезнуть.
+            (underground, Block::Dirt),
+            (IVec3::new(0, surface, -16), Block::Air),
+        ];
+        for (pos, block) in edits {
+            let before: Vec<usize> = sections.iter().map(|&k| world_faces(&world, k)).collect();
+            assert!(world.set_block(pos, block));
+            let affected = affected_sections(pos);
+            for (&key, before) in sections.iter().zip(before) {
+                let after = world_faces(&world, key);
+                if affected.contains(&key) {
+                    let mesh = mesh_world_section(&world, key).unwrap();
+                    assert_eq!(face_count(&mesh), after, "{pos}: section {key}");
+                } else {
+                    assert_eq!(
+                        after, before,
+                        "{pos}: section {key} changed but not affected"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn world_section_outside_is_none() {
+        let mut world = World::new();
+        world.insert(IVec2::ZERO, Column::new());
+        assert!(mesh_world_section(&world, IVec3::new(0, 0, 0)).is_some());
+        assert!(mesh_world_section(&world, IVec3::new(0, COLUMN_SECTIONS, 0)).is_none());
+        assert!(mesh_world_section(&world, IVec3::new(0, -1, 0)).is_none());
+        assert!(mesh_world_section(&world, IVec3::new(1, 0, 0)).is_none());
     }
 }
