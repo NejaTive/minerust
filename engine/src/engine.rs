@@ -12,9 +12,9 @@ use crate::double_tap::DoubleTap;
 use crate::fog::Fog;
 use crate::frustum::Frustum;
 use crate::globals::Globals;
-use crate::loader::{Loader, Progress};
+use crate::loader::{Loader, NEIGHBORS, Progress};
 use crate::mesh::{self, Vertex};
-use crate::mesher::{MeshData, mesh_column, mesh_world_section};
+use crate::mesher::{MeshData, MeshOptions, mesh_column, mesh_world_section};
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player};
 use crate::raycast::{Hit, raycast};
@@ -83,6 +83,10 @@ pub struct Engine {
     globals_bind_group: wgpu::BindGroup,
     /// Меши колонок по ключу колонки, по секции снизу вверх; `None` — пустая секция.
     column_meshes: HashMap<IVec2, ColumnMeshes>,
+    mesh_options: MeshOptions,
+    /// Колонки, чьи меши построены со старыми `mesh_options`, дальние первыми: их
+    /// перестраивает `stream_columns` в бюджете кадра, с конца. До замены рисуются старые.
+    stale: Vec<IVec2>,
     world: World,
     terrain: Terrain,
     seed: i32,
@@ -207,6 +211,7 @@ impl Engine {
         let mut mesh_time = AverageTime::default();
         let mut world = World::new();
         let mut loader = Loader::new(camera_column(&camera));
+        let mesh_options = MeshOptions::default();
         let start = loader.warm_up(
             &mut world,
             |key| generate_time.measure(&performance, || terrain.generate(key)),
@@ -215,8 +220,9 @@ impl Engine {
         let column_meshes = start
             .into_iter()
             .map(|key| {
-                let meshes =
-                    mesh_time.measure(&performance, || upload_column(&device, &world, key));
+                let meshes = mesh_time.measure(&performance, || {
+                    upload_column(&device, &world, key, mesh_options)
+                });
                 (key, meshes)
             })
             .collect();
@@ -356,6 +362,8 @@ impl Engine {
             globals_buffer,
             globals_bind_group,
             column_meshes,
+            mesh_options,
+            stale: Vec::new(),
             world,
             terrain,
             seed,
@@ -443,16 +451,11 @@ impl Engine {
         let key = IVec2::new(x, z);
         self.world.import(key, column);
         // Соседей целиком, а не только граничные секции: импорт идёт раз при старте,
-        // до первого кадра, и простота тут дороже пары лишних мешей.
-        for key in [
-            key,
-            key + IVec2::X,
-            key - IVec2::X,
-            key + IVec2::Y,
-            key - IVec2::Y,
-        ] {
+        // до первого кадра, и простота тут дороже пары лишних мешей. Диагональные — из-за
+        // AO на углу колонки.
+        for key in std::iter::once(key).chain(NEIGHBORS.map(|n| key + n)) {
             if self.column_meshes.contains_key(&key) {
-                let meshes = upload_column(&self.device, &self.world, key);
+                let meshes = upload_column(&self.device, &self.world, key, self.mesh_options);
                 self.column_meshes.insert(key, meshes);
             }
         }
@@ -483,9 +486,27 @@ impl Engine {
         self.loader.radius()
     }
 
+    /// Включает или выключает затенение углов (AO). Меши всех колонок перестраиваются
+    /// постепенно, ближние первыми, в бюджете подгрузки; до замены рисуются старые.
+    pub fn set_ambient_occlusion(&mut self, enabled: bool) {
+        if enabled == self.mesh_options.ambient_occlusion {
+            return;
+        }
+        self.mesh_options.ambient_occlusion = enabled;
+        let center = camera_column(&self.camera);
+        self.stale = self.column_meshes.keys().copied().collect();
+        self.stale
+            .sort_by_key(|&key| std::cmp::Reverse((key - center).length_squared()));
+    }
+
+    /// Включено ли затенение углов; по умолчанию — да.
+    pub fn ambient_occlusion(&self) -> bool {
+        self.mesh_options.ambient_occlusion
+    }
+
     /// Статистика для HUD: `[колонок загружено, колонок с мешами, секций с мешами,
-    /// колонок в очереди на меш, генерация колонки в мкс, меширование колонки в мкс,
-    /// секций нарисовано в прошлом кадре]`.
+    /// колонок в очереди на меш (включая перестройку после смены AO), генерация колонки
+    /// в мкс, меширование колонки в мкс, секций нарисовано в прошлом кадре]`.
     /// Время — среднее с прошлого вызова (или последнее известное, если работы не было).
     pub fn stats(&mut self) -> Vec<u32> {
         let sections = self.column_meshes.values().flatten().flatten().count();
@@ -493,7 +514,7 @@ impl Engine {
             self.world.len() as u32,
             self.column_meshes.len() as u32,
             sections as u32,
-            self.loader.pending() as u32,
+            (self.loader.pending() + self.stale.len()) as u32,
             self.generate_time.take_micros(),
             self.mesh_time.take_micros(),
             self.drawn_sections,
@@ -668,9 +689,9 @@ impl Engine {
 }
 
 impl Engine {
-    /// Подгрузка колонок вокруг камеры, пока не выйдет [`STREAM_BUDGET_MS`]. Одна
-    /// операция за кадр делается всегда, даже если бюджет съели раньше: иначе на
-    /// медленной машине мир не загрузился бы никогда.
+    /// Подгрузка колонок вокруг камеры и перестройка устаревших мешей (`stale`), пока
+    /// не выйдет [`STREAM_BUDGET_MS`]. Одна операция за кадр делается всегда, даже если
+    /// бюджет съели раньше: иначе на медленной машине мир не загрузился бы никогда.
     fn stream_columns(&mut self) {
         let deadline = self
             .performance
@@ -683,20 +704,18 @@ impl Engine {
         {
             self.column_meshes.remove(&key);
         }
-        loop {
-            let progress = self.loader.advance(&mut self.world, |key| {
-                self.generate_time
-                    .measure(&self.performance, || self.terrain.generate(key))
-            });
-            match progress {
-                Progress::Done => break,
-                Progress::Generated(_) => {}
-                Progress::Mesh(key) => {
-                    let meshes = self.mesh_time.measure(&self.performance, || {
-                        upload_column(&self.device, &self.world, key)
-                    });
-                    self.column_meshes.insert(key, meshes);
+        let mut loader_done = false;
+        for step in 0usize.. {
+            // Перестройка чередуется с подгрузкой: при смене AO на ходу у игрока не
+            // остаётся дыр на краю мира, а подгрузка не задерживает перестройку.
+            if !self.stale.is_empty() && (loader_done || step % 2 == 0) {
+                self.rebuild_stale();
+            } else if !self.advance_loader() {
+                loader_done = true;
+                if self.stale.is_empty() {
+                    break;
                 }
+                continue;
             }
             // Без `performance` (в браузере он есть всегда) время не измерить:
             // остаёмся на минимуме, одна операция за кадр.
@@ -707,6 +726,39 @@ impl Engine {
             if !in_time {
                 break;
             }
+        }
+    }
+
+    /// Один шаг загрузчика; `false`, если работы нет.
+    fn advance_loader(&mut self) -> bool {
+        let progress = self.loader.advance(&mut self.world, |key| {
+            self.generate_time
+                .measure(&self.performance, || self.terrain.generate(key))
+        });
+        match progress {
+            Progress::Done => return false,
+            Progress::Generated(_) => {}
+            Progress::Mesh(key) => {
+                let meshes = self.mesh_time.measure(&self.performance, || {
+                    upload_column(&self.device, &self.world, key, self.mesh_options)
+                });
+                self.column_meshes.insert(key, meshes);
+            }
+        }
+        true
+    }
+
+    /// Перестраивает ближайшую колонку из `stale` с текущими `mesh_options`. Колонку,
+    /// чей меш загрузчик уже снял, пропускает.
+    fn rebuild_stale(&mut self) {
+        let Some(key) = self.stale.pop() else {
+            return;
+        };
+        if self.column_meshes.contains_key(&key) {
+            let meshes = self.mesh_time.measure(&self.performance, || {
+                upload_column(&self.device, &self.world, key, self.mesh_options)
+            });
+            self.column_meshes.insert(key, meshes);
         }
     }
 }
@@ -760,7 +812,7 @@ impl Engine {
         let Some(meshes) = self.column_meshes.get_mut(&IVec2::new(key.x, key.z)) else {
             return;
         };
-        let Some(data) = mesh_world_section(&self.world, key) else {
+        let Some(data) = mesh_world_section(&self.world, key, self.mesh_options) else {
             return;
         };
         let min = (key * SECTION_SIZE).as_vec3();
@@ -884,13 +936,18 @@ struct SectionMesh {
 type ColumnMeshes = [Option<SectionMesh>; COLUMN_SECTIONS as usize];
 
 /// Строит меш колонки и загружает её непустые секции на GPU. Загрузчик отдаёт
-/// колонку на меш только вместе с 4 соседями, так что грани на стыках верные сразу.
-fn upload_column(device: &wgpu::Device, world: &World, key: IVec2) -> ColumnMeshes {
+/// колонку на меш только вместе с 8 соседями, так что грани и AO на стыках верные сразу.
+fn upload_column(
+    device: &wgpu::Device,
+    world: &World,
+    key: IVec2,
+    options: MeshOptions,
+) -> ColumnMeshes {
     let column = world
         .column(key)
         .expect("loader meshes only loaded columns");
     let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
-    let data = mesh_column(column, origin, |local| world.block(origin + local));
+    let data = mesh_column(column, origin, |local| world.block(origin + local), options);
     std::array::from_fn(|sy| {
         let min = (origin + IVec3::Y * sy as i32 * SECTION_SIZE).as_vec3();
         upload_section(device, &data[sy], min)

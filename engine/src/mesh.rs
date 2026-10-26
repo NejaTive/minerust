@@ -1,11 +1,11 @@
 /// Вершина: позиция (vec3), UV (vec2), яркость стороны (f32), слой текстуры (u32), 28 байт.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vertex {
     pub position: [f32; 3],
     /// В размерах блока: 0..1 на грань, v = 0 — верх тайла.
     pub uv: [f32; 2],
-    /// Множитель яркости грани по её стороне.
+    /// Множитель яркости: сторона грани × затенение угла (AO).
     pub shade: f32,
     pub layer: u32,
 }
