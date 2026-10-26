@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import GameCanvas, { type ApiInfo, type WorldStats } from './components/GameCanvas.vue'
+import GameCanvas, {
+  type ApiInfo,
+  type PlayerInfo,
+  type WorldStats,
+} from './components/GameCanvas.vue'
 import Hud from './components/Hud.vue'
 import ControlsPanel from './components/ControlsPanel.vue'
 import { type BlockName, loadControlsHidden, saveControlsHidden } from './settings'
@@ -13,6 +17,7 @@ const stats = ref<WorldStats>()
 const notice = ref<string>()
 const renderDistance = ref<number>()
 const block = ref<BlockName>()
+const player = ref<PlayerInfo>()
 const controlsHidden = ref(loadControlsHidden())
 
 let noticeTimer = 0
@@ -34,9 +39,17 @@ watch(controlsHidden, saveControlsHidden)
     @notice="showNotice"
     @render-distance="renderDistance = $event"
     @block="block = $event"
+    @player="player = $event"
     @toggle-controls="controlsHidden = !controlsHidden"
   />
-  <Hud :fps="fps" :api="api" :stats="stats" :block="block" :notice="notice" />
+  <Hud
+    :fps="fps"
+    :api="api"
+    :stats="stats"
+    :block="block"
+    :player="player"
+    :notice="notice"
+  />
   <ControlsPanel
     :hidden="controlsHidden"
     :backend="api?.backend"

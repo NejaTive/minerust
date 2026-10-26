@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { API_LABELS, BLOCK_LABELS, type BlockName } from '../settings'
-import type { ApiInfo, WorldStats } from './GameCanvas.vue'
+import type { ApiInfo, PlayerInfo, WorldStats } from './GameCanvas.vue'
 
 defineProps<{
   fps: number
   api?: ApiInfo
   stats?: WorldStats
   block?: BlockName
+  player?: PlayerInfo
   notice?: string
 }>()
 
@@ -28,6 +29,10 @@ const ms = (us: number) => (us / 1000).toFixed(2)
     </div>
     <div v-if="stats">
       Колонка: генерация {{ ms(stats.generateUs) }} мс · меш {{ ms(stats.meshUs) }} мс
+    </div>
+    <div v-if="player">
+      <template v-if="player.mode === 'flying'">Режим: полёт</template>
+      <template v-else>Режим: ходьба<template v-if="player.onGround"> · на земле</template></template>
     </div>
     <div v-if="block">Блок: {{ BLOCK_LABELS[block] }}</div>
     <div v-if="notice" class="notice">{{ notice }}</div>

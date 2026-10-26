@@ -22,6 +22,11 @@ export interface WorldStats {
   drawnSections: number
 }
 
+export interface PlayerInfo {
+  mode: 'walking' | 'flying'
+  onGround: boolean
+}
+
 export interface ApiInfo {
   backend: GraphicsApi
   /** Просили WebGPU, но браузер его не дал, и движок работает на WebGL2. */
@@ -35,6 +40,7 @@ const emit = defineEmits<{
   notice: [text: string]
   'render-distance': [columns: number]
   block: [name: BlockName]
+  player: [info: PlayerInfo]
   'toggle-controls': []
 }>()
 
@@ -164,9 +170,18 @@ function onBlur() {
 function startLoop() {
   let frames = 0
   let lastFpsTime = performance.now()
+  let player: PlayerInfo | undefined
   const frame = (now: number) => {
-    engine.value!.render(now / 1000)
+    const current = engine.value!
+    current.render(now / 1000)
     frames++
+    // Читаем каждый кадр, чтобы HUD не отставал, но эмитим только изменения.
+    const mode = current.player_mode() as PlayerInfo['mode']
+    const onGround = current.on_ground()
+    if (player?.mode !== mode || player.onGround !== onGround) {
+      player = { mode, onGround }
+      emit('player', player)
+    }
     if (now - lastFpsTime >= 1000) {
       emit('fps', frames)
       const [columns, meshedColumns, meshedSections, queued, generateUs, meshUs, drawnSections] =
