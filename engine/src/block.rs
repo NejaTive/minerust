@@ -25,6 +25,17 @@ impl Block {
         self != Block::Air
     }
 
+    /// Блок, который игрок может выбрать, по имени из интерфейса: `"grass"`, `"dirt"`,
+    /// `"stone"`. Воздух не выбирается: для него есть ломание.
+    pub fn from_name(name: &str) -> Option<Block> {
+        match name {
+            "grass" => Some(Block::Grass),
+            "dirt" => Some(Block::Dirt),
+            "stone" => Some(Block::Stone),
+            _ => None,
+        }
+    }
+
     /// Тайл грани; `None` — у блока нет граней (воздух).
     pub fn tile(self, facing: Facing) -> Option<Tile> {
         Some(match (self, facing) {
@@ -47,5 +58,14 @@ mod tests {
         assert_eq!(Block::Grass.tile(Facing::Side), Some(Tile::GrassSide));
         assert_eq!(Block::Grass.tile(Facing::Bottom), Some(Tile::Dirt));
         assert_eq!(Block::Air.tile(Facing::Top), None);
+    }
+
+    #[test]
+    fn selectable_by_name() {
+        assert_eq!(Block::from_name("grass"), Some(Block::Grass));
+        assert_eq!(Block::from_name("dirt"), Some(Block::Dirt));
+        assert_eq!(Block::from_name("stone"), Some(Block::Stone));
+        assert_eq!(Block::from_name("air"), None);
+        assert_eq!(Block::from_name("Stone"), None);
     }
 }

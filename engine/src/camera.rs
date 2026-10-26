@@ -54,7 +54,7 @@ impl Camera {
     }
 
     /// Направление взгляда с учётом pitch.
-    fn forward(&self) -> Vec3 {
+    pub fn forward(&self) -> Vec3 {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
         Vec3::new(cy * cp, sp, sy * cp)

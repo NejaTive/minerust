@@ -6,6 +6,7 @@ pub const SECTION_SIZE: i32 = 16;
 pub const SECTION_VOLUME: usize = 4096;
 
 /// Секция 16³. Индекс блока: x + 16·z + 256·y.
+#[derive(Clone)]
 pub struct Section {
     // В куче: на шаге 4 секций будут тысячи, и их перемещают по значению.
     blocks: Box<[Block; SECTION_VOLUME]>,

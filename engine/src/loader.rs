@@ -16,7 +16,7 @@ const NEIGHBORS: [IVec2; 4] = [IVec2::X, IVec2::NEG_X, IVec2::Y, IVec2::NEG_Y];
 /// Результат одного [`Loader::advance`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Progress {
-    /// Колонка сгенерирована и лежит в `World`.
+    /// Колонка загружена (сгенерирована или взята из отложенных правок) и лежит в `World`.
     Generated(IVec2),
     /// Колонке нужно построить меш. Загрузчик уже считает её мешированной.
     Mesh(IVec2),
@@ -115,7 +115,7 @@ impl Loader {
         for &o in self.offsets.iter().filter(in_circle(radius + 1)) {
             let key = center + o;
             if world.column(key).is_none() {
-                world.insert(key, generate(key));
+                load(world, key, &mut generate);
             }
         }
         let mesh: Vec<IVec2> = self
@@ -160,7 +160,8 @@ impl Loader {
     }
 
     /// Одна единица работы: меш ближайшей готовой колонки, а если таких нет —
-    /// генерация ближайшей незагруженной. Меши идут первыми, чтобы рельеф вокруг
+    /// загрузка ближайшей незагруженной: колонка с правками берётся из отложенных
+    /// в `World`, остальные генерируются `generate`. Меши идут первыми, чтобы рельеф вокруг
     /// игрока появлялся как можно раньше; генерация при этом не голодает, ведь
     /// без неё готовые к мешу колонки быстро кончаются.
     pub fn advance(
@@ -173,7 +174,7 @@ impl Loader {
             return Progress::Mesh(key);
         }
         if let Some(key) = self.next_to_generate(world) {
-            world.insert(key, generate(key));
+            load(world, key, generate);
             return Progress::Generated(key);
         }
         Progress::Done
@@ -231,6 +232,12 @@ impl Loader {
         self.offsets
             .partition_point(|o| o.length_squared() <= radius * radius)
     }
+}
+
+/// Кладёт колонку в мир: изменённую — из отложенных правок, иначе — новую от генератора.
+fn load(world: &mut World, key: IVec2, generate: impl FnOnce(IVec2) -> Column) {
+    let column = world.take_edited(key).unwrap_or_else(|| generate(key));
+    world.insert(key, column);
 }
 
 /// Смещения в круге `radius`, ближние первыми.
@@ -497,5 +504,47 @@ mod tests {
         assert_eq!(mesh.len(), circle_points(2));
         assert_eq!(world.len(), circle_points(3));
         assert!(mesh.iter().all(|&k| dist2(k, center) <= 4));
+    }
+
+    #[test]
+    fn edited_column_comes_back_without_generator() {
+        use glam::IVec3;
+
+        use crate::block::Block;
+
+        let mut loader = Loader::new(IVec2::ZERO);
+        let mut world = World::new();
+        let mut meshed = HashSet::new();
+        settle(&mut loader, &mut world, IVec2::ZERO, &mut meshed);
+        let pos = IVec3::new(3, 50, -5);
+        let key = IVec2::new(0, -1);
+        assert!(world.set_block(pos, Block::Stone));
+
+        let far = IVec2::new(100, 0);
+        settle(&mut loader, &mut world, far, &mut meshed);
+        assert!(world.column(key).is_none());
+
+        // Обратно: генератор не должен трогать изменённую колонку.
+        for key in loader.update(IVec2::ZERO, &mut world) {
+            meshed.remove(&key);
+        }
+        loop {
+            let progress = loader.advance(&mut world, |k| {
+                assert_ne!(k, key, "edited column regenerated");
+                Column::new()
+            });
+            match progress {
+                Progress::Done => break,
+                Progress::Mesh(k) => assert!(meshed.insert(k)),
+                Progress::Generated(_) => {}
+            }
+        }
+        assert_eq!(world.block(pos), Block::Stone);
+
+        // И после второй выгрузки правка снова сохраняется.
+        settle(&mut loader, &mut world, far, &mut meshed);
+        assert!(world.is_edited(key));
+        settle(&mut loader, &mut world, IVec2::ZERO, &mut meshed);
+        assert_eq!(world.block(pos), Block::Stone);
     }
 }
