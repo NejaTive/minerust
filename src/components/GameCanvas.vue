@@ -1,15 +1,57 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import init, { Engine } from '@engine'
+import {
+  type BlockName,
+  type GraphicsApi,
+  loadGraphicsApi,
+  loadRenderDistance,
+  saveGraphicsApi,
+  saveRenderDistance,
+} from '../settings'
 
-const emit = defineEmits<{ fps: [value: number] }>()
+/** Порядок полей — как в `Engine.stats()`; время — в микросекундах. */
+export interface WorldStats {
+  columns: number
+  meshedColumns: number
+  meshedSections: number
+  queued: number
+  generateUs: number
+  meshUs: number
+  /** Секций, прошедших отсечение по пирамиде видимости, в последнем кадре. */
+  drawnSections: number
+}
+
+export interface ApiInfo {
+  backend: GraphicsApi
+  /** Просили WebGPU, но браузер его не дал, и движок работает на WebGL2. */
+  fallback: boolean
+}
+
+const emit = defineEmits<{
+  fps: [value: number]
+  stats: [value: WorldStats]
+  api: [info: ApiInfo]
+  notice: [text: string]
+  'render-distance': [columns: number]
+  block: [name: BlockName]
+  'toggle-controls': []
+}>()
 
 const canvas = ref<HTMLCanvasElement>()
+// Смена ключа пересоздаёт <canvas>: тип контекста (webgpu/webgl2) фиксируется первым
+// getContext, и старый canvas другой API уже не отдаст.
+const canvasKey = ref(0)
 // shallowRef: Vue не должен оборачивать wasm-объект в Proxy.
 const engine = shallowRef<Engine>()
 const error = ref<string>()
 const locked = ref(false)
+// Выбор блока живёт здесь, а не в движке: движок пересоздаётся при смене API.
+const selectedBlock = ref<BlockName>('grass')
 
+let preferred = loadGraphicsApi()
+let switching = false
+let disposed = false
 let rafId = 0
 let resizeObserver: ResizeObserver | undefined
 
@@ -39,10 +81,75 @@ function onMouseMove(e: MouseEvent) {
   if (locked.value) engine.value?.mouse_move(e.movementX, e.movementY)
 }
 
+// Только при уже захваченном курсоре: клик, который захватывает курсор, блок не ломает.
+function onMouseDown(e: MouseEvent) {
+  if (locked.value) engine.value?.mouse_button(e.button, true)
+}
+
+// Отпускание передаём всегда: курсор могли отпустить посреди удержания.
+function onMouseUp(e: MouseEvent) {
+  engine.value?.mouse_button(e.button, false)
+}
+
+const BLOCK_KEYS: Record<string, BlockName> = {
+  Digit1: 'grass',
+  Digit2: 'dirt',
+  Digit3: 'stone',
+}
+
+function selectBlock(name: BlockName) {
+  selectedBlock.value = name
+  engine.value?.select_block(name)
+  emit('block', name)
+}
+
+const HOTKEYS = new Set(['KeyG', 'KeyH', 'BracketLeft', 'BracketRight'])
+
+/** Хоткеи интерфейса: работают без pointer lock и в движок не попадают. */
+function onHotkey(e: KeyboardEvent): boolean {
+  if (!HOTKEYS.has(e.code)) return false
+  // Cmd+H / Ctrl+G и т.п. — системные сочетания, их не перехватываем.
+  if (e.ctrlKey || e.metaKey || e.altKey) return false
+  // Дальность при удержании листается автоповтором; G и H — по одному нажатию.
+  if (e.code === 'BracketLeft') changeRenderDistance(-1)
+  else if (e.code === 'BracketRight') changeRenderDistance(1)
+  else if (!e.repeat) {
+    if (e.code === 'KeyG') void switchApi()
+    else emit('toggle-controls')
+  }
+  return true
+}
+
+function columnsWord(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'колонка'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'колонки'
+  return 'колонок'
+}
+
+function changeRenderDistance(delta: number) {
+  const current = engine.value
+  if (!current) return
+  // Движок сам зажимает значение в допустимые пределы.
+  current.set_render_distance(current.render_distance() + delta)
+  const columns = current.render_distance()
+  saveRenderDistance(columns)
+  emit('render-distance', columns)
+  emit('notice', `Дальность: ${columns} ${columnsWord(columns)}`)
+}
+
 function onKeyDown(e: KeyboardEvent) {
+  if (onHotkey(e)) return
   if (!locked.value) return
   if (GAME_KEYS.has(e.code)) e.preventDefault()
   if (e.repeat) return
+  // Цифры выбирают блок и в движок как клавиши полёта не попадают.
+  const block = BLOCK_KEYS[e.code]
+  if (block) {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) selectBlock(block)
+    return
+  }
   engine.value?.set_key(e.code, true)
 }
 
@@ -54,25 +161,7 @@ function onBlur() {
   engine.value?.release_all_keys()
 }
 
-onMounted(async () => {
-  try {
-    await init()
-    resize()
-    engine.value = await Engine.create(canvas.value!)
-  } catch (e) {
-    error.value = String(e)
-    return
-  }
-
-  document.addEventListener('pointerlockchange', onLockChange)
-  document.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('keydown', onKeyDown)
-  window.addEventListener('keyup', onKeyUp)
-  window.addEventListener('blur', onBlur)
-
-  resizeObserver = new ResizeObserver(resize)
-  resizeObserver.observe(canvas.value!)
-
+function startLoop() {
   let frames = 0
   let lastFpsTime = performance.now()
   const frame = (now: number) => {
@@ -80,29 +169,121 @@ onMounted(async () => {
     frames++
     if (now - lastFpsTime >= 1000) {
       emit('fps', frames)
+      const [columns, meshedColumns, meshedSections, queued, generateUs, meshUs, drawnSections] =
+        engine.value!.stats()
+      emit('stats', {
+        columns,
+        meshedColumns,
+        meshedSections,
+        queued,
+        generateUs,
+        meshUs,
+        drawnSections,
+      })
       frames = 0
       lastFpsTime = now
     }
     rafId = requestAnimationFrame(frame)
   }
   rafId = requestAnimationFrame(frame)
+}
+
+async function start(camera?: Float32Array) {
+  resize()
+  const created = await Engine.create(canvas.value!, preferred, camera)
+  if (disposed) {
+    created.free()
+    return
+  }
+  created.set_render_distance(loadRenderDistance())
+  emit('render-distance', created.render_distance())
+  created.select_block(selectedBlock.value)
+  emit('block', selectedBlock.value)
+  engine.value = created
+  const backend = created.backend() as GraphicsApi
+  emit('api', { backend, fallback: preferred === 'webgpu' && backend === 'webgl2' })
+
+  resizeObserver = new ResizeObserver(resize)
+  resizeObserver.observe(canvas.value!)
+  startLoop()
+}
+
+/** Освобождает движок и всё, что привязано к текущему canvas. */
+function stop() {
+  cancelAnimationFrame(rafId)
+  resizeObserver?.disconnect()
+  resizeObserver = undefined
+  if (document.pointerLockElement === canvas.value) document.exitPointerLock()
+  engine.value?.free()
+  engine.value = undefined
+}
+
+async function switchApi() {
+  const current = engine.value
+  if (switching || !current) return
+  const target: GraphicsApi = current.backend() === 'webgpu' ? 'webgl2' : 'webgpu'
+  switching = true
+  try {
+    // Проверяем заранее, чтобы не пересоздавать canvas ради того же WebGL2.
+    if (target === 'webgpu' && !(await Engine.webgpu_supported())) {
+      emit('notice', 'WebGPU недоступен в этом браузере — остаётся WebGL2')
+      return
+    }
+    const camera = current.camera_state()
+    stop()
+    preferred = target
+    saveGraphicsApi(target)
+    canvasKey.value++
+    await nextTick()
+    await start(camera)
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    switching = false
+  }
+}
+
+onMounted(async () => {
+  document.addEventListener('pointerlockchange', onLockChange)
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mousedown', onMouseDown)
+  document.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('blur', onBlur)
+
+  switching = true
+  try {
+    await init()
+    await start()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    switching = false
+  }
 })
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(rafId)
-  resizeObserver?.disconnect()
+  disposed = true
+  stop()
   document.removeEventListener('pointerlockchange', onLockChange)
   document.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('mousedown', onMouseDown)
+  document.removeEventListener('mouseup', onMouseUp)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', onBlur)
-  if (document.pointerLockElement === canvas.value) document.exitPointerLock()
-  engine.value?.free()
 })
 </script>
 
 <template>
-  <canvas ref="canvas" class="game" @click="requestLock" />
+  <canvas
+    :key="canvasKey"
+    ref="canvas"
+    class="game"
+    @click="requestLock"
+    @contextmenu.prevent
+  />
   <div v-if="engine && !locked" class="hint">Кликни, чтобы играть</div>
   <div v-if="engine && locked" class="crosshair" />
   <div v-if="error" class="error">Не удалось запустить движок: {{ error }}</div>

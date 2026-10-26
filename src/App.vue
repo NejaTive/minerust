@@ -1,12 +1,46 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import GameCanvas from './components/GameCanvas.vue'
+import { ref, watch } from 'vue'
+import GameCanvas, { type ApiInfo, type WorldStats } from './components/GameCanvas.vue'
 import Hud from './components/Hud.vue'
+import ControlsPanel from './components/ControlsPanel.vue'
+import { type BlockName, loadControlsHidden, saveControlsHidden } from './settings'
+
+const NOTICE_MS = 2500
 
 const fps = ref(0)
+const api = ref<ApiInfo>()
+const stats = ref<WorldStats>()
+const notice = ref<string>()
+const renderDistance = ref<number>()
+const block = ref<BlockName>()
+const controlsHidden = ref(loadControlsHidden())
+
+let noticeTimer = 0
+
+function showNotice(text: string) {
+  notice.value = text
+  clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => (notice.value = undefined), NOTICE_MS)
+}
+
+watch(controlsHidden, saveControlsHidden)
 </script>
 
 <template>
-  <GameCanvas @fps="fps = $event" />
-  <Hud :fps="fps" />
+  <GameCanvas
+    @fps="fps = $event"
+    @stats="stats = $event"
+    @api="api = $event"
+    @notice="showNotice"
+    @render-distance="renderDistance = $event"
+    @block="block = $event"
+    @toggle-controls="controlsHidden = !controlsHidden"
+  />
+  <Hud :fps="fps" :api="api" :stats="stats" :block="block" :notice="notice" />
+  <ControlsPanel
+    :hidden="controlsHidden"
+    :backend="api?.backend"
+    :render-distance="renderDistance"
+    :block="block"
+  />
 </template>

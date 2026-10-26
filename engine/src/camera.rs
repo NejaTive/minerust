@@ -5,12 +5,13 @@ use glam::{Mat4, Vec3};
 
 const FOV_Y: f32 = 70.0 * std::f32::consts::PI / 180.0;
 const NEAR: f32 = 0.1;
-const FAR: f32 = 1000.0;
 /// Скорость полёта, блоков в секунду.
 const SPEED: f32 = 8.0;
 /// Поворот камеры, радиан на пиксель движения мыши.
 const SENSITIVITY: f32 = 0.002;
 const MAX_PITCH: f32 = 89.0 * std::f32::consts::PI / 180.0;
+/// Наклон на спауне: −15°, горизонт в верхней части экрана.
+const SPAWN_PITCH: f32 = -15.0 * std::f32::consts::PI / 180.0;
 
 /// Свободная камера как в креативе: yaw/pitch в радианах, Y — вверх.
 pub struct Camera {
@@ -22,19 +23,38 @@ pub struct Camera {
 }
 
 impl Camera {
-    /// Стартует сзади-сверху от куба в начале координат и смотрит прямо на него.
-    pub fn new() -> Self {
-        let position = Vec3::new(0.0, 1.5, 4.0);
-        let dir = -position;
+    /// Камера на спауне `position`: смотрит вдоль +X и чуть вниз, на рельеф впереди.
+    pub fn spawn(position: Vec3) -> Self {
         Self {
             position,
-            yaw: dir.z.atan2(dir.x),
-            pitch: dir.y.atan2(dir.x.hypot(dir.z)),
+            yaw: 0.0,
+            pitch: SPAWN_PITCH,
         }
     }
 
+    /// `[x, y, z, yaw, pitch]` — плоский вид для передачи через JS.
+    pub fn state(&self) -> [f32; 5] {
+        let p = self.position;
+        [p.x, p.y, p.z, self.yaw, self.pitch]
+    }
+
+    /// Обратное к [`Camera::state`]; `None`, если длина не 5 или есть не-числа.
+    pub fn from_state(state: &[f32]) -> Option<Self> {
+        let &[x, y, z, yaw, pitch] = state else {
+            return None;
+        };
+        if !state.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        Some(Self {
+            position: Vec3::new(x, y, z),
+            yaw,
+            pitch: pitch.clamp(-MAX_PITCH, MAX_PITCH),
+        })
+    }
+
     /// Направление взгляда с учётом pitch.
-    fn forward(&self) -> Vec3 {
+    pub fn forward(&self) -> Vec3 {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
         Vec3::new(cy * cp, sp, sy * cp)
@@ -77,10 +97,11 @@ impl Camera {
         self.position += dir.normalize_or_zero() * SPEED * dt;
     }
 
-    /// Матрица view-projection. В glam 0.34 бывший `Mat4::perspective_rh` — это
-    /// `rh::proj::directx`: NDC с глубиной 0..1 и Y вверх, как ожидает wgpu.
-    pub fn view_proj(&self, aspect: f32) -> Mat4 {
-        let proj = directx::perspective(FOV_Y, aspect, NEAR, FAR);
+    /// Матрица view-projection; `far` — дальняя плоскость в блоках, см. `Fog::far_plane`.
+    /// В glam 0.34 бывший `Mat4::perspective_rh` — это `rh::proj::directx`:
+    /// NDC с глубиной 0..1 и Y вверх, как ожидает wgpu.
+    pub fn view_proj(&self, aspect: f32, far: f32) -> Mat4 {
+        let proj = directx::perspective(FOV_Y, aspect, NEAR, far);
         let view = view::look_to_mat4(self.position, self.forward(), Vec3::Y);
         proj * view
     }

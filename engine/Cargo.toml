@@ -8,8 +8,19 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 console_error_panic_hook = "0.1.7"
+fastnoise-lite = "1.1.1"
 glam = "0.34.1"
 wasm-bindgen = "0.2.129"
 wasm-bindgen-futures = "0.4.79"
-web-sys = { version = "0.3.106", features = ["HtmlCanvasElement"] }
+web-sys = { version = "0.3.106", features = ["HtmlCanvasElement", "Performance", "Window"] }
 wgpu = { version = "30.0.1", default-features = false, features = ["webgpu", "webgl", "wgsl"] }
+
+# wasm-pack --dev собирает cargo-профиль dev. Без оптимизаций меш колонки в браузере
+# занимает ~9 мс, и подгрузка роняет FPS ниже 30. opt-level = 1 для своего крейта
+# сохраняет отладочные assert'ы и быструю пересборку, а зависимости (glam, wgpu,
+# fastnoise-lite) собираются один раз и могут быть оптимизированы полностью.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
