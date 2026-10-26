@@ -6,7 +6,10 @@ use web_sys::{HtmlCanvasElement, Performance};
 use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
-use crate::loader::{Budget, Loader};
+use crate::fog::Fog;
+use crate::frustum::Frustum;
+use crate::globals::Globals;
+use crate::loader::{Loader, Progress};
 use crate::mesh::{self, Vertex};
 use crate::mesher::{MeshData, mesh_column};
 use crate::section::SECTION_SIZE;
@@ -27,13 +30,13 @@ const SKY: wgpu::Color = wgpu::Color {
 const SEED: i32 = 1337;
 /// Круг колонок, который `create` грузит и мешует синхронно, чтобы первый кадр не был пустым.
 const START_RADIUS: i32 = 2;
-/// Бюджет потоковой загрузки на кадр, колонок. В release колонка генерируется за ~0.03 мс,
-/// мешируется с загрузкой на GPU за ~0.25 мс: 4 + 4 — около 1 мс на кадр, малая доля даже
-/// от 8 мс при 120 Гц. Круг прорисовки (~200 колонок) заполняется примерно за секунду,
-/// полёт 40 блоков/с требует меньше одной колонки на кадр. Генераций не меньше, чем мешей:
-/// колонке для меша нужны готовые соседи.
-const GEN_PER_FRAME: usize = 4;
-const MESH_PER_FRAME: usize = 4;
+/// Бюджет потоковой загрузки на кадр, мс. Сам кадр без подгрузки занимает на CPU
+/// ~1–1.5 мс, и 3 мс сверху оставляют запас даже при 120 Гц (8.3 мс на кадр).
+/// В release это ~10 мешей колонки (~0.25 мс) за кадр: круг дальности 8 (~200 колонок)
+/// заполняется быстрее, чем за секунду, а полёт 40 блоков/с требует меньше колонки
+/// на кадр. Бюджет по времени, а не по числу колонок, сам подстраивается под dev-сборку
+/// и слабые машины: кадр не проседает, просто круг заполняется дольше.
+const STREAM_BUDGET_MS: f64 = 3.0;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Верхняя граница шага кадра, чтобы после сворачивания вкладки камера не улетала.
@@ -56,6 +59,8 @@ pub struct Engine {
     world: World,
     terrain: Terrain,
     loader: Loader,
+    /// Сколько секций прошло отсечение по пирамиде видимости в последнем кадре.
+    drawn_sections: u32,
     /// `None`, если `window.performance` недоступен: тогда замеры нулевые.
     performance: Option<Performance>,
     generate_time: AverageTime,
@@ -175,10 +180,9 @@ impl Engine {
             })
             .collect();
 
-        // 64 байта = mat4x4<f32> view-projection.
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
-            size: 64,
+            size: Globals::SIZE as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -202,7 +206,8 @@ impl Engine {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    // Фрагментному шейдеру нужны параметры тумана.
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -299,6 +304,7 @@ impl Engine {
             world,
             terrain,
             loader,
+            drawn_sections: 0,
             performance,
             generate_time,
             mesh_time,
@@ -329,8 +335,19 @@ impl Engine {
         self.camera.state().to_vec()
     }
 
+    /// Дальность прорисовки в колонках; значение зажимается в 4..=16. Меняет круг загрузки,
+    /// туман и дальнюю плоскость. Можно вызывать в любой момент, в том числе сразу после create.
+    pub fn set_render_distance(&mut self, columns: i32) {
+        self.loader.set_radius(columns);
+    }
+
+    pub fn render_distance(&self) -> i32 {
+        self.loader.radius()
+    }
+
     /// Статистика для HUD: `[колонок загружено, колонок с мешами, секций с мешами,
-    /// колонок в очереди на меш, генерация колонки в мкс, меширование колонки в мкс]`.
+    /// колонок в очереди на меш, генерация колонки в мкс, меширование колонки в мкс,
+    /// секций нарисовано в прошлом кадре]`.
     /// Время — среднее с прошлого вызова (или последнее известное, если работы не было).
     pub fn stats(&mut self) -> Vec<u32> {
         let sections: usize = self.column_meshes.values().map(Vec::len).sum();
@@ -341,6 +358,7 @@ impl Engine {
             self.loader.pending() as u32,
             self.generate_time.take_micros(),
             self.mesh_time.take_micros(),
+            self.drawn_sections,
         ]
     }
 
@@ -384,9 +402,20 @@ impl Engine {
         self.stream_columns();
 
         let aspect = self.config.width as f32 / self.config.height as f32;
-        let view_proj = self.camera.view_proj(aspect).to_cols_array();
-        let bytes: Vec<u8> = view_proj.iter().flat_map(|v| v.to_le_bytes()).collect();
-        self.queue.write_buffer(&self.globals_buffer, 0, &bytes);
+        let fog = Fog::for_radius(self.loader.radius());
+        let view_proj = self
+            .camera
+            .view_proj(aspect, fog.far_plane(self.camera.position.y));
+        let globals = Globals {
+            view_proj,
+            camera_pos: self.camera.position,
+            fog_start: fog.start,
+            fog_color: Vec3::new(SKY.r as f32, SKY.g as f32, SKY.b as f32),
+            fog_end: fog.end,
+        };
+        self.queue
+            .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
+        let frustum = Frustum::from_view_proj(view_proj);
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
@@ -438,11 +467,19 @@ impl Engine {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
-            for mesh in self.column_meshes.values().flatten() {
+            let visible = self
+                .column_meshes
+                .values()
+                .flatten()
+                .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max));
+            let mut drawn = 0;
+            for mesh in visible {
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                drawn += 1;
             }
+            self.drawn_sections = drawn;
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
@@ -451,30 +488,45 @@ impl Engine {
 }
 
 impl Engine {
-    /// Подгрузка колонок вокруг камеры в пределах бюджета на кадр.
+    /// Подгрузка колонок вокруг камеры, пока не выйдет [`STREAM_BUDGET_MS`]. Одна
+    /// операция за кадр делается всегда, даже если бюджет съели раньше: иначе на
+    /// медленной машине мир не загрузился бы никогда.
     fn stream_columns(&mut self) {
-        let budget = Budget {
-            generate: GEN_PER_FRAME,
-            mesh: MESH_PER_FRAME,
-        };
-        let changes = self.loader.update(
-            camera_column(&self.camera),
-            &mut self.world,
-            |key| {
-                self.generate_time
-                    .measure(&self.performance, || self.terrain.generate(key))
-            },
-            budget,
-        );
+        let deadline = self
+            .performance
+            .as_ref()
+            .map(|p| p.now() + STREAM_BUDGET_MS);
         // Буферы освобождаются вместе с `SectionMesh`.
-        for key in changes.unmesh {
+        for key in self
+            .loader
+            .update(camera_column(&self.camera), &mut self.world)
+        {
             self.column_meshes.remove(&key);
         }
-        for key in changes.mesh {
-            let meshes = self.mesh_time.measure(&self.performance, || {
-                upload_column(&self.device, &self.world, key)
+        loop {
+            let progress = self.loader.advance(&mut self.world, |key| {
+                self.generate_time
+                    .measure(&self.performance, || self.terrain.generate(key))
             });
-            self.column_meshes.insert(key, meshes);
+            match progress {
+                Progress::Done => break,
+                Progress::Generated(_) => {}
+                Progress::Mesh(key) => {
+                    let meshes = self.mesh_time.measure(&self.performance, || {
+                        upload_column(&self.device, &self.world, key)
+                    });
+                    self.column_meshes.insert(key, meshes);
+                }
+            }
+            // Без `performance` (в браузере он есть всегда) время не измерить:
+            // остаёмся на минимуме, одна операция за кадр.
+            let in_time = match (&self.performance, deadline) {
+                (Some(p), Some(deadline)) => p.now() < deadline,
+                _ => false,
+            };
+            if !in_time {
+                break;
+            }
         }
     }
 }
@@ -520,6 +572,9 @@ struct SectionMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    /// Коробка секции целиком в мировых координатах — для отсечения по пирамиде.
+    min: Vec3,
+    max: Vec3,
 }
 
 /// Строит меш колонки и загружает её непустые секции на GPU. Загрузчик отдаёт
@@ -531,12 +586,17 @@ fn upload_column(device: &wgpu::Device, world: &World, key: IVec2) -> Vec<Sectio
     let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
     mesh_column(column, origin, |local| world.block(origin + local))
         .iter()
-        .filter_map(|data| upload_section(device, data))
+        .enumerate()
+        .filter_map(|(sy, data)| {
+            let min = (origin + IVec3::Y * sy as i32 * SECTION_SIZE).as_vec3();
+            upload_section(device, data, min)
+        })
         .collect()
 }
 
-/// `None` для пустой секции: буфер нулевого размера не нужен.
-fn upload_section(device: &wgpu::Device, data: &MeshData) -> Option<SectionMesh> {
+/// `min` — нижний угол секции в мире. `None` для пустой секции: буфер нулевого
+/// размера не нужен.
+fn upload_section(device: &wgpu::Device, data: &MeshData, min: Vec3) -> Option<SectionMesh> {
     if data.indices.is_empty() {
         return None;
     }
@@ -554,6 +614,8 @@ fn upload_section(device: &wgpu::Device, data: &MeshData) -> Option<SectionMesh>
         vertex_buffer,
         index_buffer,
         index_count: data.indices.len() as u32,
+        min,
+        max: min + SECTION_SIZE as f32,
     })
 }
 

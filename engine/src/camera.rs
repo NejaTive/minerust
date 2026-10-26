@@ -5,7 +5,6 @@ use glam::{Mat4, Vec3};
 
 const FOV_Y: f32 = 70.0 * std::f32::consts::PI / 180.0;
 const NEAR: f32 = 0.1;
-const FAR: f32 = 1000.0;
 /// Скорость полёта, блоков в секунду.
 const SPEED: f32 = 8.0;
 /// Поворот камеры, радиан на пиксель движения мыши.
@@ -98,10 +97,11 @@ impl Camera {
         self.position += dir.normalize_or_zero() * SPEED * dt;
     }
 
-    /// Матрица view-projection. В glam 0.34 бывший `Mat4::perspective_rh` — это
-    /// `rh::proj::directx`: NDC с глубиной 0..1 и Y вверх, как ожидает wgpu.
-    pub fn view_proj(&self, aspect: f32) -> Mat4 {
-        let proj = directx::perspective(FOV_Y, aspect, NEAR, FAR);
+    /// Матрица view-projection; `far` — дальняя плоскость в блоках, см. `Fog::far_plane`.
+    /// В glam 0.34 бывший `Mat4::perspective_rh` — это `rh::proj::directx`:
+    /// NDC с глубиной 0..1 и Y вверх, как ожидает wgpu.
+    pub fn view_proj(&self, aspect: f32, far: f32) -> Mat4 {
+        let proj = directx::perspective(FOV_Y, aspect, NEAR, far);
         let view = view::look_to_mat4(self.position, self.forward(), Vec3::Y);
         proj * view
     }
