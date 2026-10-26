@@ -3,6 +3,7 @@
 // (`wgpu::SurfaceTarget::Canvas` есть только на wasm32), закрыто cfg ниже.
 pub mod block;
 pub mod column;
+pub mod double_tap;
 pub mod fog;
 pub mod frustum;
 pub mod globals;
@@ -10,6 +11,7 @@ pub mod loader;
 pub mod mesh;
 pub mod mesher;
 pub mod outline;
+pub mod physics;
 pub mod raycast;
 pub mod repeat;
 pub mod section;
