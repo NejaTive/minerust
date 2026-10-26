@@ -48,9 +48,34 @@ impl Block {
     }
 }
 
+/// Обратное к `block as u8`: так блоки читаются из сохранения. Ошибка — сам незнакомый
+/// байт. Номера вариантов — часть формата сохранения: новые блоки добавлять в конец.
+impl TryFrom<u8> for Block {
+    type Error = u8;
+
+    fn try_from(value: u8) -> Result<Self, u8> {
+        Ok(match value {
+            0 => Block::Air,
+            1 => Block::Grass,
+            2 => Block::Dirt,
+            3 => Block::Stone,
+            other => return Err(other),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn byte_round_trip() {
+        for block in [Block::Air, Block::Grass, Block::Dirt, Block::Stone] {
+            assert_eq!(Block::try_from(block as u8), Ok(block));
+        }
+        assert_eq!(Block::try_from(4), Err(4));
+        assert_eq!(Block::try_from(255), Err(255));
+    }
 
     #[test]
     fn grass_has_distinct_top_side_bottom() {
