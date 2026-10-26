@@ -10,13 +10,17 @@ use crate::section::SECTION_SIZE;
 ///
 /// Колонки с правками игрока при выгрузке не пропадают, а ждут в `stashed`, пока
 /// загрузчик не вернёт их через [`World::take_edited`]. Правки целиком — это
-/// изменённые загруженные колонки плюс `stashed`: сохранение (шаг 7) сериализует их.
+/// изменённые загруженные колонки плюс `stashed`. Сохранение пишет не все правки, а
+/// только колонки, изменённые с прошлого раза: их отдаёт [`World::drain_dirty`].
 pub struct World {
     columns: HashMap<IVec2, Column>,
     /// Ключи загруженных колонок, в которых что-то меняли через [`World::set_block`].
     edited: HashSet<IVec2>,
     /// Выгруженные изменённые колонки. Без ограничения: их немного, и терять нельзя.
     stashed: HashMap<IVec2, Column>,
+    /// Колонки, изменённые после прошлого [`World::drain_dirty`], загруженные или
+    /// отложенные. Выгрузка признак не снимает: колонку ещё надо сохранить.
+    dirty: HashSet<IVec2>,
 }
 
 impl World {
@@ -25,6 +29,7 @@ impl World {
             columns: HashMap::new(),
             edited: HashSet::new(),
             stashed: HashMap::new(),
+            dirty: HashSet::new(),
         }
     }
 
@@ -44,7 +49,8 @@ impl World {
     }
 
     /// Ставит блок по мировым координатам. `false` (и ничего не меняет), если y вне
-    /// 0..WORLD_HEIGHT или колонка не загружена. Колонка помечается изменённой.
+    /// 0..WORLD_HEIGHT или колонка не загружена. Колонка помечается изменённой и
+    /// несохранённой.
     pub fn set_block(&mut self, pos: IVec3, block: Block) -> bool {
         if !(0..WORLD_HEIGHT).contains(&pos.y) {
             return false;
@@ -55,6 +61,7 @@ impl World {
         };
         column.set(local, block);
         self.edited.insert(key);
+        self.dirty.insert(key);
         true
     }
 
@@ -88,6 +95,35 @@ impl World {
     /// Изменена ли колонка (загруженная или отложенная).
     pub fn is_edited(&self, key: IVec2) -> bool {
         self.edited.contains(&key) || self.stashed.contains_key(&key)
+    }
+
+    /// Ключи колонок, изменённых после прошлого вызова (загруженных и отложенных), в
+    /// произвольном порядке; сбрасывает признак.
+    pub fn drain_dirty(&mut self) -> Vec<IVec2> {
+        self.dirty.drain().collect()
+    }
+
+    /// Изменённая колонка — загруженная или отложенная.
+    pub fn edited_column(&self, key: IVec2) -> Option<&Column> {
+        if self.edited.contains(&key) {
+            self.columns.get(&key)
+        } else {
+            self.stashed.get(&key)
+        }
+    }
+
+    /// Сохранённая колонка из хранилища: если колонка загружена — заменяет её, иначе
+    /// кладёт в отложенные, и загрузчик возьмёт её вместо генерации. В обоих случаях
+    /// колонка считается изменённой (её снова надо сохранять при выгрузке), но не
+    /// несохранённой: в хранилище она уже такая.
+    pub fn import(&mut self, key: IVec2, column: Column) {
+        if let Some(loaded) = self.columns.get_mut(&key) {
+            *loaded = column;
+            self.edited.insert(key);
+        } else {
+            self.stashed.insert(key, column);
+        }
+        self.dirty.remove(&key);
     }
 
     /// Ключи загруженных колонок, в произвольном порядке.
@@ -248,6 +284,87 @@ mod tests {
         world.remove(IVec2::ONE);
         assert!(world.take_edited(IVec2::ONE).is_none());
         assert!(!world.is_edited(IVec2::ONE));
+    }
+
+    #[test]
+    fn drain_dirty_reports_each_edit_once() {
+        let key = IVec2::new(1, -1);
+        let mut world = World::new();
+        world.insert(key, Column::new());
+        world.insert(IVec2::ZERO, Column::new());
+        assert!(world.drain_dirty().is_empty());
+
+        world.set_block(IVec3::new(16, 3, -16), Block::Dirt);
+        world.set_block(IVec3::new(17, 3, -16), Block::Dirt);
+        assert_eq!(world.drain_dirty(), vec![key]);
+        assert!(world.drain_dirty().is_empty());
+
+        world.set_block(IVec3::new(16, 4, -16), Block::Stone);
+        assert_eq!(world.drain_dirty(), vec![key]);
+        // Загруженная, но не тронутая колонка — не изменённая.
+        assert!(world.edited_column(IVec2::ZERO).is_none());
+    }
+
+    #[test]
+    fn stashed_column_stays_dirty_and_edited() {
+        let key = IVec2::new(-3, 0);
+        let pos = IVec3::new(-48, 10, 0);
+        let mut world = World::new();
+        world.insert(key, Column::new());
+        world.set_block(pos, Block::Stone);
+        world.remove(key);
+
+        assert_eq!(world.drain_dirty(), vec![key]);
+        let column = world.edited_column(key).expect("stashed column is edited");
+        assert_eq!(column.get(IVec3::new(0, 10, 0)), Block::Stone);
+    }
+
+    #[test]
+    fn import_replaces_loaded_column() {
+        let key = IVec2::new(2, 2);
+        let mut world = World::new();
+        world.insert(key, Column::new());
+        let mut saved = Column::new();
+        saved.set(IVec3::new(1, 2, 3), Block::Grass);
+        world.import(key, saved);
+
+        assert_eq!(world.block(IVec3::new(33, 2, 35)), Block::Grass);
+        assert!(world.is_edited(key));
+        assert!(world.edited_column(key).is_some());
+        assert!(world.drain_dirty().is_empty());
+
+        // Импортированная колонка снова отложится при выгрузке.
+        world.remove(key);
+        assert!(world.edited_column(key).is_some());
+    }
+
+    #[test]
+    fn import_into_unloaded_goes_to_loader() {
+        use crate::loader::{Loader, Progress};
+
+        let key = IVec2::new(0, 1);
+        let pos = IVec3::new(5, 60, 20);
+        let mut world = World::new();
+        // Правка до импорта: импорт перекрывает и её признак «не сохранено».
+        world.insert(key, Column::new());
+        world.set_block(pos, Block::Dirt);
+        world.remove(key);
+        let mut saved = Column::new();
+        saved.set(IVec3::new(5, 60, 4), Block::Stone);
+        world.import(key, saved);
+        assert!(world.drain_dirty().is_empty());
+        assert!(world.column(key).is_none());
+        assert!(world.is_edited(key));
+
+        let mut loader = Loader::new(IVec2::ZERO);
+        loader.update(IVec2::ZERO, &mut world);
+        while loader.advance(&mut world, |k| {
+            assert_ne!(k, key, "imported column regenerated");
+            Column::new()
+        }) != Progress::Done
+        {}
+        assert_eq!(world.block(pos), Block::Stone);
+        assert!(world.drain_dirty().is_empty());
     }
 
     fn sorted(mut keys: Vec<IVec3>) -> Vec<IVec3> {

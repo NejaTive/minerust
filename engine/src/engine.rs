@@ -19,6 +19,7 @@ use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player};
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
+use crate::save::{FORMAT_VERSION, decode_column, encode_column};
 use crate::section::SECTION_SIZE;
 use crate::terrain::Terrain;
 use crate::texture::{self, LAYER_COUNT, MIP_LEVELS, TILE_SIZE};
@@ -33,8 +34,6 @@ const SKY: wgpu::Color = wgpu::Color {
     a: 1.0,
 };
 
-/// Сид мира. Один сид — один мир: сохранения (шаг 7) будут хранить его.
-const SEED: i32 = 1337;
 /// Круг колонок, который `create` грузит и мешует синхронно, чтобы первый кадр не был пустым.
 const START_RADIUS: i32 = 2;
 /// Бюджет потоковой загрузки на кадр, мс. Сам кадр без подгрузки занимает на CPU
@@ -86,6 +85,7 @@ pub struct Engine {
     column_meshes: HashMap<IVec2, ColumnMeshes>,
     world: World,
     terrain: Terrain,
+    seed: i32,
     loader: Loader,
     /// Сколько секций прошло отсечение по пирамиде видимости в последнем кадре.
     drawn_sections: u32,
@@ -115,11 +115,15 @@ impl Engine {
     /// `preferred` — `"webgpu"` (без поддержки в браузере тихо откатывается на WebGL2)
     /// или `"webgl2"`. `camera` — `[x, y, z, yaw, pitch, mode]` из [`Engine::camera_state`]
     /// (старые 5 значений без `mode` тоже принимаются, режим тогда — ходьба); без него
-    /// игрок встаёт на землю над точкой (0, 0).
+    /// игрок встаёт на землю над точкой (0, 0). `seed` — сид мира: один сид — один рельеф.
+    ///
+    /// Сохранённые правки импортируются после create через [`Engine::import_column`],
+    /// до первого `render`.
     pub async fn create(
         canvas: HtmlCanvasElement,
         preferred: &str,
         camera: Option<Vec<f32>>,
+        seed: i32,
     ) -> Result<Engine, JsError> {
         console_error_panic_hook::set_once();
 
@@ -128,7 +132,7 @@ impl Engine {
             "webgl2" => wgpu::Backends::GL,
             other => return Err(JsError::new(&format!("unknown graphics API: {other}"))),
         };
-        let terrain = Terrain::new(SEED);
+        let terrain = Terrain::new(seed);
         let (camera, player) = match camera {
             Some(state) => restore_player(&state)
                 .ok_or_else(|| JsError::new("camera state must be 5 or 6 finite numbers"))?,
@@ -354,6 +358,7 @@ impl Engine {
             column_meshes,
             world,
             terrain,
+            seed,
             loader,
             drawn_sections: 0,
             performance,
@@ -374,6 +379,12 @@ impl Engine {
     /// Есть ли в браузере рабочий WebGPU (не только `navigator.gpu`, но и адаптер).
     pub async fn webgpu_supported() -> bool {
         wgpu::util::is_browser_webgpu_supported().await
+    }
+
+    /// Версия формата сохранения (`save::FORMAT_VERSION`): фронт пишет её в метаданные
+    /// мира и не загружает сохранение другой версии.
+    pub fn format_version() -> u8 {
+        FORMAT_VERSION
     }
 
     /// Фактический графический API: `"webgpu"` или `"webgl2"`.
@@ -401,6 +412,51 @@ impl Engine {
             self.camera.pitch,
             mode,
         ]
+    }
+
+    pub fn seed(&self) -> i32 {
+        self.seed
+    }
+
+    /// Плоский список `[x0, z0, x1, z1, …]` колонок, изменённых после прошлого вызова:
+    /// их надо сохранить через [`Engine::export_column`].
+    pub fn drain_dirty(&mut self) -> Vec<i32> {
+        self.world
+            .drain_dirty()
+            .into_iter()
+            .flat_map(|key| key.to_array())
+            .collect()
+    }
+
+    /// Байты изменённой колонки (формат `save::encode_column`) или `None`, если
+    /// колонку не меняли.
+    pub fn export_column(&self, x: i32, z: i32) -> Option<Vec<u8>> {
+        self.world
+            .edited_column(IVec2::new(x, z))
+            .map(encode_column)
+    }
+
+    /// Импорт сохранённой колонки из [`Engine::export_column`]. Меши её и соседей
+    /// перестраиваются сразу, если они уже есть. Ошибка формата — `JsError`, мир не меняется.
+    pub fn import_column(&mut self, x: i32, z: i32, bytes: &[u8]) -> Result<(), JsError> {
+        let column = decode_column(bytes).map_err(|e| JsError::new(&e.to_string()))?;
+        let key = IVec2::new(x, z);
+        self.world.import(key, column);
+        // Соседей целиком, а не только граничные секции: импорт идёт раз при старте,
+        // до первого кадра, и простота тут дороже пары лишних мешей.
+        for key in [
+            key,
+            key + IVec2::X,
+            key - IVec2::X,
+            key + IVec2::Y,
+            key - IVec2::Y,
+        ] {
+            if self.column_meshes.contains_key(&key) {
+                let meshes = upload_column(&self.device, &self.world, key);
+                self.column_meshes.insert(key, meshes);
+            }
+        }
+        Ok(())
     }
 
     /// Режим игрока: `"walking"` или `"flying"`.
