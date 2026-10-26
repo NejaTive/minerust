@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import GameCanvas, { type ApiInfo } from './components/GameCanvas.vue'
+import GameCanvas, { type ApiInfo, type WorldStats } from './components/GameCanvas.vue'
 import Hud from './components/Hud.vue'
 import ControlsPanel from './components/ControlsPanel.vue'
 import { loadControlsHidden, saveControlsHidden } from './settings'
@@ -9,6 +9,7 @@ const NOTICE_MS = 2500
 
 const fps = ref(0)
 const api = ref<ApiInfo>()
+const stats = ref<WorldStats>()
 const notice = ref<string>()
 const controlsHidden = ref(loadControlsHidden())
 
@@ -26,10 +27,11 @@ watch(controlsHidden, saveControlsHidden)
 <template>
   <GameCanvas
     @fps="fps = $event"
+    @stats="stats = $event"
     @api="api = $event"
     @notice="showNotice"
     @toggle-controls="controlsHidden = !controlsHidden"
   />
-  <Hud :fps="fps" :api="api" :notice="notice" />
+  <Hud :fps="fps" :api="api" :stats="stats" :notice="notice" />
   <ControlsPanel :hidden="controlsHidden" :backend="api?.backend" />
 </template>

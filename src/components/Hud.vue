@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { API_LABELS } from '../settings'
-import type { ApiInfo } from './GameCanvas.vue'
+import type { ApiInfo, WorldStats } from './GameCanvas.vue'
 
-defineProps<{ fps: number; api?: ApiInfo; notice?: string }>()
+defineProps<{ fps: number; api?: ApiInfo; stats?: WorldStats; notice?: string }>()
+
+const ms = (us: number) => (us / 1000).toFixed(2)
 </script>
 
 <template>
@@ -10,6 +12,13 @@ defineProps<{ fps: number; api?: ApiInfo; notice?: string }>()
     <div>MineRust · {{ fps }} FPS</div>
     <div v-if="api">
       {{ API_LABELS[api.backend] }}<template v-if="api.fallback"> (WebGPU недоступен)</template>
+    </div>
+    <div v-if="stats">
+      Колонки {{ stats.columns }} · с мешем {{ stats.meshedColumns }} ({{ stats.meshedSections }}
+      секций) · в очереди {{ stats.queued }}
+    </div>
+    <div v-if="stats">
+      Колонка: генерация {{ ms(stats.generateUs) }} мс · меш {{ ms(stats.meshUs) }} мс
     </div>
     <div v-if="notice" class="notice">{{ notice }}</div>
   </div>
