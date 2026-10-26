@@ -1,22 +1,39 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use glam::{IVec2, IVec3, Vec3};
 use wasm_bindgen::prelude::*;
-use web_sys::HtmlCanvasElement;
+use web_sys::{HtmlCanvasElement, Performance};
 use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
+use crate::loader::{Budget, Loader};
 use crate::mesh::{self, Vertex};
-use crate::mesher::mesh_section;
+use crate::mesher::{MeshData, mesh_column};
 use crate::section::SECTION_SIZE;
+use crate::terrain::Terrain;
 use crate::texture::{self, LAYER_COUNT, MIP_LEVELS, TILE_SIZE};
-use crate::world::World;
+use crate::world::{World, column_key};
 
+/// Цвет неба в линейном пространстве: рендер идёт в sRGB-view, и при выводе он
+/// станет прежним sRGB (0.53, 0.81, 0.92).
 const SKY: wgpu::Color = wgpu::Color {
-    r: 0.53,
-    g: 0.81,
-    b: 0.92,
+    r: 0.24,
+    g: 0.62,
+    b: 0.83,
     a: 1.0,
 };
+
+/// Сид мира. Один сид — один мир: сохранения (шаг 7) будут хранить его.
+const SEED: i32 = 1337;
+/// Круг колонок, который `create` грузит и мешует синхронно, чтобы первый кадр не был пустым.
+const START_RADIUS: i32 = 2;
+/// Бюджет потоковой загрузки на кадр, колонок. В release колонка генерируется за ~0.03 мс,
+/// мешируется с загрузкой на GPU за ~0.25 мс: 4 + 4 — около 1 мс на кадр, малая доля даже
+/// от 8 мс при 120 Гц. Круг прорисовки (~200 колонок) заполняется примерно за секунду,
+/// полёт 40 блоков/с требует меньше одной колонки на кадр. Генераций не меньше, чем мешей:
+/// колонке для меша нужны готовые соседи.
+const GEN_PER_FRAME: usize = 4;
+const MESH_PER_FRAME: usize = 4;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Верхняя граница шага кадра, чтобы после сворачивания вкладки камера не улетала.
@@ -34,7 +51,15 @@ pub struct Engine {
     pipeline: wgpu::RenderPipeline,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
-    section_meshes: Vec<SectionMesh>,
+    /// Меши колонок по ключу колонки; в векторе — только непустые секции.
+    column_meshes: HashMap<IVec2, Vec<SectionMesh>>,
+    world: World,
+    terrain: Terrain,
+    loader: Loader,
+    /// `None`, если `window.performance` недоступен: тогда замеры нулевые.
+    performance: Option<Performance>,
+    generate_time: AverageTime,
+    mesh_time: AverageTime,
     depth_view: wgpu::TextureView,
     camera: Camera,
     /// Коды (`KeyboardEvent.code`) зажатых сейчас клавиш.
@@ -50,7 +75,7 @@ impl Engine {
     ///
     /// `preferred` — `"webgpu"` (без поддержки в браузере тихо откатывается на WebGL2)
     /// или `"webgl2"`. `camera` — `[x, y, z, yaw, pitch]` из [`Engine::camera_state`];
-    /// без него камера стартовая.
+    /// без него камера встаёт на спаун над точкой (0, 0).
     pub async fn create(
         canvas: HtmlCanvasElement,
         preferred: &str,
@@ -63,10 +88,14 @@ impl Engine {
             "webgl2" => wgpu::Backends::GL,
             other => return Err(JsError::new(&format!("unknown graphics API: {other}"))),
         };
+        let terrain = Terrain::new(SEED);
         let camera = match camera {
             Some(state) => Camera::from_state(&state)
                 .ok_or_else(|| JsError::new("camera state must be 5 finite numbers"))?,
-            None => Camera::new(),
+            None => {
+                let ground = terrain.surface_height(0, 0) as f32;
+                Camera::spawn(Vec3::new(0.5, ground + 20.0, 0.5))
+            }
         };
 
         let width = canvas.width().max(1);
@@ -127,7 +156,24 @@ impl Engine {
 
         let depth_view = create_depth_view(&device, width, height);
 
-        let section_meshes = upload_world(&device, &World::generate());
+        let performance = web_sys::window().and_then(|w| w.performance());
+        let mut generate_time = AverageTime::default();
+        let mut mesh_time = AverageTime::default();
+        let mut world = World::new();
+        let mut loader = Loader::new(camera_column(&camera));
+        let start = loader.warm_up(
+            &mut world,
+            |key| generate_time.measure(&performance, || terrain.generate(key)),
+            START_RADIUS,
+        );
+        let column_meshes = start
+            .into_iter()
+            .map(|key| {
+                let meshes =
+                    mesh_time.measure(&performance, || upload_column(&device, &world, key));
+                (key, meshes)
+            })
+            .collect();
 
         // 64 байта = mat4x4<f32> view-projection.
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -249,7 +295,13 @@ impl Engine {
             pipeline,
             globals_buffer,
             globals_bind_group,
-            section_meshes,
+            column_meshes,
+            world,
+            terrain,
+            loader,
+            performance,
+            generate_time,
+            mesh_time,
             depth_view,
             camera,
             keys: HashSet::new(),
@@ -275,6 +327,21 @@ impl Engine {
     /// Состояние камеры `[x, y, z, yaw, pitch]` для передачи в новый `Engine`.
     pub fn camera_state(&self) -> Vec<f32> {
         self.camera.state().to_vec()
+    }
+
+    /// Статистика для HUD: `[колонок загружено, колонок с мешами, секций с мешами,
+    /// колонок в очереди на меш, генерация колонки в мкс, меширование колонки в мкс]`.
+    /// Время — среднее с прошлого вызова (или последнее известное, если работы не было).
+    pub fn stats(&mut self) -> Vec<u32> {
+        let sections: usize = self.column_meshes.values().map(Vec::len).sum();
+        vec![
+            self.world.len() as u32,
+            self.column_meshes.len() as u32,
+            sections as u32,
+            self.loader.pending() as u32,
+            self.generate_time.take_micros(),
+            self.mesh_time.take_micros(),
+        ]
     }
 
     /// Вызывается при изменении размеров canvas (в физических пикселях).
@@ -314,6 +381,7 @@ impl Engine {
             .map_or(0.0, |last| (time - last).clamp(0.0, MAX_DT));
         self.last_time = Some(time);
         self.camera.update(&self.keys, dt);
+        self.stream_columns();
 
         let aspect = self.config.width as f32 / self.config.height as f32;
         let view_proj = self.camera.view_proj(aspect).to_cols_array();
@@ -370,7 +438,7 @@ impl Engine {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
-            for mesh in &self.section_meshes {
+            for mesh in self.column_meshes.values().flatten() {
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..mesh.index_count, 0, 0..1);
@@ -382,6 +450,71 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// Подгрузка колонок вокруг камеры в пределах бюджета на кадр.
+    fn stream_columns(&mut self) {
+        let budget = Budget {
+            generate: GEN_PER_FRAME,
+            mesh: MESH_PER_FRAME,
+        };
+        let changes = self.loader.update(
+            camera_column(&self.camera),
+            &mut self.world,
+            |key| {
+                self.generate_time
+                    .measure(&self.performance, || self.terrain.generate(key))
+            },
+            budget,
+        );
+        // Буферы освобождаются вместе с `SectionMesh`.
+        for key in changes.unmesh {
+            self.column_meshes.remove(&key);
+        }
+        for key in changes.mesh {
+            let meshes = self.mesh_time.measure(&self.performance, || {
+                upload_column(&self.device, &self.world, key)
+            });
+            self.column_meshes.insert(key, meshes);
+        }
+    }
+}
+
+/// Ключ колонки, над которой стоит камера.
+fn camera_column(camera: &Camera) -> IVec2 {
+    let p = camera.position.floor().as_ivec3();
+    column_key(p.x, p.z)
+}
+
+/// Среднее время одной операции между вызовами [`AverageTime::take_micros`].
+#[derive(Default)]
+struct AverageTime {
+    total_ms: f64,
+    count: u32,
+    last_micros: u32,
+}
+
+impl AverageTime {
+    fn measure<T>(&mut self, performance: &Option<Performance>, f: impl FnOnce() -> T) -> T {
+        let Some(performance) = performance else {
+            return f();
+        };
+        let start = performance.now();
+        let result = f();
+        self.total_ms += performance.now() - start;
+        self.count += 1;
+        result
+    }
+
+    fn take_micros(&mut self) -> u32 {
+        if self.count > 0 {
+            self.last_micros = (self.total_ms * 1000.0 / f64::from(self.count)) as u32;
+            self.total_ms = 0.0;
+            self.count = 0;
+        }
+        self.last_micros
+    }
+}
+
 /// GPU-буферы меша одной секции. Индексы `u16`: на секцию их всегда хватает.
 struct SectionMesh {
     vertex_buffer: wgpu::Buffer,
@@ -389,33 +522,39 @@ struct SectionMesh {
     index_count: u32,
 }
 
-/// Строит и загружает меши всех непустых секций мира.
-fn upload_world(device: &wgpu::Device, world: &World) -> Vec<SectionMesh> {
-    world
-        .sections()
-        .filter_map(|(key, section)| {
-            let origin = key * SECTION_SIZE;
-            let data = mesh_section(section, origin, |local| world.block(origin + local));
-            if data.indices.is_empty() {
-                return None;
-            }
-            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("section vertices"),
-                contents: &mesh::vertex_bytes(&data.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("section indices"),
-                contents: &mesh::index_bytes(&data.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-            Some(SectionMesh {
-                vertex_buffer,
-                index_buffer,
-                index_count: data.indices.len() as u32,
-            })
-        })
+/// Строит меш колонки и загружает её непустые секции на GPU. Загрузчик отдаёт
+/// колонку на меш только вместе с 4 соседями, так что грани на стыках верные сразу.
+fn upload_column(device: &wgpu::Device, world: &World, key: IVec2) -> Vec<SectionMesh> {
+    let column = world
+        .column(key)
+        .expect("loader meshes only loaded columns");
+    let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+    mesh_column(column, origin, |local| world.block(origin + local))
+        .iter()
+        .filter_map(|data| upload_section(device, data))
         .collect()
+}
+
+/// `None` для пустой секции: буфер нулевого размера не нужен.
+fn upload_section(device: &wgpu::Device, data: &MeshData) -> Option<SectionMesh> {
+    if data.indices.is_empty() {
+        return None;
+    }
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("section vertices"),
+        contents: &mesh::vertex_bytes(&data.vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("section indices"),
+        contents: &mesh::index_bytes(&data.indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    Some(SectionMesh {
+        vertex_buffer,
+        index_buffer,
+        index_count: data.indices.len() as u32,
+    })
 }
 
 /// Массив текстур блоков: по слою на тайл, с готовыми мип-уровнями.

@@ -1,6 +1,7 @@
 use glam::IVec3;
 
 use crate::block::{Block, Facing};
+use crate::column::{COLUMN_SECTIONS, Column};
 use crate::mesh::Vertex;
 use crate::section::{SECTION_SIZE, Section};
 
@@ -128,6 +129,31 @@ pub fn mesh_section(
         }
     }
     mesh
+}
+
+/// Меши всех секций колонки, снизу вверх (`[0]` — y 0..16).
+///
+/// `origin` — мировые координаты минимального угла колонки (y = 0). Соседей по
+/// вертикали внутри колонки берёт из неё самой; `neighbor` вызывается только для
+/// локальных координат колонки за её краем (x или z равен -1 или 16, y равен -1 или 128).
+pub fn mesh_column(
+    column: &Column,
+    origin: IVec3,
+    neighbor: impl Fn(IVec3) -> Block,
+) -> Vec<MeshData> {
+    (0..COLUMN_SECTIONS)
+        .map(|sy| {
+            let offset = IVec3::new(0, sy * SECTION_SIZE, 0);
+            mesh_section(column.section(sy), origin + offset, |local| {
+                let in_column = local + offset;
+                if Column::contains(in_column) {
+                    column.get(in_column)
+                } else {
+                    neighbor(in_column)
+                }
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -295,5 +321,57 @@ mod tests {
         normals.sort_by_key(|n| n.to_array());
         normals.dedup();
         assert_eq!(normals.len(), 6);
+    }
+
+    #[test]
+    fn no_faces_between_columns() {
+        use glam::IVec2;
+
+        use crate::column::WORLD_HEIGHT;
+        use crate::terrain::Terrain;
+        use crate::world::World;
+
+        // Центр с отрицательными координатами, чтобы задеть и div_euclid на стыках.
+        let center = IVec2::new(-1, 2);
+        let terrain = Terrain::new(1337);
+        let mut world = World::new();
+        for z in -1..=1 {
+            for x in -1..=1 {
+                let key = center + IVec2::new(x, z);
+                world.insert(key, terrain.generate(key));
+            }
+        }
+
+        let origin = IVec3::new(center.x * SECTION_SIZE, 0, center.y * SECTION_SIZE);
+        let column = world.column(center).unwrap();
+        let meshes = mesh_column(column, origin, |local| world.block(origin + local));
+        assert_eq!(meshes.len(), COLUMN_SECTIONS as usize);
+        let meshed: usize = meshes.iter().map(face_count).sum();
+
+        // Те же грани, посчитанные по миру целиком, без деления на колонки и секции.
+        let dirs = [
+            IVec3::X,
+            IVec3::NEG_X,
+            IVec3::Y,
+            IVec3::NEG_Y,
+            IVec3::Z,
+            IVec3::NEG_Z,
+        ];
+        let mut expected = 0;
+        for y in 0..WORLD_HEIGHT {
+            for z in 0..SECTION_SIZE {
+                for x in 0..SECTION_SIZE {
+                    let pos = origin + IVec3::new(x, y, z);
+                    if world.block(pos).is_solid() {
+                        expected += dirs
+                            .iter()
+                            .filter(|&&d| !world.block(pos + d).is_solid())
+                            .count();
+                    }
+                }
+            }
+        }
+        assert!(expected > 256, "flat terrain would not test side faces");
+        assert_eq!(meshed, expected);
     }
 }
