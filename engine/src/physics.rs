@@ -49,7 +49,7 @@ pub struct Player {
     /// Скорость, бл/с.
     pub velocity: Vec3,
     pub mode: Mode,
-    /// В последнем шаге тело стояло на блоке снизу.
+    /// В последнем шаге движение вниз упёрлось в блок. В полёте без спуска — `false`.
     pub on_ground: bool,
 }
 
@@ -135,14 +135,10 @@ impl Player {
         for axis in [1, 0, 2] {
             self.move_axis(axis, delta[axis], &is_solid);
         }
-        // Без вертикального движения столкновения снизу не было, но тело может
-        // стоять на полу: это нужно для приземления в полёте без Shift.
-        if delta.y == 0.0 {
-            self.on_ground = self.touches_floor(&is_solid);
-        }
-
-        // Касание земли в полёте — приземление, если игрок не поднимается.
-        if self.mode == Mode::Flying && self.on_ground && vertical <= 0.0 {
+        // Приземление в полёте — только когда спуск упёрся в землю. Не «стоит на земле»:
+        // полёт, включённый двойным Space без прыжка (оба нажатия короче кадра), начинается
+        // на земле, и такое правило выключало бы его на первом же шаге.
+        if self.mode == Mode::Flying && self.on_ground {
             self.mode = Mode::Walking;
         }
     }
@@ -206,19 +202,6 @@ impl Player {
             }
         }
         self.feet[axis] += delta;
-    }
-
-    /// Стоит ли тело вплотную на твёрдом блоке.
-    fn touches_floor(&self, is_solid: &impl Fn(IVec3) -> bool) -> bool {
-        let (min, max) = self.aabb();
-        let floor = min.y.round();
-        if (min.y - floor).abs() > EPS {
-            return false;
-        }
-        let lo = (min + EPS).floor().as_ivec3();
-        let hi = (max - EPS).floor().as_ivec3();
-        let y = floor as i32 - 1;
-        (lo.x..=hi.x).any(|x| (lo.z..=hi.z).any(|z| is_solid(IVec3::new(x, y, z))))
     }
 }
 
@@ -509,20 +492,21 @@ mod tests {
     }
 
     #[test]
-    fn flying_on_ground_lands_without_input_but_rises_with_jump() {
+    fn flight_toggled_on_ground_lasts_until_descend() {
         let solid = world(&[]);
-        let mut player = Player::new(Vec3::new(0.5, GROUND, 0.5), Mode::Flying);
-        let up = Input {
-            jump: true,
+        let mut player = standing();
+        player.toggle_mode();
+        run(&mut player, Input::default(), 0.0, 30, &solid);
+        assert_eq!(player.mode, Mode::Flying);
+        assert_eq!(player.feet.y, GROUND);
+
+        let down = Input {
+            descend: true,
             ..Input::default()
         };
-        player.step(&up, 0.0, &solid);
-        assert_eq!(player.mode, Mode::Flying);
-        assert!(player.feet.y > GROUND);
-
-        let mut player = Player::new(Vec3::new(0.5, GROUND, 0.5), Mode::Flying);
-        player.step(&Input::default(), 0.0, &solid);
+        player.step(&down, 0.0, &solid);
         assert_eq!(player.mode, Mode::Walking);
+        assert_eq!(player.feet.y, GROUND);
     }
 
     #[test]
