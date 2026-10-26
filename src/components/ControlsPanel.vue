@@ -24,6 +24,7 @@ const controls = computed(() => [
     keys: ['G'],
     action: props.backend ? `графический API: ${API_LABELS[props.backend]}` : 'графический API',
   },
+  { keys: ['N'], action: 'новый мир' },
   {
     keys: ['[', ']'],
     action: props.renderDistance ? `дальность: ${props.renderDistance}` : 'дальность',

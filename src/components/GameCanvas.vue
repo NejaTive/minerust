@@ -9,6 +9,7 @@ import {
   saveGraphicsApi,
   saveRenderDistance,
 } from '../settings'
+import { type SavedColumn, type WorldMeta, type WorldStorage, openStorage } from '../storage'
 
 /** Порядок полей — как в `Engine.stats()`; время — в микросекундах. */
 export interface WorldStats {
@@ -56,6 +57,7 @@ const locked = ref(false)
 const selectedBlock = ref<BlockName>('grass')
 
 let preferred = loadGraphicsApi()
+// Блокирует G и N, пока движок пересоздаётся.
 let switching = false
 let disposed = false
 let rafId = 0
@@ -109,18 +111,173 @@ function selectBlock(name: BlockName) {
   emit('block', name)
 }
 
-const HOTKEYS = new Set(['KeyG', 'KeyH', 'BracketLeft', 'BracketRight'])
+/** Сид мира, пока нет сохранения: первый запуск даёт привычный рельеф. */
+const DEFAULT_SEED = 1337
+const AUTOSAVE_MS = 5000
+
+// `null` — IndexedDB недоступен, игра идёт без сохранений.
+let storage: WorldStorage | null = null
+let formatVersion = 0
+// Последние байты каждой изменённой колонки текущего мира. Из этой копии, а не из базы,
+// новый движок получает правки при смене API: так G не теряет их и без IndexedDB.
+const worldColumns = new Map<string, SavedColumn>()
+// Колонки, снятые с движка, но ещё не записанные. При ошибке записи остаются здесь
+// и уходят со следующим сохранением: `drain_dirty` второй раз их не отдаст.
+const unsaved = new Map<string, SavedColumn>()
+// Последнее начатое сохранение; IndexedDB выполняет их по очереди, так что его
+// завершение означает, что записаны и все предыдущие.
+let saving = Promise.resolve()
+let saveFailed = false
+let autosaveId = 0
+
+function columnKey(column: SavedColumn): string {
+  return `${column.x},${column.z}`
+}
+
+/** Снимает с движка несохранённые колонки в `worldColumns` и `unsaved`. */
+function collectColumns(current: Engine) {
+  const keys = current.drain_dirty()
+  for (let i = 0; i < keys.length; i += 2) {
+    const x = keys[i]
+    const z = keys[i + 1]
+    const bytes = current.export_column(x, z)
+    if (!bytes) continue
+    const column = { x, z, bytes }
+    worldColumns.set(columnKey(column), column)
+    unsaved.set(columnKey(column), column)
+  }
+}
+
+/**
+ * Сохраняет несохранённые колонки и игрока (позицию — каждый раз, даже без правок).
+ * Состояние снимается синхронно, запись идёт в фоне; ошибки не пробрасываются.
+ */
+function save(): Promise<void> {
+  const current = engine.value
+  const store = storage
+  if (!current || !store) return saving
+  collectColumns(current)
+  const meta: WorldMeta = {
+    version: formatVersion,
+    seed: current.seed(),
+    player: Array.from(current.camera_state()),
+  }
+  const columns = [...unsaved.values()]
+  saving = store.save(meta, columns).then(
+    () => {
+      saveFailed = false
+      // Сравнение по ссылке: пока шла запись, колонку могли снять с движка заново.
+      for (const column of columns) {
+        if (unsaved.get(columnKey(column)) === column) unsaved.delete(columnKey(column))
+      }
+    },
+    (e: unknown) => {
+      console.warn('world save failed', e)
+      if (!saveFailed) emit('notice', 'Не удалось сохранить мир')
+      saveFailed = true
+    },
+  )
+  return saving
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') void save()
+}
+
+// Уход со страницы: запись «как получится», ждать её браузер не станет.
+function onPageHide() {
+  void save()
+}
+
+function isCompatible(meta: WorldMeta): boolean {
+  return (
+    meta.version === formatVersion &&
+    Number.isInteger(meta.seed) &&
+    Array.isArray(meta.player) &&
+    meta.player.length === 6 &&
+    meta.player.every(Number.isFinite)
+  )
+}
+
+function randomSeed(): number {
+  return crypto.getRandomValues(new Int32Array(1))[0]
+}
+
+/**
+ * Очищает базу. Если не вышло, сохранения выключаются: иначе старые колонки
+ * подмешались бы к новому миру при следующей загрузке.
+ */
+async function clearStorage() {
+  try {
+    await storage?.clear()
+  } catch (e) {
+    console.warn('world clear failed', e)
+    storage = null
+  }
+}
+
+interface WorldStart {
+  seed: number
+  player?: number[]
+}
+
+/** Открывает хранилище и читает сохранённый мир в `worldColumns`. */
+async function loadWorld(): Promise<WorldStart> {
+  storage = await openStorage()
+  if (!storage) {
+    emit('notice', 'Сохранения недоступны — мир не сохранится')
+    return { seed: DEFAULT_SEED }
+  }
+  let saved
+  try {
+    saved = await storage.load()
+  } catch (e) {
+    // Не прочитали — не пишем поверх: в базе мог остаться чужой мир.
+    console.warn('world load failed', e)
+    storage = null
+    emit('notice', 'Сохранение не читается — мир не сохранится')
+    return { seed: DEFAULT_SEED }
+  }
+  if (!saved) return { seed: DEFAULT_SEED }
+  if (!isCompatible(saved.meta)) {
+    await clearStorage()
+    emit('notice', 'Сохранение несовместимо — начат новый мир')
+    return { seed: randomSeed() }
+  }
+  for (const column of saved.columns) worldColumns.set(columnKey(column), column)
+  return saved.meta
+}
+
+/** Правки из `worldColumns` — в только что созданный движок, до первого кадра. */
+function importColumns(created: Engine) {
+  let broken = 0
+  for (const [key, column] of worldColumns) {
+    try {
+      if (!Number.isInteger(column.x) || !Number.isInteger(column.z)) throw new Error('bad key')
+      if (!(column.bytes instanceof Uint8Array)) throw new Error('bad bytes')
+      created.import_column(column.x, column.z, column.bytes)
+    } catch (e) {
+      console.warn(`saved column ${key} skipped`, e)
+      worldColumns.delete(key)
+      broken++
+    }
+  }
+  if (broken > 0) emit('notice', `Повреждённые колонки пропущены: ${broken}`)
+}
+
+const HOTKEYS = new Set(['KeyG', 'KeyH', 'KeyN', 'BracketLeft', 'BracketRight'])
 
 /** Хоткеи интерфейса: работают без pointer lock и в движок не попадают. */
 function onHotkey(e: KeyboardEvent): boolean {
   if (!HOTKEYS.has(e.code)) return false
   // Cmd+H / Ctrl+G и т.п. — системные сочетания, их не перехватываем.
   if (e.ctrlKey || e.metaKey || e.altKey) return false
-  // Дальность при удержании листается автоповтором; G и H — по одному нажатию.
+  // Дальность при удержании листается автоповтором; G, H и N — по одному нажатию.
   if (e.code === 'BracketLeft') changeRenderDistance(-1)
   else if (e.code === 'BracketRight') changeRenderDistance(1)
   else if (!e.repeat) {
     if (e.code === 'KeyG') void switchApi()
+    else if (e.code === 'KeyN') void newWorld()
     else emit('toggle-controls')
   }
   return true
@@ -203,13 +360,16 @@ function startLoop() {
   rafId = requestAnimationFrame(frame)
 }
 
-async function start(camera?: Float32Array) {
+/** `player` — `camera_state()`; без него игрок на спауне. Правки берутся из `worldColumns`. */
+async function start(seed: number, player?: ArrayLike<number>) {
   resize()
-  const created = await Engine.create(canvas.value!, preferred, camera)
+  const camera = player ? Float32Array.from(player) : undefined
+  const created = await Engine.create(canvas.value!, preferred, camera, seed)
   if (disposed) {
     created.free()
     return
   }
+  importColumns(created)
   created.set_render_distance(loadRenderDistance())
   emit('render-distance', created.render_distance())
   created.select_block(selectedBlock.value)
@@ -245,12 +405,43 @@ async function switchApi() {
       return
     }
     const camera = current.camera_state()
+    const seed = current.seed()
+    // Кроме записи в базу, `save` снимает правки в `worldColumns`: оттуда их получит новый движок.
+    await save()
     stop()
     preferred = target
     saveGraphicsApi(target)
     canvasKey.value++
     await nextTick()
-    await start(camera)
+    await start(seed, camera)
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    switching = false
+  }
+}
+
+async function newWorld() {
+  const current = engine.value
+  if (switching || !current) return
+  // Пока открыт confirm, keyup до страницы не дойдёт: клавиши залипли бы.
+  current.release_all_keys()
+  if (!confirm('Начать новый мир? Текущий будет удалён.')) return
+  switching = true
+  try {
+    // Движок останавливаем до очистки, чтобы автосохранение не записало старый мир
+    // поверх пустой базы; начатая запись должна закончиться до `clear`.
+    stop()
+    await saving
+    worldColumns.clear()
+    unsaved.clear()
+    await clearStorage()
+    canvasKey.value++
+    await nextTick()
+    await start(randomSeed())
+    // Сразу, а не через AUTOSAVE_MS: иначе перезагрузка вернула бы мир с сидом по умолчанию.
+    void save()
+    emit('notice', 'Новый мир')
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -266,11 +457,16 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', onBlur)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('pagehide', onPageHide)
 
   switching = true
   try {
     await init()
-    await start()
+    formatVersion = Engine.format_version()
+    const world = await loadWorld()
+    await start(world.seed, world.player)
+    autosaveId = window.setInterval(save, AUTOSAVE_MS)
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -280,6 +476,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true
+  clearInterval(autosaveId)
+  void save()
   stop()
   document.removeEventListener('pointerlockchange', onLockChange)
   document.removeEventListener('mousemove', onMouseMove)
@@ -288,6 +486,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', onBlur)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('pagehide', onPageHide)
 })
 </script>
 
