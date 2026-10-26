@@ -152,24 +152,27 @@ pub fn column_key(x: i32, z: i32) -> IVec2 {
 }
 
 /// Ключи секций `(x колонки, номер секции 0..8, z колонки)`, которые надо перестроить
-/// после изменения блока `pos`: его секция и соседние, если блок на её краю (по x, y, z).
-/// Диагональные соседи не нужны: мешер смотрит только через грани. Секции вне
-/// 0..COLUMN_SECTIONS по вертикали не возвращаются.
+/// после изменения блока `pos`: его секция и все соседние, к которым он примыкает, —
+/// по граням, рёбрам и углам, до 8. Диагональные нужны из-за AO: вершины соседней
+/// секции затеняются блоками по диагонали от них. Секции вне 0..COLUMN_SECTIONS по
+/// вертикали не возвращаются.
 pub fn affected_sections(pos: IVec3) -> Vec<IVec3> {
     let size = IVec3::splat(SECTION_SIZE);
     let own = pos.div_euclid(size);
     let local = pos.rem_euclid(size);
-    let mut keys = vec![own];
-    for axis in 0..3 {
-        let mut offset = IVec3::ZERO;
-        if local[axis] == 0 {
-            offset[axis] = -1;
-        } else if local[axis] == SECTION_SIZE - 1 {
-            offset[axis] = 1;
-        } else {
-            continue;
+    // Сдвиги по оси: своя секция и, если блок на краю, соседняя с этой стороны.
+    let span = |axis: usize| match local[axis] {
+        0 => -1..=0,
+        l if l == SECTION_SIZE - 1 => 0..=1,
+        _ => 0..=0,
+    };
+    let mut keys = Vec::new();
+    for dy in span(1) {
+        for dz in span(2) {
+            for dx in span(0) {
+                keys.push(own + IVec3::new(dx, dy, dz));
+            }
         }
-        keys.push(own + offset);
     }
     keys.retain(|key| (0..COLUMN_SECTIONS).contains(&key.y));
     keys
@@ -395,15 +398,32 @@ mod tests {
     }
 
     #[test]
+    fn affected_sections_on_edge() {
+        // x = 15 и y = 32: ребро между колонками 0/1 и секциями 1/2.
+        assert_eq!(
+            sorted(affected_sections(IVec3::new(15, 32, 5))),
+            sorted(vec![
+                IVec3::new(0, 2, 0),
+                IVec3::new(1, 2, 0),
+                IVec3::new(0, 1, 0),
+                IVec3::new(1, 1, 0),
+            ])
+        );
+    }
+
+    #[test]
     fn affected_sections_in_corner() {
+        let mut expected = Vec::new();
+        for y in 2..=3 {
+            for z in -1..=0 {
+                for x in 0..=1 {
+                    expected.push(IVec3::new(x, y, z));
+                }
+            }
+        }
         assert_eq!(
             sorted(affected_sections(IVec3::new(16, 47, -1))),
-            sorted(vec![
-                IVec3::new(1, 2, -1),
-                IVec3::new(0, 2, -1),
-                IVec3::new(1, 3, -1),
-                IVec3::new(1, 2, 0),
-            ])
+            sorted(expected)
         );
     }
 
@@ -418,8 +438,17 @@ mod tests {
             vec![IVec3::new(0, COLUMN_SECTIONS - 1, 0)]
         );
         assert_eq!(
-            affected_sections(IVec3::new(5, 16, 5)),
-            vec![IVec3::new(0, 1, 0), IVec3::new(0, 0, 0)]
+            sorted(affected_sections(IVec3::new(5, 16, 5))),
+            sorted(vec![IVec3::new(0, 1, 0), IVec3::new(0, 0, 0)])
         );
+        // Углы колонки на дне и на верху мира: 4 секции, все в 0..COLUMN_SECTIONS.
+        for (pos, sy) in [
+            (IVec3::new(0, 0, 0), 0),
+            (IVec3::new(15, WORLD_HEIGHT - 1, 15), COLUMN_SECTIONS - 1),
+        ] {
+            let keys = affected_sections(pos);
+            assert_eq!(keys.len(), 4, "{pos}");
+            assert!(keys.iter().all(|k| k.y == sy), "{pos}: {keys:?}");
+        }
     }
 }
