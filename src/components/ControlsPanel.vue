@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { API_LABELS, type GraphicsApi } from '../settings'
 
-const props = defineProps<{ hidden: boolean; backend?: GraphicsApi }>()
+const props = defineProps<{ hidden: boolean; backend?: GraphicsApi; renderDistance?: number }>()
 
 const controls = computed(() => [
   { keys: ['Мышь'], action: 'осмотр' },
@@ -14,6 +14,10 @@ const controls = computed(() => [
   {
     keys: ['G'],
     action: props.backend ? `графический API: ${API_LABELS[props.backend]}` : 'графический API',
+  },
+  {
+    keys: ['[', ']'],
+    action: props.renderDistance ? `дальность: ${props.renderDistance}` : 'дальность',
   },
   { keys: ['H'], action: 'скрыть панель' },
 ])

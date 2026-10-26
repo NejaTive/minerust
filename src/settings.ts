@@ -7,6 +7,12 @@ export const API_LABELS: Record<GraphicsApi, string> = {
 
 const GRAPHICS_API_KEY = 'minerust.graphicsApi'
 const CONTROLS_HIDDEN_KEY = 'minerust.controlsHidden'
+const RENDER_DISTANCE_KEY = 'minerust.renderDistance'
+
+/** Дальность прорисовки в колонках; пределы — как в `engine/src/loader.rs`. */
+export const MIN_RENDER_DISTANCE = 4
+export const MAX_RENDER_DISTANCE = 16
+const DEFAULT_RENDER_DISTANCE = 8
 
 // localStorage может бросать (приватный режим, запрет site data) — тогда работаем
 // со значениями по умолчанию и ничего не запоминаем.
@@ -40,4 +46,14 @@ export function loadControlsHidden(): boolean {
 
 export function saveControlsHidden(hidden: boolean) {
   write(CONTROLS_HIDDEN_KEY, String(hidden))
+}
+
+export function loadRenderDistance(): number {
+  const value = Number.parseInt(read(RENDER_DISTANCE_KEY) ?? '', 10)
+  if (Number.isNaN(value)) return DEFAULT_RENDER_DISTANCE
+  return Math.min(MAX_RENDER_DISTANCE, Math.max(MIN_RENDER_DISTANCE, value))
+}
+
+export function saveRenderDistance(columns: number) {
+  write(RENDER_DISTANCE_KEY, String(columns))
 }
