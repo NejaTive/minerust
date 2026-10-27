@@ -12,6 +12,23 @@ pub enum Block {
     Sand,
     Log,
     Leaves,
+    Water,
+}
+
+/// Высота поверхности воды над низом блока, если над ней не вода: как в Minecraft,
+/// поверхность чуть ниже берега, и кромка воды не сливается с землёй. По ней же
+/// опущены верхние вершины боковых граней и решается, в воде ли глаза.
+pub const WATER_SURFACE: f32 = 0.875;
+
+/// В каком проходе отрисовки рисуются грани блока.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RenderLayer {
+    /// Без прозрачности.
+    Opaque,
+    /// С дырками: пиксели либо целиком видны, либо отброшены (листва).
+    Cutout,
+    /// Полупрозрачные, смешиваются с тем, что за ними (вода).
+    Translucent,
 }
 
 /// Куда смотрит грань блока; от этого зависит её тайл.
@@ -23,15 +40,29 @@ pub enum Facing {
 }
 
 impl Block {
-    /// Для коллизий, прицела и проверки установки: всё, кроме воздуха.
+    /// Для коллизий, прицела и проверки установки: всё, кроме воздуха и воды.
     pub fn is_solid(self) -> bool {
-        self != Block::Air
+        !matches!(self, Block::Air | Block::Water)
     }
 
     /// Закрывает ли блок грань соседа и участвует ли в затенении углов: всё, кроме
-    /// воздуха и листвы. Сквозь дырки листвы видно и грани за ней, и соседнюю листву.
+    /// воздуха, листвы и воды. Сквозь дырки листвы видно и грани за ней, и соседнюю
+    /// листву; сквозь воду — дно и берег.
     pub fn is_opaque(self) -> bool {
-        !matches!(self, Block::Air | Block::Leaves)
+        !matches!(self, Block::Air | Block::Leaves | Block::Water)
+    }
+
+    pub fn is_water(self) -> bool {
+        self == Block::Water
+    }
+
+    /// Проход отрисовки. У воздуха граней нет, для него ответ не важен.
+    pub fn render_layer(self) -> RenderLayer {
+        match self {
+            Block::Leaves => RenderLayer::Cutout,
+            Block::Water => RenderLayer::Translucent,
+            _ => RenderLayer::Opaque,
+        }
     }
 
     /// Блок, который игрок может выбрать, по имени из интерфейса: `"grass"`, `"dirt"`,
@@ -60,6 +91,7 @@ impl Block {
             (Block::Log, Facing::Top | Facing::Bottom) => Tile::LogTop,
             (Block::Log, Facing::Side) => Tile::LogSide,
             (Block::Leaves, _) => Tile::Leaves,
+            (Block::Water, _) => Tile::Water,
         })
     }
 }
@@ -78,6 +110,7 @@ impl TryFrom<u8> for Block {
             4 => Block::Sand,
             5 => Block::Log,
             6 => Block::Leaves,
+            7 => Block::Water,
             other => return Err(other),
         })
     }
@@ -87,7 +120,7 @@ impl TryFrom<u8> for Block {
 mod tests {
     use super::*;
 
-    const ALL: [Block; 7] = [
+    const ALL: [Block; 8] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -95,6 +128,7 @@ mod tests {
         Block::Sand,
         Block::Log,
         Block::Leaves,
+        Block::Water,
     ];
 
     #[test]
@@ -103,7 +137,7 @@ mod tests {
             assert_eq!(block as usize, i, "save numbers must not move");
             assert_eq!(Block::try_from(block as u8), Ok(block));
         }
-        assert_eq!(Block::try_from(7), Err(7));
+        assert_eq!(Block::try_from(8), Err(8));
         assert_eq!(Block::try_from(255), Err(255));
     }
 
@@ -124,16 +158,32 @@ mod tests {
         assert_eq!(Block::from_name("log"), Some(Block::Log));
         assert_eq!(Block::from_name("leaves"), Some(Block::Leaves));
         assert_eq!(Block::from_name("air"), None);
+        assert_eq!(Block::from_name("water"), None);
         assert_eq!(Block::from_name("Stone"), None);
     }
 
     #[test]
     fn solid_and_opaque() {
         for block in ALL {
-            assert_eq!(block.is_solid(), block != Block::Air, "{block:?}");
-            let opaque = !matches!(block, Block::Air | Block::Leaves);
+            let solid = !matches!(block, Block::Air | Block::Water);
+            assert_eq!(block.is_solid(), solid, "{block:?}");
+            let opaque = !matches!(block, Block::Air | Block::Leaves | Block::Water);
             assert_eq!(block.is_opaque(), opaque, "{block:?}");
+            assert_eq!(block.is_water(), block == Block::Water, "{block:?}");
         }
+    }
+
+    #[test]
+    fn render_layers() {
+        for block in ALL {
+            let layer = match block {
+                Block::Leaves => RenderLayer::Cutout,
+                Block::Water => RenderLayer::Translucent,
+                _ => RenderLayer::Opaque,
+            };
+            assert_eq!(block.render_layer(), layer, "{block:?}");
+        }
+        assert_eq!(Block::Water.tile(Facing::Top), Some(Tile::Water));
     }
 
     #[test]

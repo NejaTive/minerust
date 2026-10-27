@@ -1,9 +1,10 @@
 use glam::{IVec2, IVec3};
 
-use crate::block::{Block, Facing};
+use crate::block::{Block, Facing, WATER_SURFACE};
 use crate::column::{COLUMN_SECTIONS, Column};
 use crate::mesh::Vertex;
 use crate::section::{SECTION_SIZE, Section};
+use crate::texture::Tile;
 use crate::world::World;
 
 pub struct MeshData {
@@ -102,12 +103,12 @@ pub fn vertex_ao(side1: bool, side2: bool, corner: bool) -> u8 {
 /// Сторона куба блоков секции с полем в один блок со всех сторон.
 const PADDED: i32 = SECTION_SIZE + 2;
 
-/// Непрозрачность блоков секции и всех её соседей в пределах −1..=16 по каждой оси.
-/// AO смотрит на 12 блоков на грань, и брать их из массива намного дешевле, чем
-/// через `neighbor` (в движке это поиск колонки в `HashMap`).
-struct Opacity([bool; (PADDED * PADDED * PADDED) as usize]);
+/// Блоки секции и всех её соседей в пределах −1..=16 по каждой оси. AO смотрит на
+/// 12 блоков на грань, и брать их из массива намного дешевле, чем через `neighbor`
+/// (в движке это поиск колонки в `HashMap`).
+struct Neighborhood([Block; (PADDED * PADDED * PADDED) as usize]);
 
-impl Opacity {
+impl Neighborhood {
     /// Индекс локальных координат секции, −1..=16 по каждой оси.
     fn index(local: IVec3) -> usize {
         let p = local + IVec3::ONE;
@@ -119,13 +120,17 @@ impl Opacity {
         (offset.x + PADDED * offset.z + PADDED * PADDED * offset.y) as isize
     }
 
-    fn at(&self, index: usize, offset: isize) -> bool {
+    fn at(&self, index: usize, offset: isize) -> Block {
         self.0[index.wrapping_add_signed(offset)]
+    }
+
+    fn opaque(&self, index: usize, offset: isize) -> bool {
+        self.at(index, offset).is_opaque()
     }
 }
 
-/// Для каждой вершины грани — сдвиги индекса в [`Opacity`] к трём блокам перед ней:
-/// два боковых и угловой.
+/// Для каждой вершины грани — сдвиги индекса в [`Neighborhood`] к трём блокам перед
+/// ней: два боковых и угловой.
 type CornerStrides = [[isize; 3]; 4];
 
 fn corner_strides(face: &Face) -> CornerStrides {
@@ -140,13 +145,26 @@ fn corner_strides(face: &Face) -> CornerStrides {
             step
         };
         let (side1, side2) = (along(a), along(b));
-        [side1, side2, side1 + side2].map(|step| Opacity::stride(face.normal + step))
+        [side1, side2, side1 + side2].map(|step| Neighborhood::stride(face.normal + step))
     })
 }
 
-/// Строит меш видимых граней секции: грань рисуется, если блок не воздух, а сосед в
-/// её направлении не непрозрачный. Так грани за листвой и между листвой остаются в
-/// меше: сквозь дырки их видно. Позиции вершин мировые.
+/// Меши секции по проходам отрисовки.
+pub struct SectionMeshes {
+    /// Непрозрачные блоки и листва (`RenderLayer::Opaque` и `Cutout`): у листвы альфа
+    /// двоичная, ей хватает `discard` без смешения.
+    pub solid: MeshData,
+    /// Вода (`RenderLayer::Translucent`): рисуется после `solid` со смешением.
+    pub water: MeshData,
+}
+
+/// Строит меши видимых граней секции. Позиции вершин мировые.
+///
+/// Грань блока рисуется, если сосед в её направлении не непрозрачный: так грани за
+/// листвой и водой остаются в меше, сквозь них их видно. У воды правило другое — грань
+/// только к воздуху: между водой и чем-либо ещё поверхности не видно, а грань воды к
+/// листве легла бы в одну плоскость с гранью листвы. Если над водой не вода, её верх
+/// опущен до [`WATER_SURFACE`]. AO у воды нет: только яркость стороны.
 ///
 /// `origin` — мировые координаты минимального угла секции в блоках (координаты секции × 16).
 /// `neighbor` возвращает блок по локальным координатам за краем секции: вызывается для
@@ -157,40 +175,45 @@ pub fn mesh_section(
     origin: IVec3,
     neighbor: impl Fn(IVec3) -> Block,
     options: MeshOptions,
-) -> MeshData {
-    let mut mesh = MeshData {
-        vertices: Vec::new(),
-        indices: Vec::new(),
+) -> SectionMeshes {
+    let mut meshes = SectionMeshes {
+        solid: MeshData::new(),
+        water: MeshData::new(),
     };
-    let mut opaque = Opacity([false; (PADDED * PADDED * PADDED) as usize]);
+    let mut blocks = Neighborhood([Block::Air; (PADDED * PADDED * PADDED) as usize]);
     let mut any_block = false;
     for y in 0..SECTION_SIZE {
         for z in 0..SECTION_SIZE {
             for x in 0..SECTION_SIZE {
                 let local = IVec3::new(x, y, z);
                 let block = section.get(local);
-                opaque.0[Opacity::index(local)] = block.is_opaque();
+                blocks.0[Neighborhood::index(local)] = block;
                 any_block |= block != Block::Air;
             }
         }
     }
     if !any_block {
-        return mesh;
+        return meshes;
     }
     for y in -1..=SECTION_SIZE {
         for z in -1..=SECTION_SIZE {
             for x in -1..=SECTION_SIZE {
                 let local = IVec3::new(x, y, z);
                 if !Section::contains(local) {
-                    opaque.0[Opacity::index(local)] = neighbor(local).is_opaque();
+                    blocks.0[Neighborhood::index(local)] = neighbor(local);
                 }
             }
         }
     }
 
-    let faces = FACES
-        .each_ref()
-        .map(|face| (face, Opacity::stride(face.normal), corner_strides(face)));
+    let faces = FACES.each_ref().map(|face| {
+        (
+            face,
+            Neighborhood::stride(face.normal),
+            corner_strides(face),
+        )
+    });
+    let up = Neighborhood::stride(IVec3::Y);
     for y in 0..SECTION_SIZE {
         for z in 0..SECTION_SIZE {
             for x in 0..SECTION_SIZE {
@@ -199,10 +222,23 @@ pub fn mesh_section(
                 if block == Block::Air {
                     continue;
                 }
-                let index = Opacity::index(local);
+                let index = Neighborhood::index(local);
                 let base = (origin + local).as_vec3();
+                if block.is_water() {
+                    let top = if blocks.at(index, up).is_water() {
+                        1.0
+                    } else {
+                        WATER_SURFACE
+                    };
+                    for (face, normal, _) in &faces {
+                        if blocks.at(index, *normal) == Block::Air {
+                            push_water_face(&mut meshes.water, face, base, top);
+                        }
+                    }
+                    continue;
+                }
                 for (face, normal, corners) in &faces {
-                    if opaque.at(index, *normal) {
+                    if blocks.opaque(index, *normal) {
                         continue;
                     }
                     let Some(tile) = block.tile(face.facing) else {
@@ -211,35 +247,77 @@ pub fn mesh_section(
                     let ao = if options.ambient_occlusion {
                         corners.map(|[side1, side2, corner]| {
                             vertex_ao(
-                                opaque.at(index, side1),
-                                opaque.at(index, side2),
-                                opaque.at(index, corner),
+                                blocks.opaque(index, side1),
+                                blocks.opaque(index, side2),
+                                blocks.opaque(index, corner),
                             )
                         })
                     } else {
                         [3; 4]
                     };
-                    // Худший случай — шахматная расстановка: 2048 блоков × 24 = 49 152 вершины.
-                    debug_assert!(
-                        mesh.vertices.len() + 4 <= usize::from(u16::MAX) + 1,
-                        "section mesh overflows u16 indices"
-                    );
-                    let first = mesh.vertices.len() as u16;
-                    mesh.vertices
-                        .extend(face.corners.iter().zip(CORNER_UVS).zip(ao).map(
-                            |((&corner, uv), ao)| Vertex {
+                    let vertices =
+                        face.corners
+                            .iter()
+                            .zip(CORNER_UVS)
+                            .zip(ao)
+                            .map(|((&corner, uv), ao)| Vertex {
                                 position: (base + glam::Vec3::from(corner)).to_array(),
                                 uv,
                                 shade: face.shade * AO_BRIGHTNESS[usize::from(ao)],
                                 layer: tile.layer(),
-                            },
-                        ));
-                    mesh.indices.extend(quad_indices(ao).map(|i| first + i));
+                            });
+                    meshes.solid.push_quad(vertices, quad_indices(ao));
                 }
             }
         }
     }
-    mesh
+    meshes
+}
+
+/// Грань воды; `top` — высота верха блока над `base` (1 или [`WATER_SURFACE`]).
+fn push_water_face(mesh: &mut MeshData, face: &Face, base: glam::Vec3, top: f32) {
+    let vertices = face
+        .corners
+        .iter()
+        .zip(CORNER_UVS)
+        .map(|(&[x, y, z], [u, v])| {
+            let y = if y == 1.0 { top } else { y };
+            // На боковой грани v = 1 − y, как у полной (`CORNER_UVS`): опущенный верх
+            // обрезает тайл, а не сжимает его.
+            let v = if face.facing == Facing::Side {
+                1.0 - y
+            } else {
+                v
+            };
+            Vertex {
+                position: (base + glam::Vec3::new(x, y, z)).to_array(),
+                uv: [u, v],
+                shade: face.shade,
+                layer: Tile::Water.layer(),
+            }
+        });
+    mesh.push_quad(vertices, [0, 1, 2, 0, 2, 3]);
+}
+
+impl MeshData {
+    fn new() -> Self {
+        Self {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
+
+    /// Добавляет квад из четырёх вершин; `order` — индексы двух треугольников в нём.
+    fn push_quad(&mut self, vertices: impl Iterator<Item = Vertex>, order: [u16; 6]) {
+        // Худший случай — шахматная расстановка: 2048 блоков × 24 = 49 152 вершины.
+        debug_assert!(
+            self.vertices.len() + 4 <= usize::from(u16::MAX) + 1,
+            "section mesh overflows u16 indices"
+        );
+        let first = self.vertices.len() as u16;
+        self.vertices.extend(vertices);
+        self.indices.extend(order.map(|i| first + i));
+    }
 }
 
 /// Индексы двух треугольников квада, против часовой стрелки, как и `Face::corners`.
@@ -266,7 +344,7 @@ pub fn mesh_column(
     origin: IVec3,
     neighbor: impl Fn(IVec3) -> Block,
     options: MeshOptions,
-) -> Vec<MeshData> {
+) -> Vec<SectionMeshes> {
     (0..COLUMN_SECTIONS)
         .map(|sy| {
             let offset = IVec3::new(0, sy * SECTION_SIZE, 0);
@@ -290,7 +368,11 @@ pub fn mesh_column(
 /// Меш одной секции по ключу `(x колонки, номер секции 0..8, z колонки)` с соседями
 /// из `world` — для перестройки после правки блока. `None`, если колонка не загружена
 /// или номер секции вне 0..COLUMN_SECTIONS.
-pub fn mesh_world_section(world: &World, key: IVec3, options: MeshOptions) -> Option<MeshData> {
+pub fn mesh_world_section(
+    world: &World,
+    key: IVec3,
+    options: MeshOptions,
+) -> Option<SectionMeshes> {
     if !(0..COLUMN_SECTIONS).contains(&key.y) {
         return None;
     }
@@ -309,7 +391,6 @@ mod tests {
     use glam::Vec3;
 
     use super::*;
-    use crate::texture::Tile;
 
     const AO: MeshOptions = MeshOptions {
         ambient_occlusion: true,
@@ -343,7 +424,7 @@ mod tests {
 
     #[test]
     fn empty_section_has_no_faces() {
-        let mesh = mesh_section(&Section::new(), IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&Section::new(), IVec3::ZERO, air, AO).solid;
         assert_eq!(face_count(&mesh), 0);
         assert!(mesh.vertices.is_empty());
     }
@@ -352,7 +433,7 @@ mod tests {
     fn single_block_has_six_faces() {
         let mut section = Section::new();
         section.set(IVec3::new(5, 5, 5), Block::Dirt);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
         assert_eq!(face_count(&mesh), 6);
         assert_eq!(mesh.vertices.len(), 24);
     }
@@ -362,7 +443,7 @@ mod tests {
         let mut section = Section::new();
         section.set(IVec3::new(1, 2, 3), Block::Dirt);
         let origin = IVec3::new(16, 0, -32);
-        let mesh = mesh_section(&section, origin, air, AO);
+        let mesh = mesh_section(&section, origin, air, AO).solid;
         let min = Vec3::new(17.0, 2.0, -29.0);
         for v in &mesh.vertices {
             let p = Vec3::from(v.position);
@@ -375,13 +456,13 @@ mod tests {
         let mut section = Section::new();
         section.set(IVec3::new(5, 5, 5), Block::Dirt);
         section.set(IVec3::new(6, 5, 5), Block::Dirt);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
         assert_eq!(face_count(&mesh), 10);
     }
 
     #[test]
     fn solid_section_draws_only_outer_shell() {
-        let mesh = mesh_section(&filled(|_| true), IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&filled(|_| true), IVec3::ZERO, air, AO).solid;
         assert_eq!(face_count(&mesh), 6 * 256);
     }
 
@@ -399,7 +480,8 @@ mod tests {
                 Block::Stone
             },
             AO,
-        );
+        )
+        .solid;
         assert_eq!(face_count(&mesh), 0);
     }
 
@@ -410,14 +492,15 @@ mod tests {
             IVec3::ZERO,
             |local| panic!("neighbor called for {local}"),
             AO,
-        );
+        )
+        .solid;
         assert!(mesh.vertices.is_empty());
     }
 
     #[test]
     fn checkerboard_fits_u16() {
         let section = filled(|p| (p.x + p.y + p.z) % 2 == 0);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
         assert_eq!(face_count(&mesh), 2048 * 6);
         assert_eq!(mesh.vertices.len(), 2048 * 24);
         assert!(
@@ -431,7 +514,7 @@ mod tests {
     fn grass_faces_use_their_tiles() {
         let mut section = Section::new();
         section.set(IVec3::ZERO, Block::Grass);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
         for quad in mesh.vertices.chunks(4) {
             let ys: Vec<f32> = quad.iter().map(|v| v.position[1]).collect();
             let expected = if ys.iter().all(|&y| y == 1.0) {
@@ -449,7 +532,7 @@ mod tests {
     fn side_faces_are_upright() {
         let mut section = Section::new();
         section.set(IVec3::ZERO, Block::Grass);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
         let sides = mesh
             .vertices
             .chunks(4)
@@ -468,7 +551,7 @@ mod tests {
     fn faces_wind_counter_clockwise_from_outside() {
         let mut section = Section::new();
         section.set(IVec3::ZERO, Block::Grass);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
         let center = Vec3::splat(0.5);
         let mut normals = Vec::new();
         for quad in mesh.vertices.chunks(4) {
@@ -599,7 +682,7 @@ mod tests {
         let mut section = Section::new();
         section.set(IVec3::new(5, 5, 5), a);
         section.set(IVec3::new(6, 5, 5), b);
-        mesh_section(&section, IVec3::ZERO, air, AO)
+        mesh_section(&section, IVec3::ZERO, air, AO).solid
     }
 
     /// Есть ли в меше грань с нормалью `normal` в плоскости x = `x`.
@@ -637,7 +720,7 @@ mod tests {
         let block = IVec3::new(8, 1, 8);
         let mut section = floor_with(&[]);
         section.set(block, Block::Leaves);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
         let (beside, _) = top_face(&mesh, IVec3::new(7, 0, 8));
         assert_eq!(shades(&beside), [1.0; 4]);
         // А пол под листвой (верхняя грань пола видна сквозь неё) — тоже без затенения.
@@ -648,7 +731,7 @@ mod tests {
     #[test]
     fn open_floor_and_block_tops_are_unshaded() {
         let block = IVec3::new(8, 1, 8);
-        let mesh = mesh_section(&floor_with(&[block]), IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&floor_with(&[block]), IVec3::ZERO, air, AO).solid;
         assert_eq!(shades(&top_face(&mesh, block).0), [1.0; 4]);
         assert_eq!(shades(&top_face(&mesh, IVec3::new(4, 0, 4)).0), [1.0; 4]);
         // Пол у подножия блока со стороны −x: у ребра к блоку один боковой сосед.
@@ -663,7 +746,7 @@ mod tests {
             .flat_map(|y| (0..16).flat_map(move |i| [IVec3::new(0, y, i), IVec3::new(i, y, 0)]))
             .collect();
         let section = floor_with(&walls);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
         let (quad, indices) = top_face(&mesh, IVec3::new(1, 0, 1));
         // Углы верхней грани: (1, 2), (2, 2), (2, 1), (1, 1) по x, z.
         assert_eq!(shades(&quad), [0.7, 1.0, 0.7, 0.5]);
@@ -706,7 +789,7 @@ mod tests {
             (IVec3::new(4, 1, 4), 3),
         ];
         for (block, dark) in cases {
-            let mesh = mesh_section(&floor_with(&[block]), IVec3::ZERO, air, AO);
+            let mesh = mesh_section(&floor_with(&[block]), IVec3::ZERO, air, AO).solid;
             let (quad, indices) = top_face(&mesh, floor);
             let mut expected = [1.0; 4];
             expected[dark] = 0.85;
@@ -722,7 +805,7 @@ mod tests {
     fn flipped_quads_keep_winding() {
         // Рваный рельеф, чтобы встретились обе диагонали.
         let section = filled(|p| p.y < 4 + (p.x * 7 + p.z * 13) % 5);
-        let mesh = mesh_section(&section, IVec3::new(-16, 32, 48), air, AO);
+        let mesh = mesh_section(&section, IVec3::new(-16, 32, 48), air, AO).solid;
         let mut flipped = 0;
         for (q, quad) in mesh.vertices.chunks(4).enumerate() {
             let normal = quad_normal(quad).as_vec3();
@@ -758,6 +841,8 @@ mod tests {
         let with = mesh_column(&column, origin, air, AO);
         let without = mesh_column(&column, origin, air, NO_AO);
         for (with, without) in with.iter().zip(&without) {
+            assert_eq!(with.water.vertices, without.water.vertices);
+            let (with, without) = (&with.solid, &without.solid);
             assert_eq!(with.vertices.len(), without.vertices.len());
             for (q, quad) in without.vertices.chunks(4).enumerate() {
                 let shade = face_shade(quad_normal(quad));
@@ -775,27 +860,36 @@ mod tests {
         }
     }
 
-    /// Видимые грани колонки `key`, посчитанные по миру целиком, без деления на колонки
-    /// и секции: блок не воздух, сосед не непрозрачный.
-    fn world_face_count(world: &World, key: IVec2) -> usize {
+    /// Видимые грани колонки `key` (`solid`, `water`), посчитанные по миру целиком, без
+    /// деления на колонки и секции: у воды — к воздуху, у остальных блоков — к не
+    /// непрозрачному соседу.
+    fn world_face_count(world: &World, key: IVec2) -> (usize, usize) {
         use crate::column::WORLD_HEIGHT;
 
         let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
-        let mut count = 0;
+        let (mut solid, mut water) = (0, 0);
         for y in 0..WORLD_HEIGHT {
             for z in 0..SECTION_SIZE {
                 for x in 0..SECTION_SIZE {
                     let pos = origin + IVec3::new(x, y, z);
-                    if world.block(pos) != Block::Air {
-                        count += FACES
-                            .iter()
-                            .filter(|face| !world.block(pos + face.normal).is_opaque())
-                            .count();
+                    let block = world.block(pos);
+                    let neighbors = FACES.iter().map(|face| world.block(pos + face.normal));
+                    if block.is_water() {
+                        water += neighbors.filter(|&n| n == Block::Air).count();
+                    } else if block != Block::Air {
+                        solid += neighbors.filter(|n| !n.is_opaque()).count();
                     }
                 }
             }
         }
-        count
+        (solid, water)
+    }
+
+    /// Грани всех секций колонки (`solid`, `water`).
+    fn column_face_count(meshes: &[SectionMeshes]) -> (usize, usize) {
+        meshes.iter().fold((0, 0), |(solid, water), m| {
+            (solid + face_count(&m.solid), water + face_count(&m.water))
+        })
     }
 
     #[test]
@@ -817,10 +911,9 @@ mod tests {
         let column = world.column(center).unwrap();
         let meshes = mesh_column(column, origin, |local| world.block(origin + local), AO);
         assert_eq!(meshes.len(), COLUMN_SECTIONS as usize);
-        let meshed: usize = meshes.iter().map(face_count).sum();
         let expected = world_face_count(&world, center);
-        assert!(expected > 256, "flat terrain would not test side faces");
-        assert_eq!(meshed, expected);
+        assert!(expected.0 > 256, "flat terrain would not test side faces");
+        assert_eq!(column_face_count(&meshes), expected);
 
         // AO по миру целиком; отдельно считаем затенённые вершины на рёбрах колонки
         // (вертикальных, где сходятся четыре колонки) и на стыках секций, чтобы тест
@@ -838,11 +931,11 @@ mod tests {
         let block_at = |p| world.block(p);
         let edge: usize = meshes
             .iter()
-            .map(|mesh| assert_ao_matches(mesh, block_at, on_edge))
+            .map(|mesh| assert_ao_matches(&mesh.solid, block_at, on_edge))
             .sum();
         let seam: usize = meshes
             .iter()
-            .map(|mesh| assert_ao_matches(mesh, block_at, on_section_seam))
+            .map(|mesh| assert_ao_matches(&mesh.solid, block_at, on_section_seam))
             .sum();
         assert!(edge > 0 && seam > 0, "edge {edge}, seam {seam}");
     }
@@ -886,18 +979,24 @@ mod tests {
                 "no leaves in {key}"
             );
             let meshes = mesh_column(column, origin, |local| world.block(origin + local), AO);
-            let meshed: usize = meshes.iter().map(face_count).sum();
-            assert_eq!(meshed, world_face_count(&world, key), "{key}");
+            assert_eq!(
+                column_face_count(&meshes),
+                world_face_count(&world, key),
+                "{key}"
+            );
             for mesh in &meshes {
-                assert_ao_matches(mesh, |p| world.block(p), |_| true);
+                assert_ao_matches(&mesh.solid, |p| world.block(p), |_| true);
             }
         }
     }
 
-    /// Меш секции `key` с соседями из `world`, в сравнимом виде.
-    fn world_mesh(world: &World, key: IVec3) -> (Vec<Vertex>, Vec<u16>) {
-        let mesh = mesh_world_section(world, key, AO).unwrap();
-        (mesh.vertices, mesh.indices)
+    /// Меши секции `key` с соседями из `world`, в сравнимом виде.
+    fn world_mesh(world: &World, key: IVec3) -> [(Vec<Vertex>, Vec<u16>); 2] {
+        let SectionMeshes { solid, water } = mesh_world_section(world, key, AO).unwrap();
+        [
+            (solid.vertices, solid.indices),
+            (water.vertices, water.indices),
+        ]
     }
 
     #[test]
@@ -956,6 +1055,155 @@ mod tests {
             }
             assert!(changed > 0, "{pos}: edit changed nothing");
         }
+    }
+
+    /// Секция с блоками `blocks`, остальное — воздух; за краем тоже воздух.
+    fn section_of(blocks: &[(IVec3, Block)]) -> SectionMeshes {
+        let mut section = Section::new();
+        for &(pos, block) in blocks {
+            section.set(pos, block);
+        }
+        mesh_section(&section, IVec3::ZERO, air, AO)
+    }
+
+    #[test]
+    fn water_block_in_air_has_six_lowered_faces() {
+        let mesh = section_of(&[(IVec3::new(5, 5, 5), Block::Water)]);
+        assert_eq!(face_count(&mesh.solid), 0);
+        assert_eq!(face_count(&mesh.water), 6);
+        let top = 5.0 + WATER_SURFACE;
+        for quad in mesh.water.vertices.chunks(4) {
+            assert!(quad.iter().all(|v| v.layer == Tile::Water.layer()));
+            // Без AO: одна яркость стороны на весь квад.
+            let shade = face_shade(quad_normal(quad));
+            assert!(quad.iter().all(|v| v.shade == shade), "{quad:?}");
+            for v in quad {
+                assert!([5.0, top].contains(&v.position[1]), "{v:?}");
+            }
+            if quad_normal(quad).y == 0 {
+                for v in quad {
+                    assert_eq!(v.uv[1], 6.0 - v.position[1], "{v:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjacent_water_shares_hidden_face() {
+        let mesh = section_of(&[
+            (IVec3::new(5, 5, 5), Block::Water),
+            (IVec3::new(6, 5, 5), Block::Water),
+        ]);
+        assert_eq!(face_count(&mesh.water), 10);
+        assert_eq!(face_count(&mesh.solid), 0);
+    }
+
+    #[test]
+    fn water_has_no_face_toward_stone_but_stone_does() {
+        let mesh = section_of(&[
+            (IVec3::new(5, 5, 5), Block::Stone),
+            (IVec3::new(6, 5, 5), Block::Water),
+        ]);
+        assert!(
+            has_face_at_x(&mesh.solid, 6.0, IVec3::X),
+            "stone toward water"
+        );
+        assert!(
+            !has_face_at_x(&mesh.water, 6.0, IVec3::NEG_X),
+            "water toward stone"
+        );
+        assert_eq!(face_count(&mesh.solid), 6);
+        assert_eq!(face_count(&mesh.water), 5);
+    }
+
+    #[test]
+    fn water_has_no_face_toward_leaves() {
+        let mesh = section_of(&[
+            (IVec3::new(5, 5, 5), Block::Leaves),
+            (IVec3::new(6, 5, 5), Block::Water),
+        ]);
+        assert!(
+            has_face_at_x(&mesh.solid, 6.0, IVec3::X),
+            "leaves toward water"
+        );
+        assert_eq!(face_count(&mesh.water), 5);
+    }
+
+    #[test]
+    fn water_under_water_is_full_height_without_top() {
+        let (low, high) = (IVec3::new(5, 5, 5), IVec3::new(5, 6, 5));
+        let mesh = section_of(&[(low, Block::Water), (high, Block::Water)]);
+        assert_eq!(face_count(&mesh.water), 10);
+        let tops: Vec<f32> = mesh
+            .water
+            .vertices
+            .chunks(4)
+            .filter(|quad| quad_normal(quad) == IVec3::Y)
+            .flat_map(|quad| quad.iter().map(|v| v.position[1]))
+            .collect();
+        assert_eq!(
+            tops,
+            [6.0 + WATER_SURFACE; 4],
+            "only the upper block has a top"
+        );
+        // Боковые грани нижнего блока — до самого верха, без щели под верхним.
+        let low_sides =
+            mesh.water.vertices.chunks(4).filter(|quad| {
+                quad_normal(quad).y == 0 && quad.iter().any(|v| v.position[1] == 5.0)
+            });
+        for quad in low_sides {
+            let max = quad.iter().map(|v| v.position[1]).fold(0.0, f32::max);
+            assert_eq!(max, 6.0, "{quad:?}");
+        }
+    }
+
+    #[test]
+    fn water_under_stone_is_lowered_without_top() {
+        let mesh = section_of(&[
+            (IVec3::new(5, 5, 5), Block::Water),
+            (IVec3::new(5, 6, 5), Block::Stone),
+        ]);
+        assert_eq!(face_count(&mesh.water), 5);
+        let max = mesh
+            .water
+            .vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(0.0, f32::max);
+        assert_eq!(max, 5.0 + WATER_SURFACE);
+        // Низ камня над водой виден.
+        assert_eq!(face_count(&mesh.solid), 6);
+    }
+
+    #[test]
+    fn lake_on_column_seams_matches_whole_world() {
+        use crate::terrain::{Terrain, lake_key};
+
+        let terrain = Terrain::new(1337);
+        let center = lake_key(&terrain);
+        let mut world = World::new();
+        for z in -1..=1 {
+            for x in -1..=1 {
+                let key = center + IVec2::new(x, z);
+                world.insert(key, terrain.generate(key));
+            }
+        }
+        let origin = IVec3::new(center.x * SECTION_SIZE, 0, center.y * SECTION_SIZE);
+        let column = world.column(center).unwrap();
+        let meshes = mesh_column(column, origin, |local| world.block(origin + local), AO);
+        let expected = world_face_count(&world, center);
+        assert!(expected.1 > 0, "no water faces in {center}");
+        assert_eq!(column_face_count(&meshes), expected);
+        for mesh in &meshes {
+            assert_ao_matches(&mesh.solid, |p| world.block(p), |_| true);
+        }
+        // Вода на западном краю колонки, и сосед за краем — тоже вода: грани между
+        // ними нет ни в одной из двух колонок.
+        let seam_water = (0..SECTION_SIZE).any(|z| {
+            let p = origin + IVec3::new(0, crate::terrain::WATER_LEVEL, z);
+            world.block(p).is_water() && world.block(p - IVec3::X).is_water()
+        });
+        assert!(seam_water, "lake does not cross the seam");
     }
 
     #[test]

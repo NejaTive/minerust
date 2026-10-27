@@ -14,7 +14,7 @@ use crate::frustum::Frustum;
 use crate::globals::Globals;
 use crate::loader::{Loader, NEIGHBORS, Progress};
 use crate::mesh::{self, Vertex};
-use crate::mesher::{MeshData, MeshOptions, mesh_column, mesh_world_section};
+use crate::mesher::{MeshData, MeshOptions, SectionMeshes, mesh_column, mesh_world_section};
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player};
 use crate::raycast::{Hit, raycast};
@@ -31,6 +31,18 @@ const SKY: wgpu::Color = wgpu::Color {
     r: 0.24,
     g: 0.62,
     b: 0.83,
+    a: 1.0,
+};
+
+/// Туман и фон под водой: муть в пару десятков блоков, тёмно-синяя, в линейном цвете.
+const UNDERWATER_FOG: Fog = Fog {
+    start: 0.0,
+    end: 24.0,
+};
+const UNDERWATER_COLOR: wgpu::Color = wgpu::Color {
+    r: 0.02,
+    g: 0.07,
+    b: 0.2,
     a: 1.0,
 };
 
@@ -68,6 +80,8 @@ pub struct Engine {
     /// Формат view кадра: всегда sRGB, даже если поверхность без него.
     render_format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
+    /// Вода: со смешением, без записи глубины, после рамки.
+    water_pipeline: wgpu::RenderPipeline,
     outline_pipeline: wgpu::RenderPipeline,
     /// Рёбра рамки вокруг `outline_block`.
     outline_buffer: wgpu::Buffer,
@@ -144,11 +158,12 @@ impl Engine {
                 .ok_or_else(|| JsError::new("camera state must be 5 or 6 finite numbers"))?,
             None => {
                 // Ноги — на верхнюю грань самого верхнего блока столбца (0, 0): по одной
-                // `surface_height` игрок мог бы появиться внутри ствола или кроны.
+                // `surface_height` игрок мог бы появиться внутри ствола или кроны, а
+                // по твёрдым блокам — на дне озера.
                 let spawn = terrain.generate(IVec2::ZERO);
                 let ground = (0..WORLD_HEIGHT)
                     .rev()
-                    .find(|&y| spawn.get(IVec3::new(0, y, 0)).is_solid())
+                    .find(|&y| spawn.get(IVec3::new(0, y, 0)) != Block::Air)
                     .unwrap_or(0) as f32;
                 let player = Player::new(Vec3::new(0.5, ground + 1.0, 0.5), Mode::Walking);
                 (Camera::spawn(player.eye()), player)
@@ -319,38 +334,20 @@ impl Engine {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("main"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Some(Vertex::layout())],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(render_format.into())],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = create_block_pipeline(
+            &device,
+            &pipeline_layout,
+            &shader,
+            render_format,
+            BlockPass::Solid,
+        );
+        let water_pipeline = create_block_pipeline(
+            &device,
+            &pipeline_layout,
+            &shader,
+            render_format,
+            BlockPass::Water,
+        );
 
         Ok(Engine {
             surface,
@@ -359,6 +356,7 @@ impl Engine {
             config,
             render_format,
             pipeline,
+            water_pipeline,
             outline_pipeline,
             outline_buffer,
             outline_block: None,
@@ -659,12 +657,25 @@ impl Engine {
         let view_proj = self
             .camera
             .view_proj(aspect, fog.far_plane(self.camera.position.y));
+        let underwater = self
+            .player
+            .eyes_in_water(|pos| self.world.block(pos).is_water());
+        let (fog, background) = if underwater {
+            (UNDERWATER_FOG, UNDERWATER_COLOR)
+        } else {
+            (fog, SKY)
+        };
         let globals = Globals {
             view_proj,
             camera_pos: self.camera.position,
             fog_start: fog.start,
-            fog_color: Vec3::new(SKY.r as f32, SKY.g as f32, SKY.b as f32),
+            fog_color: Vec3::new(
+                background.r as f32,
+                background.g as f32,
+                background.b as f32,
+            ),
             fog_end: fog.end,
+            underwater: f32::from(u8::from(underwater)),
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
@@ -704,7 +715,7 @@ impl Engine {
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(SKY),
+                        load: wgpu::LoadOp::Clear(background),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -720,26 +731,43 @@ impl Engine {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
-            let visible = self
+            let visible: Vec<&SectionMesh> = self
                 .column_meshes
                 .values()
                 .flatten()
                 .flatten()
-                .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max));
-            let mut drawn = 0;
-            for mesh in visible {
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..mesh.index_count, 0, 0..1);
-                drawn += 1;
+                .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max))
+                .collect();
+            for mesh in visible.iter().filter_map(|mesh| mesh.solid.as_ref()) {
+                mesh.draw(&mut pass);
             }
-            self.drawn_sections = drawn;
+            self.drawn_sections = visible.len() as u32;
 
             // После рельефа: глубина `LessEqual` без записи прячет рёбра за блоками.
             if self.target.is_some() {
                 pass.set_pipeline(&self.outline_pipeline);
                 pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
                 pass.draw(0..OUTLINE_VERTICES as u32, 0..1);
+            }
+
+            // Вода — последней и от дальних секций к ближним: глубину она не пишет,
+            // и смешение верно, только если ближняя вода ложится поверх дальней.
+            // Внутри секции грани не сортируются: цвет у воды один, и разница почти
+            // не видна.
+            let eye = self.camera.position;
+            let mut water: Vec<(f32, &GpuMesh)> = visible
+                .iter()
+                .filter_map(|mesh| {
+                    let center = (mesh.min + mesh.max) / 2.0;
+                    Some((center.distance_squared(eye), mesh.water.as_ref()?))
+                })
+                .collect();
+            if !water.is_empty() {
+                water.sort_by(|a, b| b.0.total_cmp(&a.0));
+                pass.set_pipeline(&self.water_pipeline);
+                for (_, mesh) in water {
+                    mesh.draw(&mut pass);
+                }
             }
         }
         self.queue.submit([encoder.finish()]);
@@ -894,9 +922,12 @@ impl Engine {
                 break;
             }
             self.prev_feet = self.player.feet;
-            self.player.step(&input, self.camera.yaw, |pos| {
-                self.world.block(pos).is_solid()
-            });
+            self.player.step(
+                &input,
+                self.camera.yaw,
+                |pos| self.world.block(pos).is_solid(),
+                |pos| self.world.block(pos).is_water(),
+            );
         }
         let feet = self.prev_feet.lerp(self.player.feet, self.clock.alpha());
         self.camera.position = feet + Vec3::Y * EYE_HEIGHT;
@@ -981,11 +1012,48 @@ impl AverageTime {
     }
 }
 
-/// GPU-буферы меша одной секции. Индексы `u16`: на секцию их всегда хватает.
-struct SectionMesh {
+/// GPU-буферы одного меша. Индексы `u16`: на секцию их всегда хватает.
+struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+}
+
+impl GpuMesh {
+    /// `None` для пустого меша: буфер нулевого размера не нужен.
+    fn upload(device: &wgpu::Device, data: &MeshData) -> Option<GpuMesh> {
+        if data.indices.is_empty() {
+            return None;
+        }
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("section vertices"),
+            contents: &mesh::vertex_bytes(&data.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("section indices"),
+            contents: &mesh::index_bytes(&data.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        Some(GpuMesh {
+            vertex_buffer,
+            index_buffer,
+            index_count: data.indices.len() as u32,
+        })
+    }
+
+    /// Пайплайн и bind group уже выставлены.
+    fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.draw_indexed(0..self.index_count, 0, 0..1);
+    }
+}
+
+/// Меши одной секции на GPU по проходам; хотя бы один не `None`.
+struct SectionMesh {
+    solid: Option<GpuMesh>,
+    water: Option<GpuMesh>,
     /// Коробка секции целиком в мировых координатах — для отсечения по пирамиде.
     min: Vec3,
     max: Vec3,
@@ -1014,28 +1082,74 @@ fn upload_column(
     })
 }
 
-/// `min` — нижний угол секции в мире. `None` для пустой секции: буфер нулевого
-/// размера не нужен.
-fn upload_section(device: &wgpu::Device, data: &MeshData, min: Vec3) -> Option<SectionMesh> {
-    if data.indices.is_empty() {
+/// `min` — нижний угол секции в мире. `None` для секции без граней.
+fn upload_section(device: &wgpu::Device, data: &SectionMeshes, min: Vec3) -> Option<SectionMesh> {
+    let solid = GpuMesh::upload(device, &data.solid);
+    let water = GpuMesh::upload(device, &data.water);
+    if solid.is_none() && water.is_none() {
         return None;
     }
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("section vertices"),
-        contents: &mesh::vertex_bytes(&data.vertices),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
-    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("section indices"),
-        contents: &mesh::index_bytes(&data.indices),
-        usage: wgpu::BufferUsages::INDEX,
-    });
     Some(SectionMesh {
-        vertex_buffer,
-        index_buffer,
-        index_count: data.indices.len() as u32,
+        solid,
+        water,
         min,
         max: min + SECTION_SIZE as f32,
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BlockPass {
+    /// Непрозрачные блоки и листва: с записью глубины, листва — через `discard`.
+    Solid,
+    Water,
+}
+
+/// Пайплайн граней блоков. У воды смешение по альфе, глубина проверяется, но не
+/// пишется (вода не заслоняет воду за собой), и обе стороны граней: поверхность видна
+/// и из-под воды.
+fn create_block_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    pass: BlockPass,
+) -> wgpu::RenderPipeline {
+    let water = pass == BlockPass::Water;
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(if water { "water" } else { "main" }),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Some(Vertex::layout())],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(if water { "fs_water" } else { "fs_main" }),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: water.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: (!water).then_some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(!water),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
     })
 }
 

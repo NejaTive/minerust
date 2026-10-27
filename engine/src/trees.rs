@@ -3,7 +3,7 @@ use glam::{IVec2, IVec3};
 use crate::block::Block;
 use crate::column::Column;
 use crate::section::SECTION_SIZE;
-use crate::terrain::{Biome, Terrain};
+use crate::terrain::{Biome, Terrain, WATER_LEVEL};
 
 /// Наибольший радиус кроны по x и z. Колонка ищет стволы и в полосе такой ширины у
 /// соседей: их кроны могут нависать над ней.
@@ -92,7 +92,7 @@ pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
 }
 
 /// Приоритет кандидата на дерево (меньше — главнее) или `None`, если в столбце дерева
-/// быть не может: по хешу или потому что сверху песок.
+/// быть не может: по хешу, потому что сверху песок (пустыня, пляж) или вода.
 fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<u32> {
     let h = hash(terrain.seed(), x, z, SALT_SPOT);
     // 24 старших бита — равномерное число 0..1, точно представимое в f32.
@@ -103,7 +103,11 @@ fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<u32> {
     }
     let w = terrain.biome_weights(x, z);
     let density = w.forest * FOREST_DENSITY + w.plains * PLAINS_DENSITY;
-    (w.dominant() != Biome::Desert && roll < density).then_some(h)
+    if w.dominant() == Biome::Desert || roll >= density {
+        return None;
+    }
+    // Ниже этой высоты поверхность — пляж или дно.
+    (terrain.surface(x, z, w) > WATER_LEVEL + 1).then_some(h)
 }
 
 /// Ставит в колонку `key` её часть деревьев: и своих, и соседских, чьи кроны
@@ -213,12 +217,31 @@ mod tests {
     }
 
     #[test]
+    fn no_trees_in_water_or_on_beaches() {
+        let terrain = Terrain::new(1337);
+        let mut low = 0;
+        for z in -1024..1024 {
+            for x in -1024..1024 {
+                if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
+                    low += 1;
+                    assert_eq!(tree_at(&terrain, x, z), None, "{x}, {z}");
+                }
+            }
+        }
+        assert!(low > 10_000, "only {low} low columns");
+    }
+
+    #[test]
     fn forest_is_denser_than_plains_and_desert_is_empty() {
+        // Площадь — только суша: в воде и на пляжах деревьев нет в любом биоме.
         let terrain = Terrain::new(1337);
         let mut area = [0; 3];
         let mut trees = [0; 3];
         for z in -1024..1024 {
             for x in -1024..1024 {
+                if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
+                    continue;
+                }
                 let biome = terrain.biome_at(x, z) as usize;
                 area[biome] += 1;
                 if tree_at(&terrain, x, z).is_some() {

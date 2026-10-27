@@ -8,8 +8,16 @@ use crate::trees;
 
 /// Слоёв земли под травой.
 const DIRT_DEPTH: i32 = 3;
-/// Средняя высота поверхности: запас по ~60 блоков до дна и до верха мира.
+/// Средняя высота поверхности: запас по ~60 блоков до дна и до верха мира. Это не
+/// уровень воды: он чуть ниже, чтобы вода стояла только в низинах.
 const SEA_LEVEL: f32 = 64.0;
+/// Y верхнего блока воды: всё, что ниже поверхности земли и не выше него, — вода.
+pub const WATER_LEVEL: i32 = 62;
+/// Поверхность в этих пределах вне пустыни — пляж: сверху песок. Нижняя граница —
+/// мелководье у берега, верхняя — полоса в пару блоков над водой.
+const BEACH: std::ops::RangeInclusive<i32> = WATER_LEVEL - 2..=WATER_LEVEL + 1;
+/// Слоёв песка на пляже; ниже них земля до той же глубины, что под травой.
+const BEACH_SAND_DEPTH: i32 = 3;
 /// Размах рельефа по биомам и добавка к нему в холмах, блоков. FBm почти не выходит
 /// за ±0.7, так что поверхность остаётся примерно в 30..100.
 const PLAINS_AMPLITUDE: f32 = 6.0;
@@ -118,7 +126,7 @@ impl Terrain {
         self.surface(x, z, self.biome_weights(x, z))
     }
 
-    fn surface(&self, x: i32, z: i32, w: BiomeWeights) -> i32 {
+    pub(crate) fn surface(&self, x: i32, z: i32, w: BiomeWeights) -> i32 {
         let (x, z) = (x as f32, z as f32);
         let hills = smoothstep(-0.2, 0.4, self.hilliness.get_noise_2d(x, z));
         let amplitude = w.plains * PLAINS_AMPLITUDE
@@ -138,7 +146,9 @@ impl Terrain {
     }
 
     /// Колонка без деревьев. В пустыне сверху 3–4 блока песка (глубже к центру
-    /// пустыни), в остальных биомах трава и 3 слоя земли; ниже камень.
+    /// пустыни), в остальных биомах трава и 3 слоя земли; ниже камень. У кромки воды
+    /// ([`BEACH`]) вместо травы песок, глубже под водой — земля. Над поверхностью ниже
+    /// [`WATER_LEVEL`] — вода до него включительно.
     pub(crate) fn generate_ground(&self, key: IVec2) -> Column {
         let mut column = Column::new();
         let origin = key * SECTION_SIZE;
@@ -147,16 +157,31 @@ impl Terrain {
                 let (wx, wz) = (origin.x + x, origin.y + z);
                 let weights = self.biome_weights(wx, wz);
                 let surface = self.surface(wx, wz, weights);
-                let sand_depth = (3.0 + weights.desert).round() as i32;
                 let desert = weights.dominant() == Biome::Desert;
+                let sand_depth = if desert {
+                    (3.0 + weights.desert).round() as i32
+                } else if BEACH.contains(&surface) {
+                    BEACH_SAND_DEPTH
+                } else {
+                    0
+                };
+                // Трава под водой не растёт.
+                let top = if surface < WATER_LEVEL {
+                    Block::Dirt
+                } else {
+                    Block::Grass
+                };
                 for y in 0..=surface {
                     let block = match (desert, surface - y) {
-                        (true, d) if d < sand_depth => Block::Sand,
-                        (false, 0) => Block::Grass,
+                        (_, d) if d < sand_depth => Block::Sand,
+                        (false, 0) => top,
                         (false, d) if d <= DIRT_DEPTH => Block::Dirt,
                         _ => Block::Stone,
                     };
                     column.set(IVec3::new(x, y, z), block);
+                }
+                for y in surface + 1..=WATER_LEVEL {
+                    column.set(IVec3::new(x, y, z), Block::Water);
                 }
             }
         }
@@ -168,6 +193,17 @@ impl Terrain {
 fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
     let t = ((v - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// Колонка, у которой вода стоит и на западном краю, и за ним: для тестов стыков.
+#[cfg(test)]
+pub(crate) fn lake_key(terrain: &Terrain) -> IVec2 {
+    let deep = |x, z| terrain.surface_height(x, z) < WATER_LEVEL - 2;
+    (0..4096)
+        .flat_map(|z| (-64..64).map(move |i| (i * SECTION_SIZE, z * 3)))
+        .find(|&(x, z)| deep(x, z) && deep(x - 1, z))
+        .map(|(x, z)| IVec2::new(x / SECTION_SIZE, z.div_euclid(SECTION_SIZE)))
+        .expect("no lake on a column border")
 }
 
 #[cfg(test)]
@@ -191,8 +227,9 @@ mod tests {
         for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
             assert_eq!(a.surface_height(x, z), b.surface_height(x, z));
         }
-        let key = IVec2::new(-3, 7);
-        assert!(same_columns(&a.generate(key), &b.generate(key)));
+        for key in [IVec2::new(-3, 7), lake_key(&a)] {
+            assert!(same_columns(&a.generate(key), &b.generate(key)));
+        }
     }
 
     #[test]
@@ -220,22 +257,79 @@ mod tests {
         assert!(min > 20 && max < 110, "{min}..{max}");
     }
 
-    /// Первый столбец биома `biome` при обходе от (0, 0) по диагонали с шагом 8.
+    /// Первый столбец биома `biome` выше пляжей при обходе от (0, 0) по диагонали с шагом 8.
     fn find_biome(terrain: &Terrain, biome: Biome) -> (i32, i32) {
-        (0..4096)
-            .map(|i| (i * 8, i * 3))
-            .find(|&(x, z)| terrain.biome_weights(x, z).dominant() == biome)
-            .unwrap_or_else(|| panic!("no {biome:?}"))
+        find_column(terrain, |x, z, w| {
+            w.dominant() == biome && terrain.surface(x, z, w) > *BEACH.end()
+        })
+        .unwrap_or_else(|| panic!("no {biome:?}"))
     }
 
-    /// Блоки земли столбца (x, z) сверху вниз до камня, без деревьев.
+    /// Первый столбец при обходе по диагонали с шагом 8, для которого `pred` истинен.
+    fn find_column(
+        terrain: &Terrain,
+        pred: impl Fn(i32, i32, BiomeWeights) -> bool,
+    ) -> Option<(i32, i32)> {
+        (0..8192)
+            .map(|i| (i * 8, i * 3))
+            .find(|&(x, z)| pred(x, z, terrain.biome_weights(x, z)))
+    }
+
+    #[test]
+    fn low_ground_is_under_water() {
+        let terrain = Terrain::new(1337);
+        let (x, z) = find_column(&terrain, |x, z, w| {
+            w.dominant() != Biome::Desert && terrain.surface(x, z, w) < *BEACH.start()
+        })
+        .expect("no deep water");
+        // Проверка воды до WATER_LEVEL и воздуха выше — внутри ground_layers.
+        let (top, layers) = ground_layers(&terrain, x, z);
+        assert!(top < WATER_LEVEL);
+        assert_eq!(layers[0], Block::Dirt, "no grass under water");
+        assert!(layers.iter().all(|&b| b != Block::Water));
+    }
+
+    #[test]
+    fn water_fills_column_up_to_level() {
+        let terrain = Terrain::new(1);
+        let (x, z) = find_column(&terrain, |x, z, w| terrain.surface(x, z, w) == 55)
+            .expect("no column with surface 55");
+        let column = terrain.generate(IVec2::new(x.div_euclid(16), z.div_euclid(16)));
+        let at = |y| column.get(IVec3::new(x.rem_euclid(16), y, z.rem_euclid(16)));
+        assert!(at(55).is_solid());
+        assert!((56..=WATER_LEVEL).all(|y| at(y) == Block::Water));
+        assert!((WATER_LEVEL + 1..WORLD_HEIGHT).all(|y| at(y) == Block::Air));
+    }
+
+    #[test]
+    fn beaches_are_sand() {
+        let terrain = Terrain::new(1337);
+        for surface in [WATER_LEVEL - 1, WATER_LEVEL + 1] {
+            let (x, z) = find_column(&terrain, |x, z, w| {
+                w.dominant() != Biome::Desert && terrain.surface(x, z, w) == surface
+            })
+            .unwrap_or_else(|| panic!("no beach at {surface}"));
+            let (_, layers) = ground_layers(&terrain, x, z);
+            let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
+            assert_eq!(sand, BEACH_SAND_DEPTH as usize, "surface {surface}");
+            assert_eq!(layers[sand], Block::Dirt);
+        }
+    }
+
+    /// Блоки земли столбца (x, z) сверху вниз до камня, без деревьев. Над землёй
+    /// проверяет воду до `WATER_LEVEL` и воздух выше.
     fn ground_layers(terrain: &Terrain, x: i32, z: i32) -> (i32, Vec<Block>) {
         let key = IVec2::new(x.div_euclid(16), z.div_euclid(16));
         let column = terrain.generate_ground(key);
         let local = |y| IVec3::new(x.rem_euclid(16), y, z.rem_euclid(16));
         let top = terrain.surface_height(x, z);
         for y in top + 1..WORLD_HEIGHT {
-            assert_eq!(column.get(local(y)), Block::Air);
+            let expected = if y <= WATER_LEVEL {
+                Block::Water
+            } else {
+                Block::Air
+            };
+            assert_eq!(column.get(local(y)), expected, "y {y}");
         }
         (top, (0..=top).rev().map(|y| column.get(local(y))).collect())
     }

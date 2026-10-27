@@ -120,7 +120,7 @@ mod tests {
     use super::*;
     use crate::terrain::Terrain;
 
-    const BLOCKS: [Block; 7] = [
+    const BLOCKS: [Block; 8] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -128,6 +128,7 @@ mod tests {
         Block::Sand,
         Block::Log,
         Block::Leaves,
+        Block::Water,
     ];
 
     fn assert_same(a: &Column, b: &Column) {
@@ -188,7 +189,7 @@ mod tests {
             state ^= state << 13;
             state ^= state >> 17;
             state ^= state << 5;
-            column.set(position(i), BLOCKS[(state % 7) as usize]);
+            column.set(position(i), BLOCKS[(state as usize) % BLOCKS.len()]);
         }
         round_trip(&column);
     }
@@ -227,8 +228,11 @@ mod tests {
             column.set(IVec3::new(i as i32, 70, 3), block);
         }
         round_trip(&column);
-        let tree_column = Terrain::new(1337).generate(IVec2::new(3, -4));
-        round_trip(&tree_column);
+        let terrain = Terrain::new(1337);
+        round_trip(&terrain.generate(IVec2::new(3, -4)));
+        let lake = terrain.generate(crate::terrain::lake_key(&terrain));
+        assert!((0..COLUMN_VOLUME).any(|i| lake.get(position(i)) == Block::Water));
+        round_trip(&lake);
     }
 
     #[test]
