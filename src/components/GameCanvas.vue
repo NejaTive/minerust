@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import init, { Engine } from '@engine'
 import {
-  type BlockName,
+  HOTBAR,
   type GraphicsApi,
   MAX_RENDER_DISTANCE,
   MIN_RENDER_DISTANCE,
@@ -35,7 +35,7 @@ export interface ApiInfo {
   fallback: boolean
 }
 
-const props = defineProps<{ settings: Settings }>()
+const props = defineProps<{ settings: Settings; slot: number }>()
 
 const emit = defineEmits<{
   fps: [value: number]
@@ -43,7 +43,8 @@ const emit = defineEmits<{
   api: [info: ApiInfo]
   notice: [text: string]
   'render-distance': [columns: number]
-  block: [name: BlockName]
+  /** Игрок выбрал слот хотбара (клавиша, колесо): v-model:slot. */
+  'update:slot': [slot: number]
   player: [info: PlayerInfo]
   /** Курсор захвачен (игра идёт) или отпущен (пауза, меню). */
   lock: [locked: boolean]
@@ -61,8 +62,6 @@ const canvasKey = ref(0)
 const engine = shallowRef<Engine>()
 const error = ref<string>()
 const locked = ref(false)
-// Выбор блока живёт здесь, а не в движке: движок пересоздаётся при смене API.
-const selectedBlock = ref<BlockName>('grass')
 
 let preferred = loadGraphicsApi()
 // Блокирует G и N, пока движок пересоздаётся; до конца загрузки true.
@@ -148,19 +147,40 @@ function onMouseUp(e: MouseEvent) {
   engine.value?.mouse_button(e.button, false)
 }
 
-const BLOCK_KEYS: Record<string, BlockName> = {
-  Digit1: 'grass',
-  Digit2: 'dirt',
-  Digit3: 'stone',
-  Digit4: 'sand',
-  Digit5: 'log',
-  Digit6: 'leaves',
+/** Выбранный слот — в движок. Слот живёт в App, а не в движке: движок пересоздаётся при смене API. */
+function applySlot(target: Engine) {
+  // Пустая строка — пустая рука: ПКМ ничего не ставит.
+  target.select_block(HOTBAR[props.slot] ?? '')
 }
 
-function selectBlock(name: BlockName) {
-  selectedBlock.value = name
-  engine.value?.select_block(name)
-  emit('block', name)
+watch(
+  () => props.slot,
+  () => {
+    if (engine.value) applySlot(engine.value)
+  },
+)
+
+/** Порог прокрутки, пикселей, на один слот. Колесо мыши шлёт за щелчок 100–120, тачпад — десятки
+ * мелких событий за жест: накопление не даёт одному жесту пролистать хотбар. */
+const WHEEL_STEP = 100
+const WHEEL_LINE_PX = 40
+const WHEEL_PAGE_PX = 800
+let wheelAccum = 0
+
+function onWheel(e: WheelEvent) {
+  if (!locked.value) return
+  // Колесо при захваченном курсоре не должно масштабировать или листать страницу.
+  e.preventDefault()
+  const unit = e.deltaMode === 1 ? WHEEL_LINE_PX : e.deltaMode === 2 ? WHEEL_PAGE_PX : 1
+  const delta = e.deltaY * unit
+  // Смена направления сбрасывает остаток, иначе первый шаг назад съедался бы им.
+  if (Math.sign(delta) !== Math.sign(wheelAccum)) wheelAccum = 0
+  wheelAccum += delta
+  if (Math.abs(wheelAccum) < WHEEL_STEP) return
+  // Вниз — следующий слот, по кругу; за одно событие — не больше одного слота.
+  const step = Math.sign(wheelAccum)
+  wheelAccum = 0
+  emit('update:slot', (props.slot + step + HOTBAR.length) % HOTBAR.length)
 }
 
 /** Сид мира, пока нет сохранения: первый запуск даёт привычный рельеф. */
@@ -358,10 +378,10 @@ function onKeyDown(e: KeyboardEvent) {
   if (!locked.value) return
   if (GAME_KEYS.has(e.code)) e.preventDefault()
   if (e.repeat) return
-  // Цифры выбирают блок и в движок как клавиши полёта не попадают.
-  const block = BLOCK_KEYS[e.code]
-  if (block) {
-    if (!e.ctrlKey && !e.metaKey && !e.altKey) selectBlock(block)
+  // Цифры выбирают слот и в движок как клавиши не попадают.
+  const digit = /^Digit([1-9])$/.exec(e.code)
+  if (digit) {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) emit('update:slot', Number(digit[1]) - 1)
     return
   }
   engine.value?.set_key(e.code, true)
@@ -424,8 +444,7 @@ async function start(seed: number, player?: ArrayLike<number>) {
   applySettings(created)
   // Меню открыто (курсор не захвачен) — новый движок тоже начинает с паузы.
   created.set_paused(!locked.value)
-  created.select_block(selectedBlock.value)
-  emit('block', selectedBlock.value)
+  applySlot(created)
   engine.value = created
   const backend = created.backend() as GraphicsApi
   emit('api', { backend, fallback: preferred === 'webgpu' && backend === 'webgl2' })
@@ -507,6 +526,7 @@ onMounted(async () => {
   document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('mousedown', onMouseDown)
   document.addEventListener('mouseup', onMouseUp)
+  document.addEventListener('wheel', onWheel, { passive: false })
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', onBlur)
@@ -535,6 +555,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mousedown', onMouseDown)
   document.removeEventListener('mouseup', onMouseUp)
+  document.removeEventListener('wheel', onWheel)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', onBlur)

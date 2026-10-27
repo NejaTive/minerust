@@ -75,7 +75,7 @@ pub fn generate() -> Vec<u8> {
     let mut data = Vec::new();
     for layer in 0..LAYER_COUNT {
         let mut level = match Tile::ALL.get(layer as usize) {
-            Some(&tile) => base_level(tile),
+            Some(&tile) => tile_pixels(tile),
             None => vec![0; (TILE_SIZE * TILE_SIZE * 4) as usize],
         };
         let mut size = TILE_SIZE;
@@ -90,7 +90,8 @@ pub fn generate() -> Vec<u8> {
     data
 }
 
-fn base_level(tile: Tile) -> Vec<u8> {
+/// Пиксели тайла 16×16 RGBA (sRGB, строки сверху вниз) — те же, что базовый уровень на GPU.
+pub fn tile_pixels(tile: Tile) -> Vec<u8> {
     let mut pixels = Vec::with_capacity((TILE_SIZE * TILE_SIZE * 4) as usize);
     for y in 0..TILE_SIZE {
         for x in 0..TILE_SIZE {
@@ -286,6 +287,20 @@ mod tests {
             }
         }
         assert_eq!(generate(), data, "generation must be deterministic");
+    }
+
+    #[test]
+    fn tile_pixels_match_gpu_base_level() {
+        let data = generate();
+        for tile in Tile::ALL {
+            let pixels = tile_pixels(tile);
+            assert_eq!(
+                pixels.len(),
+                (TILE_SIZE * TILE_SIZE * 4) as usize,
+                "{tile:?}"
+            );
+            assert_eq!(pixels, mip(&data, tile, 0), "{tile:?}");
+        }
     }
 
     #[test]

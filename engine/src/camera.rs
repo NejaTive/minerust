@@ -96,10 +96,12 @@ impl Camera {
     }
 
     /// Матрица view-projection; `far` — дальняя плоскость в блоках, см. `Fog::far_plane`.
+    /// `fov_scale` множит угол обзора на кадр (бег), не меняя настройку `fov`.
     /// В glam 0.34 бывший `Mat4::perspective_rh` — это `rh::proj::directx`:
     /// NDC с глубиной 0..1 и Y вверх, как ожидает wgpu.
-    pub fn view_proj(&self, aspect: f32, far: f32) -> Mat4 {
-        let proj = directx::perspective(self.fov.to_radians(), aspect, NEAR, far);
+    pub fn view_proj(&self, aspect: f32, far: f32, fov_scale: f32) -> Mat4 {
+        let fov = (self.fov * fov_scale).to_radians();
+        let proj = directx::perspective(fov, aspect, NEAR, far);
         let view = view::look_to_mat4(self.position, self.forward(), Vec3::Y);
         proj * view
     }
@@ -163,9 +165,9 @@ mod tests {
     fn fov_changes_projection() {
         let mut c = camera();
         c.set_fov(60.0);
-        let narrow = c.view_proj(1.0, 100.0);
+        let narrow = c.view_proj(1.0, 100.0, 1.0);
         c.set_fov(110.0);
-        let wide = c.view_proj(1.0, 100.0);
+        let wide = c.view_proj(1.0, 100.0, 1.0);
         // Больше угол — меньше масштаб по X/Y.
         assert!(wide.x_axis.x < narrow.x_axis.x);
     }

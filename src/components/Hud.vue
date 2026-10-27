@@ -6,7 +6,8 @@ defineProps<{
   fps: number
   api?: ApiInfo
   stats?: WorldStats
-  block?: BlockName
+  /** Блок в выбранном слоте; `null` — слот пуст. */
+  block: BlockName | null
   player?: PlayerInfo
   notice?: string
   showDebug: boolean
@@ -35,7 +36,7 @@ const ms = (us: number) => (us / 1000).toFixed(2)
       <template v-if="player.mode === 'flying'">Режим: полёт</template>
       <template v-else>Режим: ходьба<template v-if="player.onGround"> · на земле</template></template>
     </div>
-    <div v-if="block">Блок: {{ BLOCK_LABELS[block] }}</div>
+    <div>Блок: {{ block ? BLOCK_LABELS[block] : 'пусто' }}</div>
     <div v-if="notice" class="notice">{{ notice }}</div>
   </div>
 </template>

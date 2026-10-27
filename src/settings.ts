@@ -17,6 +17,22 @@ export const BLOCK_LABELS: Record<BlockName, string> = {
   leaves: 'листва',
 }
 
+/**
+ * Содержимое хотбара по слотам; `null` — пустой слот. Будущий инвентарь заменит константу
+ * на состояние, остальной код читает только этот массив.
+ */
+export const HOTBAR: (BlockName | null)[] = [
+  'grass',
+  'dirt',
+  'stone',
+  'sand',
+  'log',
+  'leaves',
+  null,
+  null,
+  null,
+]
+
 const GRAPHICS_API_KEY = 'minerust.graphicsApi'
 // Ключ дальности остался прежним, чтобы обновление не сбросило её у игрока.
 const RENDER_DISTANCE_KEY = 'minerust.renderDistance'
@@ -24,6 +40,7 @@ const AMBIENT_OCCLUSION_KEY = 'minerust.ambientOcclusion'
 const MOUSE_SENSITIVITY_KEY = 'minerust.mouseSensitivity'
 const FOV_KEY = 'minerust.fov'
 const SHOW_DEBUG_KEY = 'minerust.showDebug'
+const HOTBAR_SLOT_KEY = 'minerust.hotbarSlot'
 // Ключ убранной панели управления: чистим, чтобы не копился мусор.
 const OBSOLETE_KEYS = ['minerust.controlsHidden']
 
@@ -125,4 +142,15 @@ export function saveSettings(s: Settings) {
   write(MOUSE_SENSITIVITY_KEY, String(s.mouseSensitivity))
   write(FOV_KEY, String(s.fov))
   write(SHOW_DEBUG_KEY, String(s.showDebug))
+}
+
+/** Выбранный слот хотбара; вне 0..HOTBAR.length−1 или не число — первый. */
+export function loadHotbarSlot(): number {
+  const raw = read(HOTBAR_SLOT_KEY)
+  const value = raw === null ? Number.NaN : Number(raw)
+  return Number.isInteger(value) && value >= 0 && value < HOTBAR.length ? value : 0
+}
+
+export function saveHotbarSlot(slot: number) {
+  write(HOTBAR_SLOT_KEY, String(slot))
 }

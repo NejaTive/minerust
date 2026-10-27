@@ -1,4 +1,4 @@
-use crate::texture::Tile;
+use crate::texture::{Tile, tile_pixels};
 
 /// Тип блока. `repr(u8)`, чтобы секция занимала байт на блок.
 #[repr(u8)]
@@ -77,6 +77,11 @@ impl Block {
             "leaves" => Some(Block::Leaves),
             _ => None,
         }
+    }
+
+    /// Иконка для хотбара: пиксели боковой грани (16×16 RGBA, sRGB); `None` — у блока нет граней.
+    pub fn icon_pixels(self) -> Option<Vec<u8>> {
+        self.tile(Facing::Side).map(tile_pixels)
     }
 
     /// Тайл грани; `None` — у блока нет граней (воздух).
@@ -160,6 +165,19 @@ mod tests {
         assert_eq!(Block::from_name("air"), None);
         assert_eq!(Block::from_name("water"), None);
         assert_eq!(Block::from_name("Stone"), None);
+    }
+
+    #[test]
+    fn icon_is_side_face() {
+        let pixels = |tile| Some(tile_pixels(tile));
+        assert_eq!(Block::Grass.icon_pixels(), pixels(Tile::GrassSide));
+        assert_eq!(Block::Log.icon_pixels(), pixels(Tile::LogSide));
+        assert_eq!(Block::Stone.icon_pixels(), pixels(Tile::Stone));
+        assert_eq!(Block::Air.icon_pixels(), None);
+        // Зелёная кайма сверху и земля ниже: иконка травы не сплошная.
+        let grass = Block::Grass.icon_pixels().unwrap();
+        let (top, bottom) = (&grass[..3], &grass[grass.len() - 4..][..3]);
+        assert_ne!(top, bottom);
     }
 
     #[test]
