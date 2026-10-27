@@ -7,7 +7,7 @@ use wgpu::util::DeviceExt;
 
 use crate::block::Block;
 use crate::camera::Camera;
-use crate::column::COLUMN_SECTIONS;
+use crate::column::{COLUMN_SECTIONS, WORLD_HEIGHT};
 use crate::double_tap::DoubleTap;
 use crate::fog::Fog;
 use crate::frustum::Frustum;
@@ -143,8 +143,13 @@ impl Engine {
             Some(state) => restore_player(&state)
                 .ok_or_else(|| JsError::new("camera state must be 5 or 6 finite numbers"))?,
             None => {
-                // `surface_height` — верхний твёрдый блок, ноги встают на его верхнюю грань.
-                let ground = terrain.surface_height(0, 0) as f32;
+                // Ноги — на верхнюю грань самого верхнего блока столбца (0, 0): по одной
+                // `surface_height` игрок мог бы появиться внутри ствола или кроны.
+                let spawn = terrain.generate(IVec2::ZERO);
+                let ground = (0..WORLD_HEIGHT)
+                    .rev()
+                    .find(|&y| spawn.get(IVec3::new(0, y, 0)).is_solid())
+                    .unwrap_or(0) as f32;
                 let player = Player::new(Vec3::new(0.5, ground + 1.0, 0.5), Mode::Walking);
                 (Camera::spawn(player.eye()), player)
             }
@@ -613,7 +618,7 @@ impl Engine {
         }
     }
 
-    /// Блок для установки: `"grass"`, `"dirt"` или `"stone"`; иначе ошибка.
+    /// Блок для установки по имени из [`Block::from_name`]; незнакомое имя — ошибка.
     pub fn select_block(&mut self, name: &str) -> Result<(), JsError> {
         self.selected = Block::from_name(name)
             .ok_or_else(|| JsError::new(&format!("unknown block: {name}")))?;

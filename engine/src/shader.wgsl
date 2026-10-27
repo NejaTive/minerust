@@ -45,7 +45,13 @@ fn vs_main(in: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let color = textureSample(block_textures, block_sampler, in.uv, in.layer).rgb * in.shade;
+    let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);
+    // Дырки листвы. Альфа в текстуре двоичная на каждом мип-уровне (texture.rs),
+    // поэтому порог не зависит от расстояния, а смешение пайплайну не нужно.
+    if texel.a < 0.5 {
+        discard;
+    }
+    let color = texel.rgb * in.shade;
     let distance = length(in.world_pos.xz - globals.camera_pos.xz);
     let fog = smoothstep(globals.fog_start, globals.fog_end, distance);
     return vec4<f32>(mix(color, globals.fog_color, fog), 1.0);
