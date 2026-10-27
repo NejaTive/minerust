@@ -16,7 +16,7 @@ use crate::loader::{Loader, NEIGHBORS, Progress};
 use crate::mesh::{self, Vertex};
 use crate::mesher::{MeshData, MeshOptions, SectionMeshes, mesh_column, mesh_world_section};
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
-use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player};
+use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, next_fov_scale};
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
 use crate::save::{FORMAT_VERSION, decode_column, encode_column};
@@ -60,7 +60,7 @@ const STREAM_BUDGET_MS: f64 = 3.0;
 const REACH: f32 = 6.0;
 /// Период повтора ломания и установки при удержании кнопки, с.
 const REPEAT_S: f32 = 0.25;
-/// Блок в руке до первого выбора клавишами 1–3.
+/// Блок в руке до первого выбора слота.
 const DEFAULT_BLOCK: Block = Block::Grass;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -91,8 +91,8 @@ pub struct Engine {
     target: Option<IVec3>,
     breaking: Repeat,
     placing: Repeat,
-    /// Блок, который ставит правая кнопка.
-    selected: Block,
+    /// Блок, который ставит правая кнопка; `None` — пустая рука.
+    selected: Option<Block>,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     /// Меши колонок по ключу колонки, по секции снизу вверх; `None` — пустая секция.
@@ -119,6 +119,9 @@ pub struct Engine {
     prev_feet: Vec3,
     clock: Clock,
     space_tap: DoubleTap,
+    sprint_tap: DoubleTap,
+    /// Множитель угла обзора от бега, 1..=`SPRINT_FOV_SCALE`; настройку в `camera` не меняет.
+    fov_scale: f32,
     /// Коды (`KeyboardEvent.code`) зажатых сейчас клавиш.
     keys: HashSet<String>,
     last_time: Option<f32>,
@@ -363,7 +366,7 @@ impl Engine {
             target: None,
             breaking: Repeat::new(REPEAT_S),
             placing: Repeat::new(REPEAT_S),
-            selected: DEFAULT_BLOCK,
+            selected: Some(DEFAULT_BLOCK),
             globals_buffer,
             globals_bind_group,
             column_meshes,
@@ -383,6 +386,8 @@ impl Engine {
             player,
             clock: Clock::default(),
             space_tap: DoubleTap::new(DOUBLE_TAP_S),
+            sprint_tap: DoubleTap::new(DOUBLE_TAP_S),
+            fov_scale: 1.0,
             keys: HashSet::new(),
             last_time: None,
             paused: false,
@@ -585,7 +590,7 @@ impl Engine {
     }
 
     /// Нажатие/отпускание клавиши; `code` — `KeyboardEvent.code` ("KeyW", "Space"…).
-    /// Двойной Space переключает ходьбу и полёт.
+    /// Двойной Space переключает ходьбу и полёт, двойной W включает бег.
     pub fn set_key(&mut self, code: &str, pressed: bool) {
         if pressed {
             if self.paused {
@@ -596,6 +601,9 @@ impl Engine {
             // Время прошлого кадра, а не события: точность в кадр для окна 0.3 с хватает.
             if fresh && code == "Space" && self.space_tap.press(self.last_time.unwrap_or(0.0)) {
                 self.player.toggle_mode();
+            }
+            if fresh && code == "KeyW" && self.sprint_tap.press(self.last_time.unwrap_or(0.0)) {
+                self.player.start_sprint();
             }
         } else {
             self.keys.remove(code);
@@ -616,16 +624,30 @@ impl Engine {
         }
     }
 
-    /// Блок для установки по имени из [`Block::from_name`]; незнакомое имя — ошибка.
+    /// Блок для установки по имени из [`Block::from_name`]; пустая строка — пустая рука,
+    /// правая кнопка ничего не ставит. Незнакомое имя — ошибка.
     pub fn select_block(&mut self, name: &str) -> Result<(), JsError> {
-        self.selected = Block::from_name(name)
-            .ok_or_else(|| JsError::new(&format!("unknown block: {name}")))?;
+        self.selected = if name.is_empty() {
+            None
+        } else {
+            Some(
+                Block::from_name(name)
+                    .ok_or_else(|| JsError::new(&format!("unknown block: {name}")))?,
+            )
+        };
         Ok(())
+    }
+
+    /// Идёт ли игрок бегом (двойной W).
+    pub fn sprinting(&self) -> bool {
+        self.player.sprinting
     }
 
     /// Отпускает все клавиши и кнопки мыши (потеря pointer lock, blur окна).
     pub fn release_all_keys(&mut self) {
         self.keys.clear();
+        // Без зажатой W бег всё равно кончился бы на первом шаге, но флаг видит HUD и угол обзора.
+        self.player.sprinting = false;
         self.breaking.reset();
         self.placing.reset();
     }
@@ -652,11 +674,14 @@ impl Engine {
             self.outline_block = self.target;
         }
 
+        self.fov_scale = next_fov_scale(self.fov_scale, self.player.sprinting, dt);
         let aspect = self.config.width as f32 / self.config.height as f32;
         let fog = Fog::for_radius(self.loader.radius());
-        let view_proj = self
-            .camera
-            .view_proj(aspect, fog.far_plane(self.camera.position.y));
+        let view_proj = self.camera.view_proj(
+            aspect,
+            fog.far_plane(self.camera.position.y),
+            self.fov_scale,
+        );
         let underwater = self
             .player
             .eyes_in_water(|pos| self.world.block(pos).is_water());
@@ -877,12 +902,13 @@ impl Engine {
         }
         if self.placing.fire(time)
             && let Some(hit) = target
+            && let Some(block) = self.selected
         {
             let pos = hit.block + hit.normal;
             // `set_block` сам отказывает вне высоты мира и в незагруженной колонке.
             if !self.world.block(pos).is_solid()
                 && !self.player.overlaps_block(pos)
-                && self.world.set_block(pos, self.selected)
+                && self.world.set_block(pos, block)
             {
                 dirty.extend(affected_sections(pos));
                 target = self.pick();
@@ -956,6 +982,13 @@ impl Engine {
         let (lo, hi) = (column_key(lo.x, lo.z), column_key(hi.x, hi.z));
         (lo.x..=hi.x).all(|x| (lo.y..=hi.y).all(|z| self.world.column(IVec2::new(x, z)).is_some()))
     }
+}
+
+/// Иконка блока для хотбара: тайл его боковой грани, 16×16 RGBA sRGB, строки сверху вниз.
+/// `None` для незнакомого имени (см. [`Block::from_name`]).
+#[wasm_bindgen]
+pub fn block_icon(name: &str) -> Option<Vec<u8>> {
+    Block::from_name(name)?.icon_pixels()
 }
 
 /// Камера и игрок из [`Engine::camera_state`]: `[x, y, z, yaw, pitch]` и необязательный

@@ -20,6 +20,14 @@ pub const JUMP_SPEED: f32 = 9.0;
 pub const WALK_SPEED: f32 = 4.3;
 /// Скорость полёта, бл/с: как у прежней свободной камеры.
 pub const FLY_SPEED: f32 = 8.0;
+/// Бег: множитель скорости ходьбы. Как в Minecraft (×1.3).
+pub const SPRINT_FACTOR: f32 = 1.3;
+/// Бег в полёте: множитель скорости полёта.
+pub const FLY_SPRINT_FACTOR: f32 = 2.0;
+/// Во сколько раз бег раздвигает угол обзора: на 10% от настройки, чтобы скорость ощущалась.
+pub const SPRINT_FOV_SCALE: f32 = 1.1;
+/// За сколько секунд угол обзора доходит до значения бега и возвращается обратно.
+pub const SPRINT_FOV_TIME: f32 = 0.15;
 /// Управление в воздухе, бл/с²: горизонтальная скорость тянется к желаемой медленно,
 /// поэтому прыжок с разбега сохраняет инерцию, а с места до полной скорости не разогнаться.
 pub const AIR_ACCEL: f32 = 10.0;
@@ -79,6 +87,8 @@ pub struct Player {
     pub mode: Mode,
     /// В последнем шаге движение вниз упёрлось в блок. В полёте без спуска — `false`.
     pub on_ground: bool,
+    /// Бег включён. Выключает его сама физика: W отпущена, упор в стену, вход в воду.
+    pub sprinting: bool,
 }
 
 impl Player {
@@ -88,7 +98,13 @@ impl Player {
             velocity: Vec3::ZERO,
             mode,
             on_ground: false,
+            sprinting: false,
         }
+    }
+
+    /// Включает бег; он действует, пока [`Player::step`] не встретит условие выхода.
+    pub fn start_sprint(&mut self) {
+        self.sprinting = true;
     }
 
     /// Тело в мировых координатах: (min, max).
@@ -173,6 +189,10 @@ impl Player {
             Mode::Walking => self.water_depth(&is_water),
             Mode::Flying => 0.0,
         };
+        // В полёте вода не мешает, поэтому и бег в ней не прерывается (depth там 0).
+        if input.forward <= 0.0 || depth > 0.0 {
+            self.sprinting = false;
+        }
         match self.mode {
             Mode::Walking if depth > 0.0 => {
                 let target = Vec2::new(wish.x, wish.z) * SWIM_SPEED;
@@ -190,7 +210,12 @@ impl Player {
                 self.velocity.y = vy;
             }
             Mode::Walking => {
-                let target = Vec2::new(wish.x, wish.z) * WALK_SPEED;
+                let speed = if self.sprinting {
+                    WALK_SPEED * SPRINT_FACTOR
+                } else {
+                    WALK_SPEED
+                };
+                let target = Vec2::new(wish.x, wish.z) * speed;
                 // На земле скорость меняется сразу (без скольжения), в воздухе — медленно.
                 let horizontal = if self.on_ground {
                     target
@@ -206,7 +231,12 @@ impl Player {
                 self.velocity.y = (self.velocity.y - GRAVITY * TICK).max(-TERMINAL_SPEED);
             }
             Mode::Flying => {
-                self.velocity = (wish + Vec3::Y * vertical).clamp_length_max(1.0) * FLY_SPEED;
+                let speed = if self.sprinting {
+                    FLY_SPEED * FLY_SPRINT_FACTOR
+                } else {
+                    FLY_SPEED
+                };
+                self.velocity = (wish + Vec3::Y * vertical).clamp_length_max(1.0) * speed;
             }
         }
 
@@ -218,6 +248,9 @@ impl Player {
         for axis in [1, 0, 2] {
             let blocked = self.move_axis(axis, delta[axis], &is_solid);
             against_wall |= blocked && axis != 1;
+        }
+        if against_wall {
+            self.sprinting = false;
         }
         if depth > 0.0 && depth < WATER_EXIT_DEPTH && input.jump && against_wall {
             self.velocity.y = self.velocity.y.max(WATER_EXIT_SPEED);
@@ -300,6 +333,18 @@ fn water_height(pos: IVec3, is_water: &impl Fn(IVec3) -> bool) -> f32 {
         1.0
     } else {
         WATER_SURFACE
+    }
+}
+
+/// Множитель угла обзора на следующий кадр: идёт к [`SPRINT_FOV_SCALE`] при беге и к 1 иначе
+/// с постоянной скоростью, так что весь путь занимает [`SPRINT_FOV_TIME`].
+pub fn next_fov_scale(scale: f32, sprinting: bool, dt: f32) -> f32 {
+    let target = if sprinting { SPRINT_FOV_SCALE } else { 1.0 };
+    let step = (SPRINT_FOV_SCALE - 1.0) * dt / SPRINT_FOV_TIME;
+    if scale < target {
+        (scale + step).min(target)
+    } else {
+        (scale - step).max(target)
     }
 }
 
@@ -845,5 +890,75 @@ mod tests {
         assert!(!player.overlaps_block(cell - IVec3::Y));
         assert!(!player.overlaps_block(cell + IVec3::X));
         assert!(!player.overlaps_block(cell - IVec3::Z));
+    }
+
+    #[test]
+    fn sprint_speeds_up_walking_and_flying() {
+        let solid = world(&[]);
+        let mut player = standing();
+        run(&mut player, FORWARD, 0.0, 5, &solid);
+        assert!((player.velocity.x - WALK_SPEED).abs() < 1e-4);
+        player.start_sprint();
+        run(&mut player, FORWARD, 0.0, 5, &solid);
+        assert!(player.sprinting);
+        assert!((player.velocity.x - WALK_SPEED * SPRINT_FACTOR).abs() < 1e-4);
+
+        let mut flyer = Player::new(Vec3::new(0.5, 80.0, 0.5), Mode::Flying);
+        flyer.start_sprint();
+        run(&mut flyer, FORWARD, 0.0, 5, &solid);
+        assert!((flyer.velocity.x - FLY_SPEED * FLY_SPRINT_FACTOR).abs() < 1e-4);
+    }
+
+    #[test]
+    fn sprint_ends_when_forward_released() {
+        let solid = world(&[]);
+        let mut player = standing();
+        player.start_sprint();
+        run(&mut player, FORWARD, 0.0, 5, &solid);
+        run(&mut player, Input::default(), 0.0, 1, &solid);
+        assert!(!player.sprinting);
+        // Назад тоже не бег: forward < 0.
+        player.start_sprint();
+        let back = Input {
+            forward: -1.0,
+            ..FORWARD
+        };
+        run(&mut player, back, 0.0, 1, &solid);
+        assert!(!player.sprinting);
+    }
+
+    #[test]
+    fn sprint_ends_against_wall() {
+        let solid = world(&wall_x(3));
+        let mut player = standing();
+        player.start_sprint();
+        run(&mut player, FORWARD, 0.0, 120, &solid);
+        assert!(!player.sprinting);
+        assert!(player.feet.x < 3.0);
+    }
+
+    #[test]
+    fn sprint_ends_in_water() {
+        let (solid, water) = (world(&[]), pool(70));
+        let mut player = Player::new(Vec3::new(-8.0, 66.0, 0.5), Mode::Walking);
+        player.start_sprint();
+        run_in(&mut player, FORWARD, 1, &solid, &water);
+        assert!(!player.sprinting);
+    }
+
+    #[test]
+    fn fov_scale_follows_sprint_in_set_time() {
+        let mut scale = 1.0;
+        for _ in 0..9 {
+            scale = next_fov_scale(scale, true, TICK);
+        }
+        // 9 шагов по 1/60 с = 0.15 с.
+        assert!((scale - SPRINT_FOV_SCALE).abs() < 1e-4, "{scale}");
+        scale = next_fov_scale(scale, true, 1.0);
+        assert_eq!(scale, SPRINT_FOV_SCALE);
+        for _ in 0..9 {
+            scale = next_fov_scale(scale, false, TICK);
+        }
+        assert!((scale - 1.0).abs() < 1e-4, "{scale}");
     }
 }
