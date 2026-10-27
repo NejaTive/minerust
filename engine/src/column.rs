@@ -1,7 +1,7 @@
 use glam::IVec3;
 
 use crate::block::Block;
-use crate::section::{SECTION_SIZE, Section};
+use crate::section::{SECTION_SIZE, SECTION_VOLUME, Section};
 
 pub const COLUMN_SECTIONS: i32 = 8;
 pub const WORLD_HEIGHT: i32 = COLUMN_SECTIONS * SECTION_SIZE;
@@ -37,6 +37,13 @@ impl Column {
     pub fn get(&self, local: IVec3) -> Block {
         let (sy, in_section) = Self::split(local);
         self.sections[sy].get(in_section)
+    }
+
+    /// Блок по индексу `x + 16·z + 256·y` в колонке (y до 128): тот же порядок, что
+    /// внутри секции, так что секция — это 4096 подряд идущих индексов. Для горячих
+    /// циклов (свет), где индекс уже посчитан; за пределами колонки — panic.
+    pub fn get_index(&self, index: usize) -> Block {
+        self.sections[index / SECTION_VOLUME].get_index(index % SECTION_VOLUME)
     }
 
     /// Ставит блок по локальным координатам колонки; за пределами колонки — panic.
