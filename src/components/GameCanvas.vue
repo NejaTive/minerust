@@ -152,6 +152,9 @@ const BLOCK_KEYS: Record<string, BlockName> = {
   Digit1: 'grass',
   Digit2: 'dirt',
   Digit3: 'stone',
+  Digit4: 'sand',
+  Digit5: 'log',
+  Digit6: 'leaves',
 }
 
 function selectBlock(name: BlockName) {

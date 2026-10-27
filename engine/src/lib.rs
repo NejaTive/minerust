@@ -18,6 +18,7 @@ pub mod save;
 pub mod section;
 pub mod terrain;
 pub mod texture;
+pub mod trees;
 pub mod world;
 
 #[cfg(target_arch = "wasm32")]

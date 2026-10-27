@@ -88,9 +88,9 @@ impl Default for MeshOptions {
 const AO_BRIGHTNESS: [f32; 4] = [0.5, 0.7, 0.85, 1.0];
 
 /// Уровень затенения вершины по схеме 0fps, 0 — темнее всего, 3 — без затенения.
-/// `side1`, `side2` — твёрдые ли блоки, примыкающие к вершине по рёбрам грани,
+/// `side1`, `side2` — непрозрачные ли блоки, примыкающие к вершине по рёбрам грани,
 /// `corner` — блок по диагонали; все три — в слое перед гранью. Если обе стороны
-/// твёрдые, угловой блок не виден и уровень 0 независимо от него.
+/// непрозрачные, угловой блок не виден и уровень 0 независимо от него.
 pub fn vertex_ao(side1: bool, side2: bool, corner: bool) -> u8 {
     if side1 && side2 {
         0
@@ -102,12 +102,12 @@ pub fn vertex_ao(side1: bool, side2: bool, corner: bool) -> u8 {
 /// Сторона куба блоков секции с полем в один блок со всех сторон.
 const PADDED: i32 = SECTION_SIZE + 2;
 
-/// Твёрдость блоков секции и всех её соседей в пределах −1..=16 по каждой оси.
+/// Непрозрачность блоков секции и всех её соседей в пределах −1..=16 по каждой оси.
 /// AO смотрит на 12 блоков на грань, и брать их из массива намного дешевле, чем
 /// через `neighbor` (в движке это поиск колонки в `HashMap`).
-struct Solidity([bool; (PADDED * PADDED * PADDED) as usize]);
+struct Opacity([bool; (PADDED * PADDED * PADDED) as usize]);
 
-impl Solidity {
+impl Opacity {
     /// Индекс локальных координат секции, −1..=16 по каждой оси.
     fn index(local: IVec3) -> usize {
         let p = local + IVec3::ONE;
@@ -124,7 +124,7 @@ impl Solidity {
     }
 }
 
-/// Для каждой вершины грани — сдвиги индекса в [`Solidity`] к трём блокам перед ней:
+/// Для каждой вершины грани — сдвиги индекса в [`Opacity`] к трём блокам перед ней:
 /// два боковых и угловой.
 type CornerStrides = [[isize; 3]; 4];
 
@@ -140,12 +140,13 @@ fn corner_strides(face: &Face) -> CornerStrides {
             step
         };
         let (side1, side2) = (along(a), along(b));
-        [side1, side2, side1 + side2].map(|step| Solidity::stride(face.normal + step))
+        [side1, side2, side1 + side2].map(|step| Opacity::stride(face.normal + step))
     })
 }
 
-/// Строит меш видимых граней секции: грань рисуется, если блок твёрдый,
-/// а сосед в её направлении — нет. Позиции вершин мировые.
+/// Строит меш видимых граней секции: грань рисуется, если блок не воздух, а сосед в
+/// её направлении не непрозрачный. Так грани за листвой и между листвой остаются в
+/// меше: сквозь дырки их видно. Позиции вершин мировые.
 ///
 /// `origin` — мировые координаты минимального угла секции в блоках (координаты секции × 16).
 /// `neighbor` возвращает блок по локальным координатам за краем секции: вызывается для
@@ -161,19 +162,19 @@ pub fn mesh_section(
         vertices: Vec::new(),
         indices: Vec::new(),
     };
-    let mut solid = Solidity([false; (PADDED * PADDED * PADDED) as usize]);
-    let mut any_solid = false;
+    let mut opaque = Opacity([false; (PADDED * PADDED * PADDED) as usize]);
+    let mut any_block = false;
     for y in 0..SECTION_SIZE {
         for z in 0..SECTION_SIZE {
             for x in 0..SECTION_SIZE {
                 let local = IVec3::new(x, y, z);
-                let is_solid = section.get(local).is_solid();
-                solid.0[Solidity::index(local)] = is_solid;
-                any_solid |= is_solid;
+                let block = section.get(local);
+                opaque.0[Opacity::index(local)] = block.is_opaque();
+                any_block |= block != Block::Air;
             }
         }
     }
-    if !any_solid {
+    if !any_block {
         return mesh;
     }
     for y in -1..=SECTION_SIZE {
@@ -181,7 +182,7 @@ pub fn mesh_section(
             for x in -1..=SECTION_SIZE {
                 let local = IVec3::new(x, y, z);
                 if !Section::contains(local) {
-                    solid.0[Solidity::index(local)] = neighbor(local).is_solid();
+                    opaque.0[Opacity::index(local)] = neighbor(local).is_opaque();
                 }
             }
         }
@@ -189,19 +190,19 @@ pub fn mesh_section(
 
     let faces = FACES
         .each_ref()
-        .map(|face| (face, Solidity::stride(face.normal), corner_strides(face)));
+        .map(|face| (face, Opacity::stride(face.normal), corner_strides(face)));
     for y in 0..SECTION_SIZE {
         for z in 0..SECTION_SIZE {
             for x in 0..SECTION_SIZE {
                 let local = IVec3::new(x, y, z);
                 let block = section.get(local);
-                if !block.is_solid() {
+                if block == Block::Air {
                     continue;
                 }
-                let index = Solidity::index(local);
+                let index = Opacity::index(local);
                 let base = (origin + local).as_vec3();
                 for (face, normal, corners) in &faces {
-                    if solid.at(index, *normal) {
+                    if opaque.at(index, *normal) {
                         continue;
                     }
                     let Some(tile) = block.tile(face.facing) else {
@@ -210,9 +211,9 @@ pub fn mesh_section(
                     let ao = if options.ambient_occlusion {
                         corners.map(|[side1, side2, corner]| {
                             vertex_ao(
-                                solid.at(index, side1),
-                                solid.at(index, side2),
-                                solid.at(index, corner),
+                                opaque.at(index, side1),
+                                opaque.at(index, side2),
+                                opaque.at(index, corner),
                             )
                         })
                     } else {
@@ -513,9 +514,9 @@ mod tests {
                 .collect();
             let front = block + normal;
             vertex_ao(
-                block_at(front + axes[0]).is_solid(),
-                block_at(front + axes[1]).is_solid(),
-                block_at(front + toward).is_solid(),
+                block_at(front + axes[0]).is_opaque(),
+                block_at(front + axes[1]).is_opaque(),
+                block_at(front + toward).is_opaque(),
             )
         })
     }
@@ -591,6 +592,57 @@ mod tests {
 
     fn shades(quad: &[Vertex; 4]) -> [f32; 4] {
         quad.map(|v| v.shade)
+    }
+
+    /// Секция с двумя блоками рядом по x: `a` в (5, 5, 5), `b` в (6, 5, 5).
+    fn pair(a: Block, b: Block) -> MeshData {
+        let mut section = Section::new();
+        section.set(IVec3::new(5, 5, 5), a);
+        section.set(IVec3::new(6, 5, 5), b);
+        mesh_section(&section, IVec3::ZERO, air, AO)
+    }
+
+    /// Есть ли в меше грань с нормалью `normal` в плоскости x = `x`.
+    fn has_face_at_x(mesh: &MeshData, x: f32, normal: IVec3) -> bool {
+        mesh.vertices
+            .chunks(4)
+            .any(|quad| quad_normal(quad) == normal && quad.iter().all(|v| v.position[0] == x))
+    }
+
+    #[test]
+    fn stone_face_behind_leaves_is_drawn() {
+        let mesh = pair(Block::Stone, Block::Leaves);
+        assert!(
+            has_face_at_x(&mesh, 6.0, IVec3::X),
+            "stone face toward leaves"
+        );
+        assert!(
+            !has_face_at_x(&mesh, 6.0, IVec3::NEG_X),
+            "leaves face toward stone"
+        );
+        assert_eq!(face_count(&mesh), 6 + 5);
+    }
+
+    #[test]
+    fn leaves_next_to_leaves_draw_both_faces() {
+        let mesh = pair(Block::Leaves, Block::Leaves);
+        assert!(has_face_at_x(&mesh, 6.0, IVec3::X));
+        assert!(has_face_at_x(&mesh, 6.0, IVec3::NEG_X));
+        assert_eq!(face_count(&mesh), 12);
+    }
+
+    #[test]
+    fn leaves_do_not_shade_corners() {
+        // Как в `open_floor_and_block_tops_are_unshaded`, но рядом с полом листва.
+        let block = IVec3::new(8, 1, 8);
+        let mut section = floor_with(&[]);
+        section.set(block, Block::Leaves);
+        let mesh = mesh_section(&section, IVec3::ZERO, air, AO);
+        let (beside, _) = top_face(&mesh, IVec3::new(7, 0, 8));
+        assert_eq!(shades(&beside), [1.0; 4]);
+        // А пол под листвой (верхняя грань пола видна сквозь неё) — тоже без затенения.
+        assert_eq!(shades(&top_face(&mesh, IVec3::new(8, 0, 8)).0), [1.0; 4]);
+        assert_ao_matches(&mesh, in_section(&section), |_| true);
     }
 
     #[test]
@@ -723,9 +775,31 @@ mod tests {
         }
     }
 
+    /// Видимые грани колонки `key`, посчитанные по миру целиком, без деления на колонки
+    /// и секции: блок не воздух, сосед не непрозрачный.
+    fn world_face_count(world: &World, key: IVec2) -> usize {
+        use crate::column::WORLD_HEIGHT;
+
+        let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+        let mut count = 0;
+        for y in 0..WORLD_HEIGHT {
+            for z in 0..SECTION_SIZE {
+                for x in 0..SECTION_SIZE {
+                    let pos = origin + IVec3::new(x, y, z);
+                    if world.block(pos) != Block::Air {
+                        count += FACES
+                            .iter()
+                            .filter(|face| !world.block(pos + face.normal).is_opaque())
+                            .count();
+                    }
+                }
+            }
+        }
+        count
+    }
+
     #[test]
     fn no_seams_between_columns() {
-        use crate::column::WORLD_HEIGHT;
         use crate::terrain::Terrain;
 
         // Центр с отрицательными координатами, чтобы задеть и div_euclid на стыках.
@@ -744,22 +818,7 @@ mod tests {
         let meshes = mesh_column(column, origin, |local| world.block(origin + local), AO);
         assert_eq!(meshes.len(), COLUMN_SECTIONS as usize);
         let meshed: usize = meshes.iter().map(face_count).sum();
-
-        // Те же грани, посчитанные по миру целиком, без деления на колонки и секции.
-        let mut expected = 0;
-        for y in 0..WORLD_HEIGHT {
-            for z in 0..SECTION_SIZE {
-                for x in 0..SECTION_SIZE {
-                    let pos = origin + IVec3::new(x, y, z);
-                    if world.block(pos).is_solid() {
-                        expected += FACES
-                            .iter()
-                            .filter(|face| !world.block(pos + face.normal).is_solid())
-                            .count();
-                    }
-                }
-            }
-        }
+        let expected = world_face_count(&world, center);
         assert!(expected > 256, "flat terrain would not test side faces");
         assert_eq!(meshed, expected);
 
@@ -786,6 +845,53 @@ mod tests {
             .map(|mesh| assert_ao_matches(mesh, block_at, on_section_seam))
             .sum();
         assert!(edge > 0 && seam > 0, "edge {edge}, seam {seam}");
+    }
+
+    #[test]
+    fn tree_on_column_border_matches_whole_world() {
+        use crate::terrain::Terrain;
+        use crate::trees::border_tree;
+
+        let terrain = Terrain::new(1337);
+        let tree = border_tree(&terrain);
+        let trunk = IVec2::new(
+            tree.base.x.div_euclid(SECTION_SIZE),
+            tree.base.z.div_euclid(SECTION_SIZE),
+        );
+        let mut world = World::new();
+        for z in -2..=2 {
+            for x in -2..=2 {
+                let key = trunk + IVec2::new(x, z);
+                world.insert(key, terrain.generate(key));
+            }
+        }
+        // Колонка ствола и все соседи, куда заходит крона.
+        let mut keys: Vec<IVec2> = tree
+            .leaves()
+            .map(|l| IVec2::new(l.x.div_euclid(SECTION_SIZE), l.z.div_euclid(SECTION_SIZE)))
+            .collect();
+        keys.sort_by_key(|k| k.to_array());
+        keys.dedup();
+        assert!(keys.len() > 1);
+        for key in keys {
+            let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+            let column = world.column(key).unwrap();
+            assert!(
+                (0..COLUMN_SECTIONS).any(|sy| {
+                    let section = column.section(sy);
+                    (0..16 * 16 * 16).any(|i| {
+                        section.get(IVec3::new(i % 16, i / 256, i / 16 % 16)) == Block::Leaves
+                    })
+                }),
+                "no leaves in {key}"
+            );
+            let meshes = mesh_column(column, origin, |local| world.block(origin + local), AO);
+            let meshed: usize = meshes.iter().map(face_count).sum();
+            assert_eq!(meshed, world_face_count(&world, key), "{key}");
+            for mesh in &meshes {
+                assert_ao_matches(mesh, |p| world.block(p), |_| true);
+            }
+        }
     }
 
     /// Меш секции `key` с соседями из `world`, в сравнимом виде.

@@ -120,7 +120,15 @@ mod tests {
     use super::*;
     use crate::terrain::Terrain;
 
-    const BLOCKS: [Block; 4] = [Block::Air, Block::Grass, Block::Dirt, Block::Stone];
+    const BLOCKS: [Block; 7] = [
+        Block::Air,
+        Block::Grass,
+        Block::Dirt,
+        Block::Stone,
+        Block::Sand,
+        Block::Log,
+        Block::Leaves,
+    ];
 
     fn assert_same(a: &Column, b: &Column) {
         for i in 0..COLUMN_VOLUME {
@@ -180,9 +188,47 @@ mod tests {
             state ^= state << 13;
             state ^= state >> 17;
             state ^= state << 5;
-            column.set(position(i), BLOCKS[(state % 4) as usize]);
+            column.set(position(i), BLOCKS[(state % 7) as usize]);
         }
         round_trip(&column);
+    }
+
+    #[test]
+    fn reads_columns_saved_before_new_blocks() {
+        // Колонка в байтах, как её писала версия с блоками 0–3: камень, земля, трава,
+        // воздух в каждом столбе. Формат не менялся, новые номера просто стали допустимы.
+        let mut bytes = b"MRC".to_vec();
+        bytes.push(FORMAT_VERSION);
+        let columns = SECTION_SIZE * SECTION_SIZE;
+        for _ in 0..columns {
+            for (block, len) in [(3u8, 60u16), (2, 3), (1, 1), (0, 64)] {
+                bytes.push(block);
+                bytes.extend_from_slice(&len.to_le_bytes());
+            }
+        }
+        let column = decode_column(&bytes).expect("old column decodes");
+        let at = |y| column.get(IVec3::new(5, y, 9));
+        assert_eq!(
+            (at(0), at(59), at(60), at(63), at(64)),
+            (
+                Block::Stone,
+                Block::Stone,
+                Block::Dirt,
+                Block::Grass,
+                Block::Air
+            )
+        );
+    }
+
+    #[test]
+    fn new_blocks_round_trip() {
+        let mut column = Column::new();
+        for (i, &block) in BLOCKS.iter().enumerate() {
+            column.set(IVec3::new(i as i32, 70, 3), block);
+        }
+        round_trip(&column);
+        let tree_column = Terrain::new(1337).generate(IVec2::new(3, -4));
+        round_trip(&tree_column);
     }
 
     #[test]
