@@ -34,6 +34,7 @@ const ms = (us: number) => (us / 1000).toFixed(2)
     </div>
     <div v-if="player">
       <template v-if="player.mode === 'flying'">Режим: полёт</template>
+      <template v-else-if="player.mode === 'noclip'">Режим: сквозь блоки</template>
       <template v-else>Режим: ходьба<template v-if="player.onGround"> · на земле</template></template>
     </div>
     <div>Блок: {{ block ? BLOCK_LABELS[block] : 'пусто' }}</div>

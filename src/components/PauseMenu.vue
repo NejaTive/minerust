@@ -46,6 +46,7 @@ const CONTROLS = [
   { keys: ['Space ×2'], action: 'полёт / ходьба' },
   { keys: ['W ×2'], action: 'бег' },
   { keys: ['Shift'], action: 'вниз (в полёте)' },
+  { keys: ['V'], action: 'полёт сквозь блоки (при отладке)' },
   { keys: ['ЛКМ'], action: 'сломать блок' },
   { keys: ['ПКМ'], action: 'поставить блок' },
   { keys: ['1–9', 'колесо'], action: 'слот хотбара' },
