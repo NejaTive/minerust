@@ -2,6 +2,7 @@ use glam::{IVec2, IVec3};
 
 use crate::block::{Block, Facing, WATER_SURFACE};
 use crate::column::{COLUMN_SECTIONS, Column};
+use crate::light::{LightMap, average_brightness, brightness};
 use crate::mesh::Vertex;
 use crate::section::{SECTION_SIZE, Section};
 use crate::texture::Tile;
@@ -129,8 +130,17 @@ impl Neighborhood {
     }
 }
 
+/// Уровни света секции и соседей, как [`Neighborhood`] для блоков.
+struct Lights([u8; (PADDED * PADDED * PADDED) as usize]);
+
+impl Lights {
+    fn at(&self, index: usize, offset: isize) -> u32 {
+        u32::from(self.0[index.wrapping_add_signed(offset)])
+    }
+}
+
 /// Для каждой вершины грани — сдвиги индекса в [`Neighborhood`] к трём блокам перед
-/// ней: два боковых и угловой.
+/// ней: два боковых и угловой. Те же клетки дают и плавный свет вершины.
 type CornerStrides = [[isize; 3]; 4];
 
 fn corner_strides(face: &Face) -> CornerStrides {
@@ -166,14 +176,24 @@ pub struct SectionMeshes {
 /// листве легла бы в одну плоскость с гранью листвы. Если над водой не вода, её верх
 /// опущен до [`WATER_SURFACE`]. AO у воды нет: только яркость стороны.
 ///
+/// Свет плавный, как в Minecraft: в вершине — среднее уровней клетки перед гранью и
+/// трёх клеток рядом с ней у этого угла (тех же, что у AO), без непрозрачных: иначе
+/// стена тянула бы вершину к темноте, которой там нет. Угловую клетку не берём и
+/// тогда, когда обе боковые непрозрачные: она не видна из угла, и свет просочился
+/// бы сквозь стену. Итог: сторона × AO × [`average_brightness`]. У воды — яркость
+/// клетки перед гранью, одна на грань.
+///
 /// `origin` — мировые координаты минимального угла секции в блоках (координаты секции × 16).
 /// `neighbor` возвращает блок по локальным координатам за краем секции: вызывается для
 /// любых координат вне 0..16 в пределах −1..=16 по каждой оси (рёбра и углы — две или
-/// три компоненты вне 0..16). У секции из одного воздуха не вызывается.
+/// три компоненты вне 0..16). `light` — уровень света по локальным координатам
+/// секции, для всех клеток −1..=16 по каждой оси. У секции из одного воздуха оба не
+/// вызываются.
 pub fn mesh_section(
     section: &Section,
     origin: IVec3,
     neighbor: impl Fn(IVec3) -> Block,
+    light: impl Fn(IVec3) -> u8,
     options: MeshOptions,
 ) -> SectionMeshes {
     let mut meshes = SectionMeshes {
@@ -195,13 +215,16 @@ pub fn mesh_section(
     if !any_block {
         return meshes;
     }
+    let mut lights = Lights([0; (PADDED * PADDED * PADDED) as usize]);
     for y in -1..=SECTION_SIZE {
         for z in -1..=SECTION_SIZE {
             for x in -1..=SECTION_SIZE {
                 let local = IVec3::new(x, y, z);
+                let index = Neighborhood::index(local);
                 if !Section::contains(local) {
-                    blocks.0[Neighborhood::index(local)] = neighbor(local);
+                    blocks.0[index] = neighbor(local);
                 }
+                lights.0[index] = light(local);
             }
         }
     }
@@ -232,7 +255,9 @@ pub fn mesh_section(
                     };
                     for (face, normal, _) in &faces {
                         if blocks.at(index, *normal) == Block::Air {
-                            push_water_face(&mut meshes.water, face, base, top);
+                            let level = lights.at(index, *normal) as u8;
+                            let shade = face.shade * brightness(level);
+                            push_water_face(&mut meshes.water, face, base, top, shade);
                         }
                     }
                     continue;
@@ -244,29 +269,38 @@ pub fn mesh_section(
                     let Some(tile) = block.tile(face.facing) else {
                         continue;
                     };
-                    let ao = if options.ambient_occlusion {
-                        corners.map(|[side1, side2, corner]| {
-                            vertex_ao(
-                                blocks.opaque(index, side1),
-                                blocks.opaque(index, side2),
-                                blocks.opaque(index, corner),
-                            )
-                        })
-                    } else {
-                        [3; 4]
-                    };
-                    let vertices =
-                        face.corners
-                            .iter()
-                            .zip(CORNER_UVS)
-                            .zip(ao)
-                            .map(|((&corner, uv), ao)| Vertex {
-                                position: (base + glam::Vec3::from(corner)).to_array(),
-                                uv,
-                                shade: face.shade * AO_BRIGHTNESS[usize::from(ao)],
-                                layer: tile.layer(),
-                            });
-                    meshes.solid.push_quad(vertices, quad_indices(ao));
+                    let front = lights.at(index, *normal);
+                    let shades = corners.map(|[side1, side2, corner]| {
+                        let open1 = !blocks.opaque(index, side1);
+                        let open2 = !blocks.opaque(index, side2);
+                        let open_corner = !blocks.opaque(index, corner);
+                        let ao = if options.ambient_occlusion {
+                            vertex_ao(!open1, !open2, !open_corner)
+                        } else {
+                            3
+                        };
+                        let (mut sum, mut count) = (front, 1);
+                        for (offset, open) in [
+                            (side1, open1),
+                            (side2, open2),
+                            (corner, open_corner && (open1 || open2)),
+                        ] {
+                            if open {
+                                sum += lights.at(index, offset);
+                                count += 1;
+                            }
+                        }
+                        face.shade * AO_BRIGHTNESS[usize::from(ao)] * average_brightness(sum, count)
+                    });
+                    let vertices = face.corners.iter().zip(CORNER_UVS).zip(shades).map(
+                        |((&corner, uv), shade)| Vertex {
+                            position: (base + glam::Vec3::from(corner)).to_array(),
+                            uv,
+                            shade,
+                            layer: tile.layer(),
+                        },
+                    );
+                    meshes.solid.push_quad(vertices, quad_indices(shades));
                 }
             }
         }
@@ -274,8 +308,9 @@ pub fn mesh_section(
     meshes
 }
 
-/// Грань воды; `top` — высота верха блока над `base` (1 или [`WATER_SURFACE`]).
-fn push_water_face(mesh: &mut MeshData, face: &Face, base: glam::Vec3, top: f32) {
+/// Грань воды; `top` — высота верха блока над `base` (1 или [`WATER_SURFACE`]),
+/// `shade` — яркость всех её вершин.
+fn push_water_face(mesh: &mut MeshData, face: &Face, base: glam::Vec3, top: f32, shade: f32) {
     let vertices = face
         .corners
         .iter()
@@ -292,7 +327,7 @@ fn push_water_face(mesh: &mut MeshData, face: &Face, base: glam::Vec3, top: f32)
             Vertex {
                 position: (base + glam::Vec3::new(x, y, z)).to_array(),
                 uv: [u, v],
-                shade: face.shade,
+                shade,
                 layer: Tile::Water.layer(),
             }
         });
@@ -324,9 +359,10 @@ impl MeshData {
 /// Яркость интерполируется по треугольникам, и тень от тёмной вершины на диагонали
 /// тянулась бы косой полосой через весь квад. Режем по диагонали, концы которой в
 /// сумме светлее (1–3, если пара 0–2 темнее): одиночная тёмная вершина тогда остаётся
-/// в одном треугольнике.
-fn quad_indices(ao: [u8; 4]) -> [u16; 6] {
-    if ao[0] + ao[2] < ao[1] + ao[3] {
+/// в одном треугольнике. Сравниваем итоговую яркость, а не уровни AO: тень от света
+/// режется так же.
+fn quad_indices(shades: [f32; 4]) -> [u16; 6] {
+    if shades[0] + shades[2] < shades[1] + shades[3] {
         [1, 2, 3, 1, 3, 0]
     } else {
         [0, 1, 2, 0, 2, 3]
@@ -338,11 +374,13 @@ fn quad_indices(ao: [u8; 4]) -> [u16; 6] {
 /// `origin` — мировые координаты минимального угла колонки (y = 0). Соседей по
 /// вертикали внутри колонки берёт из неё самой; `neighbor` вызывается только для
 /// локальных координат колонки за её краем: x или z в −1 или 16 (в том числе оба —
-/// угол колонки), либо y равен −1 или 128.
+/// угол колонки), либо y равен −1 или 128. `light` — уровень света по локальным
+/// координатам колонки, внутри неё и за краем в тех же пределах.
 pub fn mesh_column(
     column: &Column,
     origin: IVec3,
     neighbor: impl Fn(IVec3) -> Block,
+    light: impl Fn(IVec3) -> u8,
     options: MeshOptions,
 ) -> Vec<SectionMeshes> {
     (0..COLUMN_SECTIONS)
@@ -359,6 +397,7 @@ pub fn mesh_column(
                         neighbor(in_column)
                     }
                 },
+                |local| light(local + offset),
                 options,
             )
         })
@@ -366,10 +405,11 @@ pub fn mesh_column(
 }
 
 /// Меш одной секции по ключу `(x колонки, номер секции 0..8, z колонки)` с соседями
-/// из `world` — для перестройки после правки блока. `None`, если колонка не загружена
-/// или номер секции вне 0..COLUMN_SECTIONS.
+/// из `world` и светом из `light` — для перестройки после правки блока или света.
+/// `None`, если колонка не загружена или номер секции вне 0..COLUMN_SECTIONS.
 pub fn mesh_world_section(
     world: &World,
+    light: &LightMap,
     key: IVec3,
     options: MeshOptions,
 ) -> Option<SectionMeshes> {
@@ -378,10 +418,13 @@ pub fn mesh_world_section(
     }
     let column = world.column(IVec2::new(key.x, key.z))?;
     let origin = key * SECTION_SIZE;
+    let light = light.column_sampler(IVec2::new(key.x, key.z));
+    let offset = IVec3::new(0, key.y * SECTION_SIZE, 0);
     Some(mesh_section(
         column.section(key.y),
         origin,
         |local| world.block(origin + local),
+        |local| light(local + offset),
         options,
     ))
 }
@@ -389,6 +432,8 @@ pub fn mesh_world_section(
 #[cfg(test)]
 mod tests {
     use glam::Vec3;
+
+    use crate::light::MAX_LIGHT;
 
     use super::*;
 
@@ -401,6 +446,20 @@ mod tests {
 
     fn air(_: IVec3) -> Block {
         Block::Air
+    }
+
+    /// Всё освещено полностью: яркость вершин — только сторона и AO.
+    fn full(_: IVec3) -> u8 {
+        MAX_LIGHT
+    }
+
+    /// Свет мира, где загружены все колонки `world`.
+    fn world_light(world: &World) -> LightMap {
+        let mut light = LightMap::new();
+        for key in world.keys().collect::<Vec<_>>() {
+            light.add_column(world, key);
+        }
+        light
     }
 
     fn face_count(mesh: &MeshData) -> usize {
@@ -424,7 +483,7 @@ mod tests {
 
     #[test]
     fn empty_section_has_no_faces() {
-        let mesh = mesh_section(&Section::new(), IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&Section::new(), IVec3::ZERO, air, full, AO).solid;
         assert_eq!(face_count(&mesh), 0);
         assert!(mesh.vertices.is_empty());
     }
@@ -433,7 +492,7 @@ mod tests {
     fn single_block_has_six_faces() {
         let mut section = Section::new();
         section.set(IVec3::new(5, 5, 5), Block::Dirt);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::ZERO, air, full, AO).solid;
         assert_eq!(face_count(&mesh), 6);
         assert_eq!(mesh.vertices.len(), 24);
     }
@@ -443,7 +502,7 @@ mod tests {
         let mut section = Section::new();
         section.set(IVec3::new(1, 2, 3), Block::Dirt);
         let origin = IVec3::new(16, 0, -32);
-        let mesh = mesh_section(&section, origin, air, AO).solid;
+        let mesh = mesh_section(&section, origin, air, full, AO).solid;
         let min = Vec3::new(17.0, 2.0, -29.0);
         for v in &mesh.vertices {
             let p = Vec3::from(v.position);
@@ -456,13 +515,13 @@ mod tests {
         let mut section = Section::new();
         section.set(IVec3::new(5, 5, 5), Block::Dirt);
         section.set(IVec3::new(6, 5, 5), Block::Dirt);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::ZERO, air, full, AO).solid;
         assert_eq!(face_count(&mesh), 10);
     }
 
     #[test]
     fn solid_section_draws_only_outer_shell() {
-        let mesh = mesh_section(&filled(|_| true), IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&filled(|_| true), IVec3::ZERO, air, full, AO).solid;
         assert_eq!(face_count(&mesh), 6 * 256);
     }
 
@@ -479,6 +538,13 @@ mod tests {
                 );
                 Block::Stone
             },
+            |local| {
+                assert!(
+                    local.cmpge(IVec3::NEG_ONE).all() && local.cmple(IVec3::splat(16)).all(),
+                    "light asked for {local}"
+                );
+                MAX_LIGHT
+            },
             AO,
         )
         .solid;
@@ -491,6 +557,7 @@ mod tests {
             &Section::new(),
             IVec3::ZERO,
             |local| panic!("neighbor called for {local}"),
+            |local| panic!("light asked for {local}"),
             AO,
         )
         .solid;
@@ -500,7 +567,7 @@ mod tests {
     #[test]
     fn checkerboard_fits_u16() {
         let section = filled(|p| (p.x + p.y + p.z) % 2 == 0);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::ZERO, air, full, AO).solid;
         assert_eq!(face_count(&mesh), 2048 * 6);
         assert_eq!(mesh.vertices.len(), 2048 * 24);
         assert!(
@@ -514,7 +581,7 @@ mod tests {
     fn grass_faces_use_their_tiles() {
         let mut section = Section::new();
         section.set(IVec3::ZERO, Block::Grass);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::ZERO, air, full, AO).solid;
         for quad in mesh.vertices.chunks(4) {
             let ys: Vec<f32> = quad.iter().map(|v| v.position[1]).collect();
             let expected = if ys.iter().all(|&y| y == 1.0) {
@@ -532,7 +599,7 @@ mod tests {
     fn side_faces_are_upright() {
         let mut section = Section::new();
         section.set(IVec3::ZERO, Block::Grass);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::ZERO, air, full, AO).solid;
         let sides = mesh
             .vertices
             .chunks(4)
@@ -551,7 +618,7 @@ mod tests {
     fn faces_wind_counter_clockwise_from_outside() {
         let mut section = Section::new();
         section.set(IVec3::ZERO, Block::Grass);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::ZERO, air, full, AO).solid;
         let center = Vec3::splat(0.5);
         let mut normals = Vec::new();
         for quad in mesh.vertices.chunks(4) {
@@ -577,9 +644,13 @@ mod tests {
         (b - a).cross(c - b).normalize().round().as_ivec3()
     }
 
-    /// Уровни AO вершин квада, посчитанные по миру напрямую: блок за гранью и три
-    /// блока перед каждой вершиной.
-    fn world_ao(block_at: impl Fn(IVec3) -> Block, quad: &[Vertex]) -> [u8; 4] {
+    /// Яркость вершин квада, посчитанная по миру напрямую: блок за гранью, три блока
+    /// перед каждой вершиной (AO) и свет клетки перед гранью и этих трёх клеток.
+    fn world_shades(
+        block_at: impl Fn(IVec3) -> Block,
+        light_at: impl Fn(IVec3) -> u8,
+        quad: &[Vertex],
+    ) -> [f32; 4] {
         let normal = quad_normal(quad);
         let center = quad.iter().map(|v| Vec3::from(v.position)).sum::<Vec3>() / 4.0;
         let block = (center - normal.as_vec3() * 0.5).floor().as_ivec3();
@@ -596,11 +667,19 @@ mod tests {
                 })
                 .collect();
             let front = block + normal;
-            vertex_ao(
-                block_at(front + axes[0]).is_opaque(),
-                block_at(front + axes[1]).is_opaque(),
-                block_at(front + toward).is_opaque(),
-            )
+            let cells = [front + axes[0], front + axes[1], front + toward];
+            let [o1, o2, oc] = cells.map(|c| block_at(c).is_opaque());
+            let ao = vertex_ao(o1, o2, oc);
+            let mut levels = vec![light_at(front)];
+            for (cell, open) in cells.into_iter().zip([!o1, !o2, !oc && !(o1 && o2)]) {
+                if open {
+                    levels.push(light_at(cell));
+                }
+            }
+            let sum: u32 = levels.iter().map(|&l| u32::from(l)).sum();
+            face_shade(normal)
+                * AO_BRIGHTNESS[usize::from(ao)]
+                * average_brightness(sum, levels.len() as u32)
         })
     }
 
@@ -609,25 +688,27 @@ mod tests {
     }
 
     /// Каждый квад меша: яркость вершин и выбор диагонали совпадают с расчётом по
-    /// `block_at`. Возвращает число затенённых вершин, где `pred` от позиции истинен.
-    fn assert_ao_matches(
+    /// `block_at` и `light_at`. Возвращает число затенённых (ярче нет) вершин, где
+    /// `pred` от позиции истинен.
+    fn assert_shades_match(
         mesh: &MeshData,
         block_at: impl Fn(IVec3) -> Block,
+        light_at: impl Fn(IVec3) -> u8,
         pred: impl Fn(Vec3) -> bool,
     ) -> usize {
         let mut shaded = 0;
         for (q, quad) in mesh.vertices.chunks(4).enumerate() {
-            let ao = world_ao(&block_at, quad);
-            let shade = face_shade(quad_normal(quad));
-            for (v, ao) in quad.iter().zip(ao) {
-                assert_eq!(v.shade, shade * AO_BRIGHTNESS[usize::from(ao)], "{v:?}");
-                if ao < 3 && pred(Vec3::from(v.position)) {
+            let shades = world_shades(&block_at, &light_at, quad);
+            let side = face_shade(quad_normal(quad));
+            for (v, shade) in quad.iter().zip(shades) {
+                assert_eq!(v.shade, shade, "{v:?}");
+                if shade < side && pred(Vec3::from(v.position)) {
                     shaded += 1;
                 }
             }
             let first = (q * 4) as u16;
             let indices = &mesh.indices[q * 6..q * 6 + 6];
-            assert_eq!(indices, quad_indices(ao).map(|i| first + i), "quad {q}");
+            assert_eq!(indices, quad_indices(shades).map(|i| first + i), "quad {q}");
         }
         shaded
     }
@@ -682,7 +763,7 @@ mod tests {
         let mut section = Section::new();
         section.set(IVec3::new(5, 5, 5), a);
         section.set(IVec3::new(6, 5, 5), b);
-        mesh_section(&section, IVec3::ZERO, air, AO).solid
+        mesh_section(&section, IVec3::ZERO, air, full, AO).solid
     }
 
     /// Есть ли в меше грань с нормалью `normal` в плоскости x = `x`.
@@ -720,18 +801,18 @@ mod tests {
         let block = IVec3::new(8, 1, 8);
         let mut section = floor_with(&[]);
         section.set(block, Block::Leaves);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::ZERO, air, full, AO).solid;
         let (beside, _) = top_face(&mesh, IVec3::new(7, 0, 8));
         assert_eq!(shades(&beside), [1.0; 4]);
         // А пол под листвой (верхняя грань пола видна сквозь неё) — тоже без затенения.
         assert_eq!(shades(&top_face(&mesh, IVec3::new(8, 0, 8)).0), [1.0; 4]);
-        assert_ao_matches(&mesh, in_section(&section), |_| true);
+        assert_shades_match(&mesh, in_section(&section), full, |_| true);
     }
 
     #[test]
     fn open_floor_and_block_tops_are_unshaded() {
         let block = IVec3::new(8, 1, 8);
-        let mesh = mesh_section(&floor_with(&[block]), IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&floor_with(&[block]), IVec3::ZERO, air, full, AO).solid;
         assert_eq!(shades(&top_face(&mesh, block).0), [1.0; 4]);
         assert_eq!(shades(&top_face(&mesh, IVec3::new(4, 0, 4)).0), [1.0; 4]);
         // Пол у подножия блока со стороны −x: у ребра к блоку один боковой сосед.
@@ -746,13 +827,13 @@ mod tests {
             .flat_map(|y| (0..16).flat_map(move |i| [IVec3::new(0, y, i), IVec3::new(i, y, 0)]))
             .collect();
         let section = floor_with(&walls);
-        let mesh = mesh_section(&section, IVec3::ZERO, air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::ZERO, air, full, AO).solid;
         let (quad, indices) = top_face(&mesh, IVec3::new(1, 0, 1));
         // Углы верхней грани: (1, 2), (2, 2), (2, 1), (1, 1) по x, z.
         assert_eq!(shades(&quad), [0.7, 1.0, 0.7, 0.5]);
         // Диагональ 0–2 темнее (1 + 1 против 3 + 0) — режем по 1–3.
         assert_eq!(indices, [1, 2, 3, 1, 3, 0]);
-        assert!(assert_ao_matches(&mesh, in_section(&section), |_| true) > 0);
+        assert!(assert_shades_match(&mesh, in_section(&section), full, |_| true) > 0);
     }
 
     /// Блок секции, за её краем — воздух.
@@ -789,7 +870,7 @@ mod tests {
             (IVec3::new(4, 1, 4), 3),
         ];
         for (block, dark) in cases {
-            let mesh = mesh_section(&floor_with(&[block]), IVec3::ZERO, air, AO).solid;
+            let mesh = mesh_section(&floor_with(&[block]), IVec3::ZERO, air, full, AO).solid;
             let (quad, indices) = top_face(&mesh, floor);
             let mut expected = [1.0; 4];
             expected[dark] = 0.85;
@@ -805,7 +886,7 @@ mod tests {
     fn flipped_quads_keep_winding() {
         // Рваный рельеф, чтобы встретились обе диагонали.
         let section = filled(|p| p.y < 4 + (p.x * 7 + p.z * 13) % 5);
-        let mesh = mesh_section(&section, IVec3::new(-16, 32, 48), air, AO).solid;
+        let mesh = mesh_section(&section, IVec3::new(-16, 32, 48), air, full, AO).solid;
         let mut flipped = 0;
         for (q, quad) in mesh.vertices.chunks(4).enumerate() {
             let normal = quad_normal(quad).as_vec3();
@@ -825,9 +906,10 @@ mod tests {
             }
         }
         assert!(flipped > 0, "no flipped quads to check");
-        assert_ao_matches(
+        assert_shades_match(
             &mesh,
             |p| in_section(&section)(p - IVec3::new(-16, 32, 48)),
+            full,
             |_| true,
         );
     }
@@ -838,8 +920,8 @@ mod tests {
 
         let column = Terrain::new(7).generate(IVec2::new(3, -2));
         let origin = IVec3::new(48, 0, -32);
-        let with = mesh_column(&column, origin, air, AO);
-        let without = mesh_column(&column, origin, air, NO_AO);
+        let with = mesh_column(&column, origin, air, full, AO);
+        let without = mesh_column(&column, origin, air, full, NO_AO);
         for (with, without) in with.iter().zip(&without) {
             assert_eq!(with.water.vertices, without.water.vertices);
             let (with, without) = (&with.solid, &without.solid);
@@ -907,9 +989,16 @@ mod tests {
             }
         }
 
+        let light = world_light(&world);
         let origin = IVec3::new(center.x * SECTION_SIZE, 0, center.y * SECTION_SIZE);
         let column = world.column(center).unwrap();
-        let meshes = mesh_column(column, origin, |local| world.block(origin + local), AO);
+        let meshes = mesh_column(
+            column,
+            origin,
+            |local| world.block(origin + local),
+            light.column_sampler(center),
+            AO,
+        );
         assert_eq!(meshes.len(), COLUMN_SECTIONS as usize);
         let expected = world_face_count(&world, center);
         assert!(expected.0 > 256, "flat terrain would not test side faces");
@@ -929,13 +1018,14 @@ mod tests {
                 && local.y % 16.0 == 0.0
         };
         let block_at = |p| world.block(p);
+        let light_at = |p| light.sky(p);
         let edge: usize = meshes
             .iter()
-            .map(|mesh| assert_ao_matches(&mesh.solid, block_at, on_edge))
+            .map(|mesh| assert_shades_match(&mesh.solid, block_at, light_at, on_edge))
             .sum();
         let seam: usize = meshes
             .iter()
-            .map(|mesh| assert_ao_matches(&mesh.solid, block_at, on_section_seam))
+            .map(|mesh| assert_shades_match(&mesh.solid, block_at, light_at, on_section_seam))
             .sum();
         assert!(edge > 0 && seam > 0, "edge {edge}, seam {seam}");
     }
@@ -966,6 +1056,7 @@ mod tests {
         keys.sort_by_key(|k| k.to_array());
         keys.dedup();
         assert!(keys.len() > 1);
+        let light = world_light(&world);
         for key in keys {
             let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
             let column = world.column(key).unwrap();
@@ -978,21 +1069,27 @@ mod tests {
                 }),
                 "no leaves in {key}"
             );
-            let meshes = mesh_column(column, origin, |local| world.block(origin + local), AO);
+            let meshes = mesh_column(
+                column,
+                origin,
+                |local| world.block(origin + local),
+                light.column_sampler(key),
+                AO,
+            );
             assert_eq!(
                 column_face_count(&meshes),
                 world_face_count(&world, key),
                 "{key}"
             );
             for mesh in &meshes {
-                assert_ao_matches(&mesh.solid, |p| world.block(p), |_| true);
+                assert_shades_match(&mesh.solid, |p| world.block(p), |p| light.sky(p), |_| true);
             }
         }
     }
 
     /// Меши секции `key` с соседями из `world`, в сравнимом виде.
-    fn world_mesh(world: &World, key: IVec3) -> [(Vec<Vertex>, Vec<u16>); 2] {
-        let SectionMeshes { solid, water } = mesh_world_section(world, key, AO).unwrap();
+    fn world_mesh(world: &World, light: &LightMap, key: IVec3) -> [(Vec<Vertex>, Vec<u16>); 2] {
+        let SectionMeshes { solid, water } = mesh_world_section(world, light, key, AO).unwrap();
         [
             (solid.vertices, solid.indices),
             (water.vertices, water.indices),
@@ -1012,6 +1109,7 @@ mod tests {
                 world.insert(key, terrain.generate(key));
             }
         }
+        let mut light = world_light(&world);
         // Секции колонок -1..=0, у которых загружены все 8 соседних колонок.
         let sections: Vec<IVec3> = (-1..=0)
             .flat_map(|z| {
@@ -1040,12 +1138,16 @@ mod tests {
             (IVec3::new(-1, corner_surface + 1, -1), Block::Air),
         ];
         for (pos, block) in edits {
-            let before: Vec<_> = sections.iter().map(|&k| world_mesh(&world, k)).collect();
+            let before: Vec<_> = sections
+                .iter()
+                .map(|&k| world_mesh(&world, &light, k))
+                .collect();
             assert!(world.set_block(pos, block));
-            let affected = affected_sections(pos);
+            let mut affected = affected_sections(pos);
+            affected.extend(light.block_changed(&world, pos));
             let mut changed = 0;
             for (&key, before) in sections.iter().zip(before) {
-                if world_mesh(&world, key) != before {
+                if world_mesh(&world, &light, key) != before {
                     changed += 1;
                     assert!(
                         affected.contains(&key),
@@ -1063,7 +1165,7 @@ mod tests {
         for &(pos, block) in blocks {
             section.set(pos, block);
         }
-        mesh_section(&section, IVec3::ZERO, air, AO)
+        mesh_section(&section, IVec3::ZERO, air, full, AO)
     }
 
     #[test]
@@ -1188,14 +1290,21 @@ mod tests {
                 world.insert(key, terrain.generate(key));
             }
         }
+        let light = world_light(&world);
         let origin = IVec3::new(center.x * SECTION_SIZE, 0, center.y * SECTION_SIZE);
         let column = world.column(center).unwrap();
-        let meshes = mesh_column(column, origin, |local| world.block(origin + local), AO);
+        let meshes = mesh_column(
+            column,
+            origin,
+            |local| world.block(origin + local),
+            light.column_sampler(center),
+            AO,
+        );
         let expected = world_face_count(&world, center);
         assert!(expected.1 > 0, "no water faces in {center}");
         assert_eq!(column_face_count(&meshes), expected);
         for mesh in &meshes {
-            assert_ao_matches(&mesh.solid, |p| world.block(p), |_| true);
+            assert_shades_match(&mesh.solid, |p| world.block(p), |p| light.sky(p), |_| true);
         }
         // Вода на западном краю колонки, и сосед за краем — тоже вода: грани между
         // ними нет ни в одной из двух колонок.
@@ -1206,13 +1315,164 @@ mod tests {
         assert!(seam_water, "lake does not cross the seam");
     }
 
+    /// Мир 3×3 колонок вокруг (0, 0) из `block_at` и его свет.
+    fn small_world(block_at: impl Fn(IVec3) -> Block) -> (World, LightMap) {
+        use crate::column::WORLD_HEIGHT;
+
+        let mut world = World::new();
+        for z in -1..=1 {
+            for x in -1..=1 {
+                let key = IVec2::new(x, z);
+                let mut column = Column::new();
+                for y in 0..WORLD_HEIGHT {
+                    for lz in 0..SECTION_SIZE {
+                        for lx in 0..SECTION_SIZE {
+                            let local = IVec3::new(lx, y, lz);
+                            let pos = local + IVec3::new(x, 0, z) * SECTION_SIZE;
+                            column.set(local, block_at(pos));
+                        }
+                    }
+                }
+                world.insert(key, column);
+            }
+        }
+        let light = world_light(&world);
+        (world, light)
+    }
+
+    #[test]
+    fn floor_under_canopy_is_darker_and_fades() {
+        // Пол на y = 0, навес на y = 3 над x ≥ 6: под ним свет убывает от края.
+        let (world, light) = small_world(|p| {
+            if p.y == 0 || (p.y == 3 && p.x >= 6) {
+                Block::Stone
+            } else {
+                Block::Air
+            }
+        });
+        let mesh = mesh_world_section(&world, &light, IVec3::ZERO, AO)
+            .unwrap()
+            .solid;
+        let brightest = |x| {
+            shades(&top_face(&mesh, IVec3::new(x, 0, 8)).0)
+                .into_iter()
+                .fold(0.0, f32::max)
+        };
+        assert_eq!(brightest(2), 1.0);
+        let under: Vec<f32> = (6..14).map(brightest).collect();
+        assert!(under[0] < 1.0, "{under:?}");
+        assert!(under.windows(2).all(|w| w[1] < w[0]), "{under:?}");
+        assert!(under[7] < 0.5, "{under:?}");
+        assert_shades_match(&mesh, |p| world.block(p), |p| light.sky(p), |_| true);
+    }
+
+    #[test]
+    fn opaque_cells_do_not_darken_average() {
+        // Блок на открытом полу: у его подножия AO, но свет 15 — сам блок (уровень 0)
+        // в среднее не входит, и яркость та же, что без света.
+        let block = IVec3::new(8, 1, 8);
+        let (world, light) = small_world(|p| {
+            if p.y == 0 || p == block {
+                Block::Stone
+            } else {
+                Block::Air
+            }
+        });
+        let mesh = mesh_world_section(&world, &light, IVec3::ZERO, AO)
+            .unwrap()
+            .solid;
+        let (beside, _) = top_face(&mesh, IVec3::new(7, 0, 8));
+        assert_eq!(shades(&beside), [1.0, 0.85, 0.85, 1.0]);
+    }
+
+    #[test]
+    fn water_takes_light_of_cell_in_front() {
+        // Лужа под навесом и такая же под открытым небом.
+        let (world, light) = small_world(|p| match p.y {
+            0 => Block::Stone,
+            1 if p.x == 2 || p.x == 12 => Block::Water,
+            4 if p.x >= 8 => Block::Stone,
+            _ => Block::Air,
+        });
+        let water = mesh_world_section(&world, &light, IVec3::ZERO, AO)
+            .unwrap()
+            .water;
+        let top_shade = |x: i32| {
+            let quad = water
+                .vertices
+                .chunks(4)
+                .find(|q| {
+                    quad_normal(q) == IVec3::Y
+                        && q[0].position[0] == x as f32
+                        && q[0].position[2] == 8.0
+                })
+                .unwrap();
+            assert!(quad.iter().all(|v| v.shade == quad[0].shade), "{quad:?}");
+            quad[0].shade
+        };
+        assert_eq!(top_shade(2), 1.0);
+        assert_eq!(top_shade(12), brightness(light.sky(IVec3::new(12, 2, 8))));
+        assert!(top_shade(12) < 0.5);
+    }
+
     #[test]
     fn world_section_outside_is_none() {
         let mut world = World::new();
         world.insert(IVec2::ZERO, Column::new());
-        assert!(mesh_world_section(&world, IVec3::new(0, 0, 0), AO).is_some());
-        assert!(mesh_world_section(&world, IVec3::new(0, COLUMN_SECTIONS, 0), AO).is_none());
-        assert!(mesh_world_section(&world, IVec3::new(0, -1, 0), AO).is_none());
-        assert!(mesh_world_section(&world, IVec3::new(1, 0, 0), AO).is_none());
+        let light = world_light(&world);
+        for (key, some) in [
+            (IVec3::new(0, 0, 0), true),
+            (IVec3::new(0, COLUMN_SECTIONS, 0), false),
+            (IVec3::new(0, -1, 0), false),
+            (IVec3::new(1, 0, 0), false),
+        ] {
+            assert_eq!(
+                mesh_world_section(&world, &light, key, AO).is_some(),
+                some,
+                "{key}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use crate::terrain::Terrain;
+
+    /// Среднее время `mesh_column` на квадрате колонок 12×12 (соседи загружены);
+    /// запуск: `cargo test --release mesh_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn mesh_timing() {
+        let terrain = Terrain::new(1337);
+        let mut world = World::new();
+        for z in -7..7 {
+            for x in -7..7 {
+                let key = IVec2::new(x, z);
+                world.insert(key, terrain.generate(key));
+            }
+        }
+        let keys: Vec<IVec2> = (-6..6)
+            .flat_map(|z| (-6..6).map(move |x| IVec2::new(x, z)))
+            .collect();
+        let mut light = LightMap::new();
+        for key in world.keys().collect::<Vec<_>>() {
+            light.add_column(&world, key);
+        }
+        let start = std::time::Instant::now();
+        for &key in &keys {
+            let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+            let column = world.column(key).unwrap();
+            std::hint::black_box(mesh_column(
+                column,
+                origin,
+                |local| world.block(origin + local),
+                light.column_sampler(key),
+                MeshOptions::default(),
+            ));
+        }
+        let per_column = start.elapsed() / keys.len() as u32;
+        println!("mesh: {per_column:?} per column");
     }
 }

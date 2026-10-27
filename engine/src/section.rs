@@ -30,6 +30,12 @@ impl Section {
         self.blocks[Self::index(local)]
     }
 
+    /// Блок по индексу `x + 16·z + 256·y` (0..SECTION_VOLUME): для горячих циклов,
+    /// где индекс уже посчитан; за пределами — panic.
+    pub fn get_index(&self, index: usize) -> Block {
+        self.blocks[index]
+    }
+
     /// Ставит блок по локальным координатам; за пределами 0..16 — panic.
     pub fn set(&mut self, local: IVec3, block: Block) {
         self.blocks[Self::index(local)] = block;

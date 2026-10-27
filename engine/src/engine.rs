@@ -12,6 +12,7 @@ use crate::double_tap::DoubleTap;
 use crate::fog::Fog;
 use crate::frustum::Frustum;
 use crate::globals::Globals;
+use crate::light::LightMap;
 use crate::loader::{Loader, NEIGHBORS, Progress};
 use crate::mesh::{self, Vertex};
 use crate::mesher::{MeshData, MeshOptions, SectionMeshes, mesh_column, mesh_world_section};
@@ -101,7 +102,14 @@ pub struct Engine {
     /// Колонки, чьи меши построены со старыми `mesh_options`, дальние первыми: их
     /// перестраивает `stream_columns` в бюджете кадра, с конца. До замены рисуются старые.
     stale: Vec<IVec2>,
+    /// Секции `(x колонки, номер секции, z колонки)`, где после правки или подгрузки
+    /// изменился свет, дальние первыми: их перестраивает `stream_columns` с конца, раньше
+    /// подгрузки — их немного, и правка должна дойти до экрана сразу.
+    stale_sections: Vec<IVec3>,
     world: World,
+    /// Солнечный свет загруженных колонок: колонка попадает сюда сразу после загрузки,
+    /// так что к её мешу (после загрузки всех соседей) свет окончателен.
+    light: LightMap,
     terrain: Terrain,
     seed: i32,
     loader: Loader,
@@ -111,6 +119,10 @@ pub struct Engine {
     performance: Option<Performance>,
     generate_time: AverageTime,
     mesh_time: AverageTime,
+    /// Расчёт света колонки при подгрузке (`LightMap::add_column`).
+    light_time: AverageTime,
+    /// Правка блока: свет и немедленная перестройка задетых секций.
+    edit_time: AverageTime,
     depth_view: wgpu::TextureView,
     /// Взгляд игрока. Позицию задаёт `player`: каждый кадр камера ставится в его глаза.
     camera: Camera,
@@ -234,6 +246,7 @@ impl Engine {
         let performance = web_sys::window().and_then(|w| w.performance());
         let mut generate_time = AverageTime::default();
         let mut mesh_time = AverageTime::default();
+        let mut light_time = AverageTime::default();
         let mut world = World::new();
         let mut loader = Loader::new(camera_column(&camera));
         let mesh_options = MeshOptions::default();
@@ -242,11 +255,16 @@ impl Engine {
             |key| generate_time.measure(&performance, || terrain.generate(key)),
             START_RADIUS,
         );
+        // Порядок не важен: свет не зависит от порядка добавления колонок.
+        let mut light = LightMap::new();
+        for key in world.keys().collect::<Vec<_>>() {
+            light_time.measure(&performance, || light.add_column(&world, key));
+        }
         let column_meshes = start
             .into_iter()
             .map(|key| {
                 let meshes = mesh_time.measure(&performance, || {
-                    upload_column(&device, &world, key, mesh_options)
+                    upload_column(&device, &world, &light, key, mesh_options)
                 });
                 (key, meshes)
             })
@@ -372,7 +390,9 @@ impl Engine {
             column_meshes,
             mesh_options,
             stale: Vec::new(),
+            stale_sections: Vec::new(),
             world,
+            light,
             terrain,
             seed,
             loader,
@@ -380,6 +400,8 @@ impl Engine {
             performance,
             generate_time,
             mesh_time,
+            light_time,
+            edit_time: AverageTime::default(),
             depth_view,
             camera,
             prev_feet: player.feet,
@@ -463,12 +485,24 @@ impl Engine {
         let column = decode_column(bytes).map_err(|e| JsError::new(&e.to_string()))?;
         let key = IVec2::new(x, z);
         self.world.import(key, column);
+        // Свет есть только у загруженной колонки; `add_column` пересчитывает её заново
+        // вместе с соседями. Изменения света не выходят за колонку и 8 соседей, а их
+        // меши перестраиваются ниже целиком.
+        if self.light.column(key).is_some() {
+            self.light.add_column(&self.world, key);
+        }
         // Соседей целиком, а не только граничные секции: импорт идёт раз при старте,
         // до первого кадра, и простота тут дороже пары лишних мешей. Диагональные — из-за
         // AO на углу колонки.
         for key in std::iter::once(key).chain(NEIGHBORS.map(|n| key + n)) {
             if self.column_meshes.contains_key(&key) {
-                let meshes = upload_column(&self.device, &self.world, key, self.mesh_options);
+                let meshes = upload_column(
+                    &self.device,
+                    &self.world,
+                    &self.light,
+                    key,
+                    self.mesh_options,
+                );
                 self.column_meshes.insert(key, meshes);
             }
         }
@@ -519,19 +553,24 @@ impl Engine {
     }
 
     /// Статистика для HUD: `[колонок загружено, колонок с мешами, секций с мешами,
-    /// колонок в очереди на меш (включая перестройку после смены AO), генерация колонки
-    /// в мкс, меширование колонки в мкс, секций нарисовано в прошлом кадре]`.
-    /// Время — среднее с прошлого вызова (или последнее известное, если работы не было).
+    /// колонок в очереди на меш (включая перестройку после смены AO и секции после
+    /// смены света), генерация колонки в мкс, меширование колонки в мкс, секций
+    /// нарисовано в прошлом кадре, свет колонки в мкс, правка блока со светом и
+    /// перестройкой в мкс, память на свет в КиБ]`. Время — среднее с прошлого вызова
+    /// (или последнее известное, если работы не было).
     pub fn stats(&mut self) -> Vec<u32> {
         let sections = self.column_meshes.values().flatten().flatten().count();
         vec![
             self.world.len() as u32,
             self.column_meshes.len() as u32,
             sections as u32,
-            (self.loader.pending() + self.stale.len()) as u32,
+            (self.loader.pending() + self.stale.len() + self.stale_sections.len()) as u32,
             self.generate_time.take_micros(),
             self.mesh_time.take_micros(),
             self.drawn_sections,
+            self.light_time.take_micros(),
+            self.edit_time.take_micros(),
+            (self.light.memory_bytes() / 1024) as u32,
         ]
     }
 
@@ -828,15 +867,18 @@ impl Engine {
         {
             self.column_meshes.remove(&key);
         }
+        self.unload_light();
         let mut loader_done = false;
         for step in 0usize.. {
             // Перестройка чередуется с подгрузкой: при смене AO на ходу у игрока не
             // остаётся дыр на краю мира, а подгрузка не задерживает перестройку.
-            if !self.stale.is_empty() && (loader_done || step % 2 == 0) {
+            if let Some(key) = self.stale_sections.pop() {
+                self.remesh_section(key);
+            } else if !self.stale.is_empty() && (loader_done || step % 2 == 0) {
                 self.rebuild_stale();
             } else if !self.advance_loader() {
                 loader_done = true;
-                if self.stale.is_empty() {
+                if self.stale.is_empty() && self.stale_sections.is_empty() {
                     break;
                 }
                 continue;
@@ -861,10 +903,21 @@ impl Engine {
         });
         match progress {
             Progress::Done => return false,
-            Progress::Generated(_) => {}
+            Progress::Generated(key) => {
+                let changed = self.light_time.measure(&self.performance, || {
+                    self.light.add_column(&self.world, key)
+                });
+                self.queue_sections(changed);
+            }
             Progress::Mesh(key) => {
                 let meshes = self.mesh_time.measure(&self.performance, || {
-                    upload_column(&self.device, &self.world, key, self.mesh_options)
+                    upload_column(
+                        &self.device,
+                        &self.world,
+                        &self.light,
+                        key,
+                        self.mesh_options,
+                    )
                 });
                 self.column_meshes.insert(key, meshes);
             }
@@ -880,10 +933,56 @@ impl Engine {
         };
         if self.column_meshes.contains_key(&key) {
             let meshes = self.mesh_time.measure(&self.performance, || {
-                upload_column(&self.device, &self.world, key, self.mesh_options)
+                upload_column(
+                    &self.device,
+                    &self.world,
+                    &self.light,
+                    key,
+                    self.mesh_options,
+                )
             });
             self.column_meshes.insert(key, meshes);
         }
+    }
+
+    /// Убирает свет колонок, которые загрузчик выгрузил из `World`. Загрузчик не
+    /// сообщает о выгрузке, но в одном `update` колонки только убывают, так что хватает
+    /// сравнить количество.
+    fn unload_light(&mut self) {
+        if self.light.len() <= self.world.len() {
+            return;
+        }
+        let gone: Vec<IVec2> = self
+            .light
+            .keys()
+            .filter(|&key| self.world.column(key).is_none())
+            .collect();
+        for key in gone {
+            let changed = self.light.remove_column(&self.world, key);
+            self.queue_sections(changed);
+        }
+    }
+
+    /// Ставит секции в очередь на перестройку из-за света. Секции колонок без меша
+    /// пропускает: загрузчик построит их целиком позже, уже с новым светом.
+    fn queue_sections(&mut self, keys: Vec<IVec3>) {
+        if keys.is_empty() {
+            return;
+        }
+        for key in keys {
+            if self.column_meshes.contains_key(&IVec2::new(key.x, key.z))
+                && !self.stale_sections.contains(&key)
+            {
+                self.stale_sections.push(key);
+            }
+        }
+        let eye = self.camera.position;
+        let distance = |key: &IVec3| {
+            let center = (key.as_vec3() + 0.5) * SECTION_SIZE as f32;
+            (center - eye).length_squared()
+        };
+        self.stale_sections
+            .sort_by(|a, b| distance(b).total_cmp(&distance(a)));
     }
 }
 
@@ -896,10 +995,14 @@ impl Engine {
     }
 
     /// Ломание и установка по кнопкам мыши, затем перестройка задетых секций в этом
-    /// же кадре — вне бюджета подгрузки, чтобы правка была видна сразу.
+    /// же кадре — вне бюджета подгрузки, чтобы правка была видна сразу. Секции дальше,
+    /// где изменился только свет (пещера под пробитым потолком), уходят в очередь
+    /// `stale_sections` и перестраиваются со следующего кадра в бюджете подгрузки.
     fn interact(&mut self, time: f32) {
+        let start = self.performance.as_ref().map(|p| p.now());
         let mut target = self.pick();
         let mut dirty = HashSet::new();
+        let mut lit = Vec::new();
         // `fire` вызывается каждый кадр, даже без цели: так при удержании темп не сбивается.
         if self.breaking.fire(time)
             && let Some(hit) = target
@@ -909,6 +1012,7 @@ impl Engine {
             && self.world.set_block(hit.block, Block::Air)
         {
             dirty.extend(affected_sections(hit.block));
+            lit.extend(self.light.block_changed(&self.world, hit.block));
             target = self.pick();
         }
         if self.placing.fire(time)
@@ -922,11 +1026,22 @@ impl Engine {
                 && self.world.set_block(pos, block)
             {
                 dirty.extend(affected_sections(pos));
+                lit.extend(self.light.block_changed(&self.world, pos));
                 target = self.pick();
             }
         }
+        if dirty.is_empty() {
+            self.target = target.map(|hit| hit.block);
+            return;
+        }
+        lit.retain(|key| !dirty.contains(key));
+        self.stale_sections.retain(|key| !dirty.contains(key));
         for key in dirty {
             self.remesh_section(key);
+        }
+        self.queue_sections(lit);
+        if let (Some(p), Some(start)) = (&self.performance, start) {
+            self.edit_time.record(p.now() - start);
         }
         self.target = target.map(|hit| hit.block);
     }
@@ -937,7 +1052,8 @@ impl Engine {
         let Some(meshes) = self.column_meshes.get_mut(&IVec2::new(key.x, key.z)) else {
             return;
         };
-        let Some(data) = mesh_world_section(&self.world, key, self.mesh_options) else {
+        let Some(data) = mesh_world_section(&self.world, &self.light, key, self.mesh_options)
+        else {
             return;
         };
         let min = (key * SECTION_SIZE).as_vec3();
@@ -1042,9 +1158,13 @@ impl AverageTime {
         };
         let start = performance.now();
         let result = f();
-        self.total_ms += performance.now() - start;
-        self.count += 1;
+        self.record(performance.now() - start);
         result
+    }
+
+    fn record(&mut self, ms: f64) {
+        self.total_ms += ms;
+        self.count += 1;
     }
 
     fn take_micros(&mut self) -> u32 {
@@ -1113,6 +1233,7 @@ type ColumnMeshes = [Option<SectionMesh>; COLUMN_SECTIONS as usize];
 fn upload_column(
     device: &wgpu::Device,
     world: &World,
+    light: &LightMap,
     key: IVec2,
     options: MeshOptions,
 ) -> ColumnMeshes {
@@ -1120,7 +1241,13 @@ fn upload_column(
         .column(key)
         .expect("loader meshes only loaded columns");
     let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
-    let data = mesh_column(column, origin, |local| world.block(origin + local), options);
+    let data = mesh_column(
+        column,
+        origin,
+        |local| world.block(origin + local),
+        light.column_sampler(key),
+        options,
+    );
     std::array::from_fn(|sy| {
         let min = (origin + IVec3::Y * sy as i32 * SECTION_SIZE).as_vec3();
         upload_section(device, &data[sy], min)

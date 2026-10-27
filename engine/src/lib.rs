@@ -8,6 +8,7 @@ pub mod double_tap;
 pub mod fog;
 pub mod frustum;
 pub mod globals;
+pub mod light;
 pub mod loader;
 pub mod mesh;
 pub mod mesher;
