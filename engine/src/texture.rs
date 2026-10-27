@@ -13,10 +13,11 @@ pub enum Tile {
     LogSide,
     LogTop,
     Leaves,
+    Water,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 8] = [
+    pub const ALL: [Tile; 9] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -25,6 +26,7 @@ impl Tile {
         Tile::LogSide,
         Tile::LogTop,
         Tile::Leaves,
+        Tile::Water,
     ];
 
     pub fn layer(self) -> u32 {
@@ -55,6 +57,9 @@ const BARK: [f32; 3] = [92.0, 68.0, 40.0];
 const RINGS_LIGHT: [f32; 3] = [182.0, 148.0, 94.0];
 const RINGS_DARK: [f32; 3] = [150.0, 118.0, 72.0];
 const LEAVES: [f32; 3] = [58.0, 118.0, 38.0];
+const WATER: [f32; 3] = [52.0, 98.0, 196.0];
+/// Непрозрачность воды: дно на глубине пары блоков ещё видно, а поверхность читается.
+const WATER_ALPHA: u8 = 180;
 /// Доля дырок в листве: примерно как в Minecraft, крона ещё читается как масса.
 const LEAF_HOLES: f32 = 0.3;
 /// Глубина зелёной каймы на боку травы, пикселей сверху.
@@ -75,8 +80,9 @@ pub fn generate() -> Vec<u8> {
         };
         let mut size = TILE_SIZE;
         data.extend_from_slice(&level);
+        let cutout = Tile::ALL.get(layer as usize) == Some(&Tile::Leaves);
         while size > 1 {
-            level = downsample(&level, size);
+            level = downsample(&level, size, cutout);
             size /= 2;
             data.extend_from_slice(&level);
         }
@@ -91,7 +97,11 @@ fn base_level(tile: Tile) -> Vec<u8> {
             pixels.extend(pixel(tile, x, y).map(|c| c.round() as u8));
             // У дырок цвет тот же, что у листвы, а не чёрный: на смешении мип-уровней
             // он попадает в результат, и чёрный дал бы тёмную кайму.
-            pixels.push(if is_hole(tile, x, y) { 0 } else { 255 });
+            pixels.push(match tile {
+                Tile::Water => WATER_ALPHA,
+                _ if is_hole(tile, x, y) => 0,
+                _ => 255,
+            });
         }
     }
     pixels
@@ -99,21 +109,37 @@ fn base_level(tile: Tile) -> Vec<u8> {
 
 /// Уровень вдвое меньше: каждый квадрат 2×2 → один пиксель. Цвет усредняется в
 /// линейном пространстве — среднее sRGB-байтов темнее настоящего, и вдали тайлы бы
-/// темнели — и только по непрозрачным пикселям, чтобы цвет дырок не просачивался.
+/// темнели.
 ///
-/// Альфа остаётся двоичной: 255, если непрозрачны хотя бы 2 из 4. Шейдер отбрасывает
+/// Без `cutout` (вода) альфа — простое среднее: она и так полупрозрачная и
+/// смешивается пайплайном, порога нет.
+///
+/// С `cutout` (листва) цвет берётся только по непрозрачным пикселям, чтобы цвет дырок
+/// не просачивался, а альфа остаётся двоичной: 255, если непрозрачны хотя бы 2 из 4. Шейдер отбрасывает
 /// пиксели с альфой < 0.5, и при простом среднем покрытие таяло бы с каждым уровнем —
 /// кроны вдали «растворялись» бы. Большинство при 70% непрозрачных даёт ~92% на
 /// следующем уровне: вдали листва плотнее, а не прозрачнее. Масштабирование альфы под
 /// покрытие (как для травы с мягкой альфой) здесь лишнее: на уровнях 2×2 и 1×1 долю
 /// 70% всё равно не выразить, а двоичная альфа не зависит от того, где GPU смешает уровни.
-fn downsample(level: &[u8], size: u32) -> Vec<u8> {
+fn downsample(level: &[u8], size: u32, cutout: bool) -> Vec<u8> {
     let half = size / 2;
     let mut out = Vec::with_capacity((half * half * 4) as usize);
     for y in 0..half {
         for x in 0..half {
             let texels = [(0, 0), (1, 0), (0, 1), (1, 1)]
                 .map(|(dx, dy)| (((2 * y + dy) * size + 2 * x + dx) * 4) as usize);
+            if !cutout {
+                for channel in 0..3 {
+                    let sum: f32 = texels
+                        .iter()
+                        .map(|&i| srgb_to_linear(level[i + channel]))
+                        .sum();
+                    out.push(linear_to_srgb(sum / 4.0));
+                }
+                let alpha: u32 = texels.iter().map(|&i| u32::from(level[i + 3])).sum();
+                out.push(((alpha + 2) / 4) as u8);
+                continue;
+            }
             let opaque: Vec<usize> = texels
                 .iter()
                 .copied()
@@ -163,6 +189,7 @@ fn pixel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
         Tile::Stone => STONE,
         Tile::Sand => SAND,
         Tile::Leaves => LEAVES,
+        Tile::Water => WATER,
         // Продольные полосы коры: яркость по столбцу пикселей, заметнее пиксельного шума,
         // иначе вблизи кора неотличима от земли.
         Tile::LogSide => BARK.map(|c| c * (0.65 + 0.55 * noise(tile, x, TILE_SIZE))),
@@ -246,6 +273,10 @@ mod tests {
         assert_eq!(data.len(), LAYER_COUNT as usize * layer_bytes());
         for tile in Tile::ALL {
             let layer = &data[tile.layer() as usize * layer_bytes()..][..layer_bytes()];
+            if tile == Tile::Water {
+                assert!(layer.chunks(4).all(|p| p[3] == WATER_ALPHA), "{tile:?}");
+                continue;
+            }
             assert!(
                 layer.chunks(4).all(|p| p[3] == 0 || p[3] == 255),
                 "{tile:?}"
@@ -263,7 +294,7 @@ mod tests {
         let mut level = color.repeat((TILE_SIZE * TILE_SIZE) as usize);
         let mut size = TILE_SIZE;
         while size > 1 {
-            level = downsample(&level, size);
+            level = downsample(&level, size, true);
             size /= 2;
         }
         assert_eq!(level, color);
@@ -276,7 +307,7 @@ mod tests {
         let black = [0, 0, 0, 255];
         let white = [255, 255, 255, 255];
         let level = [white, black, black, white].concat();
-        let out = downsample(&level, 2);
+        let out = downsample(&level, 2, true);
         assert!((187..=188).contains(&out[0]), "got {}", out[0]);
         assert_eq!(out[3], 255);
     }
@@ -326,10 +357,18 @@ mod tests {
         let green = [58, 118, 38, 255];
         let hole = [0, 0, 0, 0];
         let level = [green, hole, hole, green].concat();
-        assert_eq!(downsample(&level, 2), green);
+        assert_eq!(downsample(&level, 2, true), green);
         // Одна непрозрачная из четырёх — дырка.
         let level = [green, hole, hole, hole].concat();
-        assert_eq!(downsample(&level, 2)[3], 0);
+        assert_eq!(downsample(&level, 2, true)[3], 0);
+    }
+
+    #[test]
+    fn translucent_downsample_averages_alpha() {
+        let level = [[52, 98, 196, 180], [52, 98, 196, 100]].repeat(2).concat();
+        assert_eq!(downsample(&level, 2, false), [52, 98, 196, 140]);
+        // Листва с той же альфой стала бы непрозрачной.
+        assert_eq!(downsample(&level, 2, true)[3], 255);
     }
 
     #[test]

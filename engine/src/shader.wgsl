@@ -7,7 +7,12 @@ struct Globals {
     fog_start: f32,
     fog_color: vec3<f32>,
     fog_end: f32,
+    // 1 — глаза под водой: туман по полному расстоянию и синий тон.
+    underwater: f32,
 };
+
+// Множитель цвета под водой, линейный: гасит красный и зелёный сильнее синего.
+const UNDERWATER_TINT: vec3<f32> = vec3<f32>(0.35, 0.6, 1.0);
 
 @group(0) @binding(0)
 var<uniform> globals: Globals;
@@ -43,6 +48,19 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
+// Цвет грани с тоном и туманом.
+fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
+    var color = texel * in.shade;
+    var distance = length(in.world_pos.xz - globals.camera_pos.xz);
+    if globals.underwater > 0.5 {
+        color *= UNDERWATER_TINT;
+        // Под водой дно в паре блоков под камерой уже должно тонуть в мути.
+        distance = length(in.world_pos - globals.camera_pos);
+    }
+    let fog = smoothstep(globals.fog_start, globals.fog_end, distance);
+    return mix(color, globals.fog_color, fog);
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);
@@ -51,8 +69,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if texel.a < 0.5 {
         discard;
     }
-    let color = texel.rgb * in.shade;
-    let distance = length(in.world_pos.xz - globals.camera_pos.xz);
-    let fog = smoothstep(globals.fog_start, globals.fog_end, distance);
-    return vec4<f32>(mix(color, globals.fog_color, fog), 1.0);
+    return vec4<f32>(shaded(in, texel.rgb), 1.0);
+}
+
+// Вода: полупрозрачная, смешивается пайплайном; `discard` не нужен.
+@fragment
+fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);
+    return vec4<f32>(shaded(in, texel.rgb), texel.a);
 }
