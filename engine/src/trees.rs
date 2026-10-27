@@ -284,7 +284,7 @@ mod tests {
         for cz in -1..=1 {
             for cx in -1..=1 {
                 let key = center + IVec2::new(cx, cz);
-                let ground = terrain.generate_ground(key);
+                let ground = terrain.generate_carved(key);
                 for y in 0..WORLD_HEIGHT {
                     for z in 0..SECTION_SIZE {
                         for x in 0..SECTION_SIZE {
@@ -348,7 +348,7 @@ mod tests {
             tree.base.x.div_euclid(SECTION_SIZE),
             tree.base.z.div_euclid(SECTION_SIZE),
         );
-        let ground = terrain.generate_ground(key);
+        let ground = terrain.generate_carved(key);
         let column = terrain.generate(key);
         let origin = IVec3::new(key.x, 0, key.y) * SECTION_SIZE;
         for log in tree.logs() {

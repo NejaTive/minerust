@@ -175,8 +175,9 @@ mod tests {
         let terrain = Terrain::new(1337);
         for key in [IVec2::ZERO, IVec2::new(-7, 12), IVec2::new(40, -3)] {
             let bytes = round_trip(&terrain.generate(key));
-            // Рельеф даёт ~4 серии на столб (камень, земля, трава, воздух): ~3 КБ из 32.
-            assert!(bytes.len() < 4096, "{key}: {} bytes", bytes.len());
+            // Рельеф даёт ~4 серии на столб (камень, земля, трава, воздух): ~3 КБ из 32;
+            // пещеры добавляют по паре серий в столбах, где проходят.
+            assert!(bytes.len() < 8192, "{key}: {} bytes", bytes.len());
         }
     }
 
