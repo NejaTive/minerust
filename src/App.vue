@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, reactive, ref, useTemplateRef, watch } from 'vue'
 import GameCanvas, {
   type ApiInfo,
   type PlayerInfo,
   type WorldStats,
 } from './components/GameCanvas.vue'
+import Hotbar from './components/Hotbar.vue'
 import Hud from './components/Hud.vue'
 import PauseMenu, { type MenuScreen } from './components/PauseMenu.vue'
-import { type BlockName, type Settings, loadSettings, saveSettings } from './settings'
+import {
+  HOTBAR,
+  type Settings,
+  loadHotbarSlot,
+  loadSettings,
+  saveHotbarSlot,
+  saveSettings,
+} from './settings'
 
 const NOTICE_MS = 2500
 
@@ -16,7 +24,8 @@ const fps = ref(0)
 const api = ref<ApiInfo>()
 const stats = ref<WorldStats>()
 const notice = ref<string>()
-const block = ref<BlockName>()
+const slot = ref(loadHotbarSlot())
+const block = computed(() => HOTBAR[slot.value] ?? null)
 const player = ref<PlayerInfo>()
 
 const game = useTemplateRef('game')
@@ -36,6 +45,7 @@ function showNotice(text: string) {
 }
 
 watch(settings, saveSettings)
+watch(slot, saveHotbarSlot)
 
 function updateSettings(patch: Partial<Settings>) {
   Object.assign(settings, patch)
@@ -69,13 +79,13 @@ async function newWorld() {
 <template>
   <GameCanvas
     ref="game"
+    v-model:slot="slot"
     :settings="settings"
     @fps="fps = $event"
     @stats="stats = $event"
     @api="api = $event"
     @notice="showNotice"
     @render-distance="settings.renderDistance = $event"
-    @block="block = $event"
     @player="player = $event"
     @lock="onLock"
     @busy="busy = $event"
@@ -90,6 +100,7 @@ async function newWorld() {
     :notice="notice"
     :show-debug="settings.showDebug"
   />
+  <Hotbar v-if="locked && api" :slot-index="slot" />
   <PauseMenu
     v-if="!locked"
     v-model:screen="screen"
