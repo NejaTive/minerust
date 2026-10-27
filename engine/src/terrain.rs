@@ -2,6 +2,7 @@ use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use glam::{IVec2, IVec3};
 
 use crate::block::Block;
+use crate::caves::Caves;
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::section::SECTION_SIZE;
 use crate::trees;
@@ -62,6 +63,7 @@ pub struct Terrain {
     hilliness: FastNoiseLite,
     temperature: FastNoiseLite,
     humidity: FastNoiseLite,
+    pub(crate) caves: Caves,
 }
 
 impl Terrain {
@@ -93,6 +95,7 @@ impl Terrain {
             hilliness,
             temperature: climate(2),
             humidity: climate(3),
+            caves: Caves::new(seed),
         }
     }
 
@@ -137,15 +140,27 @@ impl Terrain {
         (y.floor() as i32).clamp(1, WORLD_HEIGHT - 2)
     }
 
-    /// Колонка по её координатам (мировые x, z / 16): земля и деревья, в том числе
-    /// кроны деревьев соседних колонок, нависающие над этой.
+    /// Колонка по её координатам (мировые x, z / 16): земля, пещеры и деревья, в том
+    /// числе кроны деревьев соседних колонок, нависающие над этой.
     pub fn generate(&self, key: IVec2) -> Column {
-        let mut column = self.generate_ground(key);
+        let mut column = self.generate_carved(key);
         trees::plant(self, key, &mut column);
         column
     }
 
-    /// Колонка без деревьев. В пустыне сверху 3–4 блока песка (глубже к центру
+    /// Колонка без деревьев, но с пещерами.
+    pub(crate) fn generate_carved(&self, key: IVec2) -> Column {
+        let mut column = self.generate_ground(key);
+        self.caves.carve(
+            key,
+            &mut column,
+            |x, z| self.surface_height(x, z),
+            |x, z| trees::tree_at(self, x, z).is_some(),
+        );
+        column
+    }
+
+    /// Колонка без деревьев и пещер. В пустыне сверху 3–4 блока песка (глубже к центру
     /// пустыни), в остальных биомах трава и 3 слоя земли; ниже камень. У кромки воды
     /// ([`BEACH`]) вместо травы песок, глубже под водой — земля. Над поверхностью ниже
     /// [`WATER_LEVEL`] — вода до него включительно.
@@ -190,7 +205,7 @@ impl Terrain {
 }
 
 /// 0 до `edge0`, 1 после `edge1`, между ними — плавный переход без излома.
-fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
+pub(crate) fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
     let t = ((v - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -437,5 +452,27 @@ mod tests {
             border <= forest,
             "border step {border}, forest step {forest}"
         );
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    /// Среднее время `generate` на квадрате колонок 16×16; запуск:
+    /// `cargo test --release generate_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn generate_timing() {
+        let terrain = Terrain::new(1337);
+        let keys: Vec<IVec2> = (-8..8)
+            .flat_map(|z| (-8..8).map(move |x| IVec2::new(x, z)))
+            .collect();
+        let start = std::time::Instant::now();
+        for &key in &keys {
+            std::hint::black_box(terrain.generate(key));
+        }
+        let per_column = start.elapsed() / keys.len() as u32;
+        println!("generate: {per_column:?} per column");
     }
 }

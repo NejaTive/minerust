@@ -416,12 +416,14 @@ impl Engine {
     }
 
     /// Состояние `[x, y, z, yaw, pitch, mode]` для передачи в новый `Engine`: x, y, z —
-    /// глаза игрока, `mode` — 0 ходьба, 1 полёт. Скорость не передаётся.
+    /// глаза игрока, `mode` — 0 ходьба, 1 полёт, 2 полёт сквозь блоки. Скорость не
+    /// передаётся.
     pub fn camera_state(&self) -> Vec<f32> {
         let eye = self.player.eye();
         let mode = match self.player.mode {
             Mode::Walking => 0.0,
             Mode::Flying => 1.0,
+            Mode::Noclip => 2.0,
         };
         vec![
             eye.x,
@@ -473,11 +475,12 @@ impl Engine {
         Ok(())
     }
 
-    /// Режим игрока: `"walking"` или `"flying"`.
+    /// Режим игрока: `"walking"`, `"flying"` или `"noclip"`.
     pub fn player_mode(&self) -> String {
         match self.player.mode {
             Mode::Walking => "walking",
             Mode::Flying => "flying",
+            Mode::Noclip => "noclip",
         }
         .to_owned()
     }
@@ -607,6 +610,14 @@ impl Engine {
             }
         } else {
             self.keys.remove(code);
+        }
+    }
+
+    /// Включает отладочный полёт сквозь блоки или возвращает из него в обычный полёт.
+    /// На паузе не действует, как и клавиши.
+    pub fn toggle_noclip(&mut self) {
+        if !self.paused {
+            self.player.toggle_noclip();
         }
     }
 
@@ -1002,6 +1013,7 @@ fn restore_player(state: &[f32]) -> Option<(Camera, Player)> {
     let mode = match mode {
         None => Mode::Walking,
         Some(1.0) => Mode::Flying,
+        Some(2.0) => Mode::Noclip,
         Some(m) if m.is_finite() => Mode::Walking,
         Some(_) => return None,
     };

@@ -25,7 +25,7 @@ export interface WorldStats {
 }
 
 export interface PlayerInfo {
-  mode: 'walking' | 'flying'
+  mode: 'walking' | 'flying' | 'noclip'
   onGround: boolean
 }
 
@@ -378,6 +378,11 @@ function onKeyDown(e: KeyboardEvent) {
   if (!locked.value) return
   if (GAME_KEYS.has(e.code)) e.preventDefault()
   if (e.repeat) return
+  // Полёт сквозь блоки — отладочный: только при включённой отладке в настройках.
+  if (e.code === 'KeyV' && props.settings.showDebug && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    engine.value?.toggle_noclip()
+    return
+  }
   // Цифры выбирают слот и в движок как клавиши не попадают.
   const digit = /^Digit([1-9])$/.exec(e.code)
   if (digit) {

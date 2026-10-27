@@ -67,6 +67,8 @@ const EPS: f32 = 1e-3;
 pub enum Mode {
     Walking,
     Flying,
+    /// Отладочный полёт сквозь блоки: без коллизий и воды, на землю не садится.
+    Noclip,
 }
 
 /// Намерения игрока на шаг: оси в пространстве взгляда (forward/strafe в −1..1),
@@ -128,7 +130,18 @@ impl Player {
                 self.velocity.y = 0.0;
                 Mode::Flying
             }
-            Mode::Flying => Mode::Walking,
+            Mode::Flying | Mode::Noclip => Mode::Walking,
+        };
+    }
+
+    /// Включает полёт сквозь блоки или возвращает из него в обычный полёт.
+    pub fn toggle_noclip(&mut self) {
+        self.mode = match self.mode {
+            Mode::Noclip => Mode::Flying,
+            Mode::Walking | Mode::Flying => {
+                self.velocity.y = 0.0;
+                Mode::Noclip
+            }
         };
     }
 
@@ -187,7 +200,7 @@ impl Player {
 
         let depth = match self.mode {
             Mode::Walking => self.water_depth(&is_water),
-            Mode::Flying => 0.0,
+            Mode::Flying | Mode::Noclip => 0.0,
         };
         // В полёте вода не мешает, поэтому и бег в ней не прерывается (depth там 0).
         if input.forward <= 0.0 || depth > 0.0 {
@@ -230,7 +243,7 @@ impl Player {
                 }
                 self.velocity.y = (self.velocity.y - GRAVITY * TICK).max(-TERMINAL_SPEED);
             }
-            Mode::Flying => {
+            Mode::Flying | Mode::Noclip => {
                 let speed = if self.sprinting {
                     FLY_SPEED * FLY_SPRINT_FACTOR
                 } else {
@@ -244,6 +257,10 @@ impl Player {
         // неё игрок скользит. Y первым — тогда вбок двигается уже стоящее на полу тело.
         let delta = self.velocity * TICK;
         self.on_ground = false;
+        if self.mode == Mode::Noclip {
+            self.feet += delta;
+            return;
+        }
         let mut against_wall = false;
         for axis in [1, 0, 2] {
             let blocked = self.move_axis(axis, delta[axis], &is_solid);
@@ -851,6 +868,32 @@ mod tests {
             "{}",
             player.feet.x
         );
+    }
+
+    #[test]
+    fn noclip_passes_through_blocks_and_never_lands() {
+        let rock = |_: IVec3| true;
+        let mut player = Player::new(Vec3::new(0.5, 70.0, 0.5), Mode::Walking);
+        player.toggle_noclip();
+        assert_eq!(player.mode, Mode::Noclip);
+        let down = Input {
+            descend: true,
+            ..FORWARD
+        };
+        run(&mut player, down, 0.0, 60, &rock);
+        assert!(
+            player.feet.x > 5.0 && player.feet.y < 65.0,
+            "{}",
+            player.feet
+        );
+        assert_eq!(player.mode, Mode::Noclip);
+        assert!(!player.on_ground);
+
+        player.toggle_noclip();
+        assert_eq!(player.mode, Mode::Flying);
+        player.toggle_noclip();
+        player.toggle_mode();
+        assert_eq!(player.mode, Mode::Walking);
     }
 
     #[test]
