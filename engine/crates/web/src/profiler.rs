@@ -25,6 +25,12 @@ impl AverageTime {
         result
     }
 
+    /// Сразу `count` операций общей длительностью `total_ms`.
+    pub(crate) fn record_total(&mut self, total_ms: f64, count: u32) {
+        self.total_ms += total_ms;
+        self.count += count;
+    }
+
     pub(crate) fn record(&mut self, ms: f64) {
         self.total_ms += ms;
         self.count += 1;
@@ -51,6 +57,8 @@ pub(crate) struct SceneStats {
     pub light_kib: usize,
     pub counts: FrameCounts,
     pub gpu_kib: u64,
+    pub gpu_used_kib: u64,
+    pub gpu_timer: bool,
 }
 
 /// Замеры времени для `stats()`.
@@ -63,6 +71,8 @@ pub(crate) struct Profiler {
     pub(crate) light_time: AverageTime,
     /// Правка блока: свет и немедленная перестройка задетых секций.
     pub(crate) edit_time: AverageTime,
+    /// GPU за кадр: render pass по `timestamp-query`, приходит с задержкой в кадры.
+    pub(crate) gpu_frame_time: AverageTime,
     /// Замеры кадра включены (`set_profiling`): иначе нет лишних вызовов `performance.now`.
     profiling: bool,
     /// CPU за кадр: подгрузка и меш в бюджете.
@@ -87,6 +97,7 @@ impl Profiler {
             mesh_time: AverageTime::default(),
             light_time: AverageTime::default(),
             edit_time: AverageTime::default(),
+            gpu_frame_time: AverageTime::default(),
             profiling: false,
             stream_frame_time: AverageTime::default(),
             build_frame_time: AverageTime::default(),
@@ -170,6 +181,9 @@ impl Profiler {
             water_indices: counts.water_indices,
             draw_calls: counts.draw_calls,
             gpu_kib: scene.gpu_kib as u32,
+            gpu_used_kib: scene.gpu_used_kib as u32,
+            gpu_frame_us: self.gpu_frame_time.take_micros(),
+            gpu_timer: scene.gpu_timer,
             load_ms: self.load_ms,
         }
     }

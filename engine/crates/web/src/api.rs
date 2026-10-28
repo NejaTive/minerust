@@ -66,9 +66,19 @@ pub struct WorldStats {
     /// Draw-вызовов в последнем кадре.
     #[wasm_bindgen(js_name = drawCalls)]
     pub draw_calls: u32,
-    /// Меши на GPU, КиБ.
+    /// Буферы мешей на GPU целиком (арена вершин и буфер углов с запасом) и общие индексы, КиБ.
     #[wasm_bindgen(js_name = gpuKib)]
     pub gpu_kib: u32,
+    /// Из `gpuKib` занято мешами, КиБ; разница — запас арены.
+    #[wasm_bindgen(js_name = gpuUsedKib)]
+    pub gpu_used_kib: u32,
+    /// GPU за кадр (один render pass), мкс. 0 — нет данных: профилирование выключено,
+    /// замеры ещё не пришли (результат опаздывает на пару кадров) или нет `gpuTimer`.
+    #[wasm_bindgen(js_name = gpuFrameUs)]
+    pub gpu_frame_us: u32,
+    /// Адаптер даёт `timestamp-query`; без него `gpuFrameUs` всегда 0.
+    #[wasm_bindgen(js_name = gpuTimer)]
+    pub gpu_timer: bool,
     /// Полная загрузка мира, мс; 0, пока идёт. Считается от создания движка или `set_camera_state`.
     #[wasm_bindgen(js_name = loadMs)]
     pub load_ms: u32,

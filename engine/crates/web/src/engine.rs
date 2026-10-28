@@ -161,7 +161,12 @@ impl Engine {
             light_kib: self.game.light.memory_bytes() / 1024,
             counts: self.renderer.frame_counts(),
             gpu_kib: self.renderer.gpu_bytes() / 1024,
+            gpu_used_kib: self.renderer.gpu_used_bytes() / 1024,
+            gpu_timer: self.renderer.has_gpu_timer(),
         };
+        if let Some((total_ms, count)) = self.renderer.take_gpu_samples() {
+            self.profiler.gpu_frame_time.record_total(total_ms, count);
+        }
         self.profiler.stats(&scene)
     }
 
@@ -171,10 +176,11 @@ impl Engine {
         self.profiler.load_ms()
     }
 
-    /// Замеры времени кадра для `stats()`: три `performance.now` за кадр. Выключены по
+    /// Замеры времени кадра для `stats()`: три `performance.now` за кадр и метки времени GPU. Выключены по
     /// умолчанию, включаются отладочным HUD и режимом замера.
     pub fn set_profiling(&mut self, enabled: bool) {
         self.profiler.set_profiling(enabled);
+        self.renderer.set_gpu_timing(enabled);
     }
 
     /// Отладочная: ставит игрока и взгляд из `[x, y, z, yaw, pitch, mode]` (как

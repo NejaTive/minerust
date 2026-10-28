@@ -48,9 +48,15 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
       {{ ms(stats.submitUs) }} мс
     </div>
     <div v-if="showDebug && stats">
+      Кадр GPU:
+      <template v-if="!stats.gpuTimer">нет timestamp-query</template
+      ><template v-else-if="stats.gpuFrameUs">{{ ms(stats.gpuFrameUs) }} мс</template
+      ><template v-else>нет данных</template>
+    </div>
+    <div v-if="showDebug && stats">
       Вершин {{ k(stats.solidVertices + stats.waterVertices) }} (вода {{ k(stats.waterVertices) }})
       · индексов {{ k(stats.solidIndices + stats.waterIndices) }} · draw {{ stats.drawCalls }} · GPU
-      {{ (stats.gpuKib / 1024).toFixed(1) }} МиБ
+      {{ (stats.gpuKib / 1024).toFixed(1) }} МиБ (занято {{ (stats.gpuUsedKib / 1024).toFixed(1) }})
     </div>
     <div v-if="showDebug && stats">
       Колонка: свет {{ ms(stats.lightUs) }} мс · загрузка мира
