@@ -10,19 +10,18 @@ import {
   loadGraphicsApi,
   saveGraphicsApi,
 } from '../settings'
+import {
+  BENCH,
+  BENCH_POINTS,
+  BENCH_SEED,
+  FrameRecorder,
+  benchApi,
+  runBench,
+} from '../bench'
+import { type WorldStats, parseStats } from '../stats'
 import { type SavedColumn, type WorldMeta, type WorldStorage, openStorage } from '../storage'
 
-/** Порядок полей — как в `Engine.stats()`; время — в микросекундах. */
-export interface WorldStats {
-  columns: number
-  meshedColumns: number
-  meshedSections: number
-  queued: number
-  generateUs: number
-  meshUs: number
-  /** Секций, прошедших отсечение по пирамиде видимости, в последнем кадре. */
-  drawnSections: number
-}
+export type { WorldStats }
 
 export interface PlayerInfo {
   mode: 'walking' | 'flying' | 'noclip'
@@ -63,7 +62,8 @@ const engine = shallowRef<Engine>()
 const error = ref<string>()
 const locked = ref(false)
 
-let preferred = loadGraphicsApi()
+let preferred = (BENCH && benchApi()) || loadGraphicsApi()
+const benchFrames = new FrameRecorder()
 // Блокирует G и N, пока движок пересоздаётся; до конца загрузки true.
 let switching = true
 function setSwitching(value: boolean) {
@@ -124,6 +124,8 @@ function applySettings(target: Engine) {
   target.set_ambient_occlusion(s.ambientOcclusion)
   target.set_mouse_sensitivity(s.mouseSensitivity)
   target.set_fov(s.fov)
+  // Замеры кадра нужны только отладочному HUD и режиму замера.
+  target.set_profiling(s.showDebug)
 }
 
 watch(
@@ -406,7 +408,9 @@ function startLoop() {
   let player: PlayerInfo | undefined
   const frame = (now: number) => {
     const current = engine.value!
+    const renderStart = BENCH ? performance.now() : 0
     current.render(now / 1000)
+    if (BENCH) benchFrames.push(now, performance.now() - renderStart)
     frames++
     // Читаем каждый кадр, чтобы HUD не отставал, но эмитим только изменения.
     const mode = current.player_mode() as PlayerInfo['mode']
@@ -417,17 +421,7 @@ function startLoop() {
     }
     if (now - lastFpsTime >= 1000) {
       emit('fps', frames)
-      const [columns, meshedColumns, meshedSections, queued, generateUs, meshUs, drawnSections] =
-        engine.value!.stats()
-      emit('stats', {
-        columns,
-        meshedColumns,
-        meshedSections,
-        queued,
-        generateUs,
-        meshUs,
-        drawnSections,
-      })
+      emit('stats', parseStats(engine.value!.stats()))
       frames = 0
       lastFpsTime = now
     }
@@ -448,7 +442,7 @@ async function start(seed: number, player?: ArrayLike<number>) {
   importColumns(created)
   applySettings(created)
   // Меню открыто (курсор не захвачен) — новый движок тоже начинает с паузы.
-  created.set_paused(!locked.value)
+  created.set_paused(BENCH ? false : !locked.value)
   applySlot(created)
   engine.value = created
   const backend = created.backend() as GraphicsApi
@@ -541,9 +535,15 @@ onMounted(async () => {
   try {
     await init()
     formatVersion = Engine.format_version()
-    const world = await loadWorld()
-    await start(world.seed, world.player)
-    autosaveId = window.setInterval(save, AUTOSAVE_MS)
+    if (BENCH) {
+      // Мир в памяти: без хранилища `save` ничего не делает, автосохранения нет.
+      await start(BENCH_SEED, BENCH_POINTS[0].camera)
+      void runBench(() => engine.value!, benchFrames, canvas.value!)
+    } else {
+      const world = await loadWorld()
+      await start(world.seed, world.player)
+      autosaveId = window.setInterval(save, AUTOSAVE_MS)
+    }
   } catch (e) {
     error.value = String(e)
   } finally {

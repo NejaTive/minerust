@@ -14,6 +14,7 @@ defineProps<{
 }>()
 
 const ms = (us: number) => (us / 1000).toFixed(2)
+const k = (n: number) => `${(n / 1000).toFixed(0)}k`
 </script>
 
 <template>
@@ -31,6 +32,19 @@ const ms = (us: number) => (us / 1000).toFixed(2)
     </div>
     <div v-if="showDebug && stats">
       Колонка: генерация {{ ms(stats.generateUs) }} мс · меш {{ ms(stats.meshUs) }} мс
+    </div>
+    <div v-if="showDebug && stats">
+      Кадр CPU: подгрузка {{ ms(stats.streamUs) }} · сборка {{ ms(stats.buildUs) }} · отправка
+      {{ ms(stats.submitUs) }} мс
+    </div>
+    <div v-if="showDebug && stats">
+      Вершин {{ k(stats.solidVertices + stats.waterVertices) }} (вода
+      {{ k(stats.waterVertices) }}) · индексов {{ k(stats.solidIndices + stats.waterIndices) }} ·
+      draw {{ stats.drawCalls }} · GPU {{ (stats.gpuKib / 1024).toFixed(1) }} МиБ
+    </div>
+    <div v-if="showDebug && stats">
+      Колонка: свет {{ ms(stats.lightUs) }} мс · загрузка мира
+      <template v-if="stats.loadMs">{{ stats.loadMs }} мс</template><template v-else>идёт</template>
     </div>
     <div v-if="player">
       <template v-if="player.mode === 'flying'">Режим: полёт</template>

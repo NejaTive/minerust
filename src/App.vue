@@ -8,6 +8,7 @@ import GameCanvas, {
 import Hotbar from './components/Hotbar.vue'
 import Hud from './components/Hud.vue'
 import PauseMenu, { type MenuScreen } from './components/PauseMenu.vue'
+import { BENCH, BENCH_DEBUG, BENCH_RENDER_DISTANCE } from './bench'
 import {
   HOTBAR,
   type Settings,
@@ -20,6 +21,14 @@ import {
 const NOTICE_MS = 2500
 
 const settings = reactive<Settings>(loadSettings())
+// Режим замера: фиксированные настройки, поверх сохранённых, и в localStorage они не попадают.
+if (BENCH) {
+  Object.assign(settings, {
+    renderDistance: BENCH_RENDER_DISTANCE,
+    ambientOcclusion: true,
+    showDebug: BENCH_DEBUG,
+  })
+}
 const fps = ref(0)
 const api = ref<ApiInfo>()
 const stats = ref<WorldStats>()
@@ -44,7 +53,9 @@ function showNotice(text: string) {
   noticeTimer = window.setTimeout(() => (notice.value = undefined), NOTICE_MS)
 }
 
-watch(settings, saveSettings)
+watch(settings, (value) => {
+  if (!BENCH) saveSettings(value)
+})
 watch(slot, saveHotbarSlot)
 
 function updateSettings(patch: Partial<Settings>) {
@@ -102,7 +113,7 @@ async function newWorld() {
   />
   <Hotbar v-if="locked && api" :slot-index="slot" />
   <PauseMenu
-    v-if="!locked"
+    v-if="!locked && !BENCH"
     v-model:screen="screen"
     :settings="settings"
     :api="api"
