@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { API_LABELS, BLOCK_LABELS, type BlockName } from '../settings'
-import type { ApiInfo, PlayerInfo, TimeInfo, WorldStats } from './GameCanvas.vue'
+import { BLOCK_LABELS, type BlockName } from '../settings'
+import type { PlayerInfo, TimeInfo, WorldStats } from './GameCanvas.vue'
 
 defineProps<{
   fps: number
-  api?: ApiInfo
   stats?: WorldStats
   time?: TimeInfo
   /** Блок в выбранном слоте; `null` — слот пуст. */
@@ -32,9 +31,7 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
 <template>
   <div class="hud">
     <div>MineRust · {{ fps }} FPS</div>
-    <div v-if="showDebug && api">
-      {{ API_LABELS[api.backend] }}<template v-if="api.fallback"> (WebGPU недоступен)</template>
-    </div>
+    <div v-if="showDebug">WebGPU</div>
     <div v-if="showDebug && stats">
       Колонки {{ stats.columns }} · с мешем {{ stats.meshedColumns }} · в очереди
       {{ stats.queued }}

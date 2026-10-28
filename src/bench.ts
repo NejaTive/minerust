@@ -1,18 +1,12 @@
 import type { Engine } from '@engine'
-import type { GraphicsApi } from './settings'
 import { type WorldStats, parseStats } from './stats'
 
-/** Режим замера: `?bench` в адресе. Дополнительно `&api=webgpu|webgl2` выбирает API, не трогая сохранённый. */
+/** Режим замера: `?bench` в адресе. */
 const params = new URLSearchParams(location.search)
 export const BENCH = params.has('bench')
 
 /** `&debug=0` — как обычная игра с выключенным `showDebug`: без замеров кадра и HUD (для сравнения накладных). */
 export const BENCH_DEBUG = params.get('debug') !== '0'
-
-export function benchApi(): GraphicsApi | undefined {
-  const api = params.get('api')
-  return api === 'webgpu' || api === 'webgl2' ? api : undefined
-}
 
 /** Сид замера: мир в памяти, IndexedDB не читается и не пишется. Тот же сид — в `bench_points` (terrain.rs). */
 export const BENCH_SEED = 1337
@@ -101,7 +95,6 @@ export interface BenchResult {
   error?: string
   /** Версия и коммит сборки: замеры разных версий сравниваются по ним. */
   version: string
-  backend: string
   build: string
   seed: number
   renderDistance: number
@@ -134,7 +127,6 @@ export async function runBench(
   const result: BenchResult = {
     done: false,
     version: __APP_COMMIT__ ? `${__APP_VERSION__}+${__APP_COMMIT__}` : __APP_VERSION__,
-    backend: first.backend(),
     build: (first.constructor as typeof Engine).build_profile(),
     seed: BENCH_SEED,
     renderDistance: first.render_distance(),

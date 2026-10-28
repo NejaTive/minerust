@@ -1,10 +1,3 @@
-export type GraphicsApi = 'webgpu' | 'webgl2'
-
-export const API_LABELS: Record<GraphicsApi, string> = {
-  webgpu: 'WebGPU',
-  webgl2: 'WebGL2',
-}
-
 /** Блоки, которые игрок ставит; имена — как в `Engine.select_block`. */
 export type BlockName =
   | 'grass'
@@ -49,7 +42,6 @@ export const HOTBAR: (BlockName | null)[] = [
   'poppy',
 ]
 
-const GRAPHICS_API_KEY = 'minerust.graphicsApi'
 // Ключ дальности остался прежним, чтобы обновление не сбросило её у игрока.
 const RENDER_DISTANCE_KEY = 'minerust.renderDistance'
 const AMBIENT_OCCLUSION_KEY = 'minerust.ambientOcclusion'
@@ -57,8 +49,8 @@ const MOUSE_SENSITIVITY_KEY = 'minerust.mouseSensitivity'
 const FOV_KEY = 'minerust.fov'
 const SHOW_DEBUG_KEY = 'minerust.showDebug'
 const HOTBAR_SLOT_KEY = 'minerust.hotbarSlot'
-// Ключ убранной панели управления: чистим, чтобы не копился мусор.
-const OBSOLETE_KEYS = ['minerust.controlsHidden']
+// Ключи убранных настроек (панель управления, выбор графического API): чистим, чтобы не копился мусор.
+const OBSOLETE_KEYS = ['minerust.controlsHidden', 'minerust.graphicsApi']
 
 /** Дальность прорисовки в колонках; пределы — как в `engine/src/loader.rs`. */
 export const MIN_RENDER_DISTANCE = 4
@@ -70,7 +62,7 @@ export const MAX_MOUSE_SENSITIVITY = 3
 export const MIN_FOV = 60
 export const MAX_FOV = 110
 
-/** Настройки игры. Графический API хранится отдельно: его меняет пересоздание движка. */
+/** Настройки игры. */
 export interface Settings {
   renderDistance: number
   ambientOcclusion: boolean
@@ -123,14 +115,6 @@ function readNumber(key: string, min: number, max: number, fallback: number): nu
 function readBool(key: string, fallback: boolean): boolean {
   const raw = read(key)
   return raw === null ? fallback : raw === 'true'
-}
-
-export function loadGraphicsApi(): GraphicsApi {
-  return read(GRAPHICS_API_KEY) === 'webgl2' ? 'webgl2' : 'webgpu'
-}
-
-export function saveGraphicsApi(api: GraphicsApi) {
-  write(GRAPHICS_API_KEY, api)
 }
 
 export function loadSettings(): Settings {

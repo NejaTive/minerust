@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref, useTemplateRef, watch } from 'vue'
 import GameCanvas, {
-  type ApiInfo,
   type PlayerInfo,
   type TimeInfo,
   type WorldStats,
 } from './components/GameCanvas.vue'
 import Hotbar from './components/Hotbar.vue'
 import Hud from './components/Hud.vue'
+import WebGpuRequired from './components/WebGpuRequired.vue'
 import PauseMenu, { type MenuScreen } from './components/PauseMenu.vue'
 import { BENCH, BENCH_DEBUG, BENCH_RENDER_DISTANCE } from './bench'
 import {
@@ -31,7 +31,10 @@ if (BENCH) {
   })
 }
 const fps = ref(0)
-const api = ref<ApiInfo>()
+// Движок создан: до этого хотбар не показываем.
+const ready = ref(false)
+// WebGPU нет; пустая строка — причина неизвестна (нет `navigator.gpu`).
+const noWebGpu = ref<string>()
 const stats = ref<WorldStats>()
 const time = ref<TimeInfo>()
 const notice = ref<string>()
@@ -97,7 +100,8 @@ async function newWorld() {
     @fps="fps = $event"
     @stats="stats = $event"
     @time="time = $event"
-    @api="api = $event"
+    @ready="ready = true"
+    @no-webgpu="noWebGpu = $event ?? ''"
     @notice="showNotice"
     @render-distance="settings.renderDistance = $event"
     @player="player = $event"
@@ -105,9 +109,9 @@ async function newWorld() {
     @busy="busy = $event"
     @ask-new-world="askNewWorld"
   />
+  <WebGpuRequired v-if="noWebGpu !== undefined" :reason="noWebGpu" />
   <Hud
     :fps="fps"
-    :api="api"
     :stats="stats"
     :time="time"
     :block="block"
@@ -115,18 +119,16 @@ async function newWorld() {
     :notice="notice"
     :show-debug="settings.showDebug"
   />
-  <Hotbar v-if="locked && api" :slot-index="slot" />
+  <Hotbar v-if="locked && ready" :slot-index="slot" />
   <PauseMenu
     v-if="!locked && !BENCH"
     v-model:screen="screen"
     :settings="settings"
-    :api="api"
     :started="started"
     :busy="busy"
     :lock-failed="lockFailed"
     @update:settings="updateSettings"
     @play="play"
-    @set-api="game?.switchApi($event)"
     @new-world="newWorld"
   />
 </template>

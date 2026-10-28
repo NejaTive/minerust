@@ -3,12 +3,9 @@ import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import init, { Engine } from '@engine'
 import {
   HOTBAR,
-  type GraphicsApi,
   MAX_RENDER_DISTANCE,
   MIN_RENDER_DISTANCE,
   type Settings,
-  loadGraphicsApi,
-  saveGraphicsApi,
 } from '../settings'
 import {
   BENCH,
@@ -16,9 +13,9 @@ import {
   BENCH_SEED,
   BENCH_TIME,
   FrameRecorder,
-  benchApi,
   runBench,
 } from '../bench'
+import { NoWebGpuError, hasWebGpu } from '../gpu'
 import { type WorldStats, parseStats } from '../stats'
 import { type SavedColumn, type WorldMeta, type WorldStorage, openStorage } from '../storage'
 
@@ -34,18 +31,15 @@ export interface PlayerInfo {
   onGround: boolean
 }
 
-export interface ApiInfo {
-  backend: GraphicsApi
-  /** Просили WebGPU, но браузер его не дал, и движок работает на WebGL2. */
-  fallback: boolean
-}
-
 const props = defineProps<{ settings: Settings; slot: number }>()
 
 const emit = defineEmits<{
   fps: [value: number]
   stats: [value: WorldStats]
-  api: [info: ApiInfo]
+  /** Движок создан и рисует: можно показывать хотбар. */
+  ready: []
+  /** WebGPU нет: `reason` — текст ошибки движка, если браузер его заявил, но адаптера нет. */
+  'no-webgpu': [reason?: string]
   notice: [text: string]
   'render-distance': [columns: number]
   /** Игрок выбрал слот хотбара (клавиша, колесо): v-model:slot. */
@@ -62,17 +56,16 @@ const emit = defineEmits<{
 }>()
 
 const canvas = ref<HTMLCanvasElement>()
-// Смена ключа пересоздаёт <canvas>: тип контекста (webgpu/webgl2) фиксируется первым
-// getContext, и старый canvas другой API уже не отдаст.
+// Смена ключа пересоздаёт <canvas>: новый мир начинается на чистом контексте, а не на
+// переконфигурированной поверхности прежнего движка.
 const canvasKey = ref(0)
 // shallowRef: Vue не должен оборачивать wasm-объект в Proxy.
 const engine = shallowRef<Engine>()
 const error = ref<string>()
 const locked = ref(false)
 
-let preferred = (BENCH && benchApi()) || loadGraphicsApi()
 const benchFrames = new FrameRecorder()
-// Блокирует G и N, пока движок пересоздаётся; до конца загрузки true.
+// Блокирует N, пока движок пересоздаётся; до конца загрузки true.
 let switching = true
 function setSwitching(value: boolean) {
   switching = value
@@ -157,7 +150,7 @@ function onMouseUp(e: MouseEvent) {
   engine.value?.mouse_button(e.button, false)
 }
 
-/** Выбранный слот — в движок. Слот живёт в App, а не в движке: движок пересоздаётся при смене API. */
+/** Выбранный слот — в движок. Слот живёт в App, а не в движке: движок пересоздаётся (новый мир). */
 function applySlot(target: Engine) {
   // Пустая строка — пустая рука: ПКМ ничего не ставит.
   target.select_block(HOTBAR[props.slot] ?? '')
@@ -200,8 +193,7 @@ const AUTOSAVE_MS = 5000
 // `null` — IndexedDB недоступен, игра идёт без сохранений.
 let storage: WorldStorage | null = null
 let formatVersion = 0
-// Последние байты каждой изменённой колонки текущего мира. Из этой копии, а не из базы,
-// новый движок получает правки при смене API: так G не теряет их и без IndexedDB.
+// Последние байты каждой изменённой колонки текущего мира (и прочитанных из базы).
 const worldColumns = new Map<string, SavedColumn>()
 // Колонки, снятые с движка, но ещё не записанные. При ошибке записи остаются здесь
 // и уходят со следующим сохранением: `drain_dirty` второй раз их не отдаст.
@@ -349,20 +341,17 @@ function importColumns(created: Engine) {
   if (broken > 0) emit('notice', `Повреждённые колонки пропущены: ${broken}`)
 }
 
-const HOTKEYS = new Set(['KeyG', 'KeyN', 'BracketLeft', 'BracketRight'])
+const HOTKEYS = new Set(['KeyN', 'BracketLeft', 'BracketRight'])
 
 /** Хоткеи интерфейса: работают без pointer lock и в движок не попадают. */
 function onHotkey(e: KeyboardEvent): boolean {
   if (!HOTKEYS.has(e.code)) return false
   // Cmd+H / Ctrl+G и т.п. — системные сочетания, их не перехватываем.
   if (e.ctrlKey || e.metaKey || e.altKey) return false
-  // Дальность при удержании листается автоповтором; G и N — по одному нажатию.
+  // Дальность при удержании листается автоповтором; N — по одному нажатию.
   if (e.code === 'BracketLeft') changeRenderDistance(-1)
   else if (e.code === 'BracketRight') changeRenderDistance(1)
-  else if (!e.repeat) {
-    if (e.code === 'KeyG') void switchApi()
-    else if (!switching) emit('ask-new-world')
-  }
+  else if (!e.repeat && !switching) emit('ask-new-world')
   return true
 }
 
@@ -452,7 +441,11 @@ function startLoop() {
 async function start(seed: number, player?: ArrayLike<number>, time?: number) {
   resize()
   const camera = player ? Float32Array.from(player) : undefined
-  const created = await Engine.create(canvas.value!, preferred, camera, seed)
+  const created = await Engine.create(canvas.value!, camera, seed).catch((e: unknown) => {
+    // Движок сообщает об отсутствии адаптера или устройства текстом с префиксом «WebGPU».
+    const text = e instanceof Error ? e.message : String(e)
+    throw text.startsWith('WebGPU ') ? new NoWebGpuError(text) : e
+  })
   if (disposed) {
     created.free()
     return
@@ -470,8 +463,7 @@ async function start(seed: number, player?: ArrayLike<number>, time?: number) {
   created.set_paused(BENCH ? false : !locked.value)
   applySlot(created)
   engine.value = created
-  const backend = created.backend() as GraphicsApi
-  emit('api', { backend, fallback: preferred === 'webgpu' && backend === 'webgl2' })
+  emit('ready')
 
   resizeObserver = new ResizeObserver(resize)
   resizeObserver.observe(canvas.value!)
@@ -486,38 +478,6 @@ function stop() {
   if (document.pointerLockElement === canvas.value) document.exitPointerLock()
   engine.value?.free()
   engine.value = undefined
-}
-
-/** Переключает графический API; без аргумента — на другой, как клавиша G. */
-async function switchApi(requested?: GraphicsApi) {
-  const current = engine.value
-  if (switching || !current) return
-  const target: GraphicsApi =
-    requested ?? (current.backend() === 'webgpu' ? 'webgl2' : 'webgpu')
-  if (target === current.backend()) return
-  setSwitching(true)
-  try {
-    // Проверяем заранее, чтобы не пересоздавать canvas ради того же WebGL2.
-    if (target === 'webgpu' && !(await Engine.webgpu_supported())) {
-      emit('notice', 'WebGPU недоступен в этом браузере — остаётся WebGL2')
-      return
-    }
-    const camera = current.camera_state()
-    const seed = current.seed()
-    const time = current.time_of_day()
-    // Кроме записи в базу, `save` снимает правки в `worldColumns`: оттуда их получит новый движок.
-    await save()
-    stop()
-    preferred = target
-    saveGraphicsApi(target)
-    canvasKey.value++
-    await nextTick()
-    await start(seed, camera, time)
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    setSwitching(false)
-  }
 }
 
 /** Подтверждение спрашивает меню; здесь мир заменяется сразу. */
@@ -558,6 +518,12 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('pagehide', onPageHide)
 
+  if (!hasWebGpu()) {
+    // wasm не грузим: без WebGPU движок всё равно не стартует.
+    emit('no-webgpu')
+    setSwitching(false)
+    return
+  }
   try {
     await init()
     formatVersion = Engine.format_version()
@@ -571,7 +537,8 @@ onMounted(async () => {
       autosaveId = window.setInterval(save, AUTOSAVE_MS)
     }
   } catch (e) {
-    error.value = String(e)
+    if (e instanceof NoWebGpuError) emit('no-webgpu', e.message)
+    else error.value = String(e)
   } finally {
     setSwitching(false)
   }
@@ -594,7 +561,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pagehide', onPageHide)
 })
 
-defineExpose({ requestLock, releaseCursor, switchApi, newWorld })
+defineExpose({ requestLock, releaseCursor, newWorld })
 </script>
 
 <template>
