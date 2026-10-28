@@ -9,7 +9,9 @@ const { version } = JSON.parse(readFileSync('./package.json', 'utf8'))
 // Без git (архив исходников) хеша нет — версия всё равно показывается.
 function commit(): string {
   try {
-    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim()
   } catch {
     return ''
   }

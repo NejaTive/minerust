@@ -1,20 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import init, { Engine } from '@engine'
-import {
-  HOTBAR,
-  MAX_RENDER_DISTANCE,
-  MIN_RENDER_DISTANCE,
-  type Settings,
-} from '../settings'
-import {
-  BENCH,
-  BENCH_POINTS,
-  BENCH_SEED,
-  BENCH_TIME,
-  FrameRecorder,
-  runBench,
-} from '../bench'
+import { HOTBAR, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, type Settings } from '../settings'
+import { BENCH, BENCH_POINTS, BENCH_SEED, BENCH_TIME, FrameRecorder, runBench } from '../bench'
 import { NoWebGpuError, hasWebGpu } from '../gpu'
 import { type WorldStats, parseStats } from '../stats'
 import { type SavedColumn, type WorldMeta, type WorldStorage, openStorage } from '../storage'
@@ -586,12 +574,7 @@ defineExpose({ requestLock, releaseCursor, newWorld })
 </script>
 
 <template>
-  <canvas
-    :key="canvasKey"
-    ref="canvas"
-    class="game"
-    @contextmenu.prevent
-  />
+  <canvas :key="canvasKey" ref="canvas" class="game" @contextmenu.prevent />
   <div v-if="engine && locked" class="crosshair" />
   <div v-if="error" class="error">Не удалось запустить движок: {{ error }}</div>
 </template>

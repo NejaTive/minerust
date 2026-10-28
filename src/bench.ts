@@ -143,7 +143,8 @@ export async function runBench(
       recorder.reset()
       const started = performance.now()
       while (current.load_ms() === 0) {
-        if (performance.now() - started > LOAD_TIMEOUT_MS) throw new Error(`${point.name}: load timeout`)
+        if (performance.now() - started > LOAD_TIMEOUT_MS)
+          throw new Error(`${point.name}: load timeout`)
         await sleep(50)
       }
       const loaded = parseStats(current.stats())

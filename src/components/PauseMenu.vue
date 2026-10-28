@@ -35,7 +35,6 @@ const emit = defineEmits<{
 
 const VERSION = __APP_COMMIT__ ? `v${__APP_VERSION__} · ${__APP_COMMIT__}` : `v${__APP_VERSION__}`
 
-
 const CONTROLS = [
   { keys: ['Esc'], action: 'пауза и меню' },
   { keys: ['W', 'A', 'S', 'D'], action: 'движение' },
@@ -91,8 +90,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
         </button>
         <p v-if="lockFailed" class="warn">Браузер не дал захватить курсор — нажмите ещё раз</p>
         <p v-if="newerSave" class="warn">
-          Сохранение из более новой версии игры: оно не загружено и не изменится, пока вы не
-          начнёте новый мир
+          Сохранение из более новой версии игры: оно не загружено и не изменится, пока вы не начнёте
+          новый мир
         </p>
         <button :disabled="busy" @click="go('confirm')">Новый мир</button>
         <button @click="go('settings')">Настройки</button>
