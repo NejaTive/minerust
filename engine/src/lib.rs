@@ -4,6 +4,7 @@
 pub mod block;
 pub mod caves;
 pub mod column;
+pub mod daytime;
 pub mod double_tap;
 pub mod fog;
 pub mod frustum;

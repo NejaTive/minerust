@@ -15,6 +15,8 @@ export interface WorldMeta {
   seed: number
   /** `Engine.camera_state()`: глаза x, y, z, yaw, pitch, режим. */
   player: number[]
+  /** `Engine.time_of_day()`, 0..1; в старых сохранениях нет — начинается утро. */
+  time?: number
 }
 
 export interface SavedColumn {

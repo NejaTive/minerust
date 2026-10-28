@@ -14,6 +14,7 @@ import {
   BENCH,
   BENCH_POINTS,
   BENCH_SEED,
+  BENCH_TIME,
   FrameRecorder,
   benchApi,
   runBench,
@@ -22,6 +23,11 @@ import { type WorldStats, parseStats } from '../stats'
 import { type SavedColumn, type WorldMeta, type WorldStorage, openStorage } from '../storage'
 
 export type { WorldStats }
+
+export interface TimeInfo {
+  time: number
+  phase: string
+}
 
 export interface PlayerInfo {
   mode: 'walking' | 'flying' | 'noclip'
@@ -45,6 +51,8 @@ const emit = defineEmits<{
   /** Игрок выбрал слот хотбара (клавиша, колесо): v-model:slot. */
   'update:slot': [slot: number]
   player: [info: PlayerInfo]
+  /** Время суток 0..1 и фаза (`day`, `dusk`, `night`, `dawn`), раз в секунду. */
+  time: [info: TimeInfo]
   /** Курсор захвачен (игра идёт) или отпущен (пауза, меню). */
   lock: [locked: boolean]
   /** Движок грузится или пересоздаётся, мир менять нельзя. */
@@ -235,6 +243,7 @@ function save(): Promise<void> {
     version: formatVersion,
     seed: current.seed(),
     player: Array.from(current.camera_state()),
+    time: current.time_of_day(),
   }
   const columns = [...unsaved.values()]
   saving = store.save(meta, columns).then(
@@ -293,6 +302,7 @@ async function clearStorage() {
 interface WorldStart {
   seed: number
   player?: number[]
+  time?: number
 }
 
 /** Открывает хранилище и читает сохранённый мир в `worldColumns`. */
@@ -385,6 +395,11 @@ function onKeyDown(e: KeyboardEvent) {
     engine.value?.toggle_noclip()
     return
   }
+  // Перемотка времени суток (×60) — отладочная, пока T зажата.
+  if (e.code === 'KeyT' && props.settings.showDebug && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    engine.value?.set_time_fast(true)
+    return
+  }
   // Цифры выбирают слот и в движок как клавиши не попадают.
   const digit = /^Digit([1-9])$/.exec(e.code)
   if (digit) {
@@ -395,10 +410,12 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 function onKeyUp(e: KeyboardEvent) {
+  if (e.code === 'KeyT') engine.value?.set_time_fast(false)
   engine.value?.set_key(e.code, false)
 }
 
 function onBlur() {
+  engine.value?.set_time_fast(false)
   engine.value?.release_all_keys()
 }
 
@@ -422,6 +439,7 @@ function startLoop() {
     if (now - lastFpsTime >= 1000) {
       emit('fps', frames)
       emit('stats', parseStats(engine.value!.stats()))
+      emit('time', { time: engine.value!.time_of_day(), phase: engine.value!.day_phase() })
       frames = 0
       lastFpsTime = now
     }
@@ -431,7 +449,7 @@ function startLoop() {
 }
 
 /** `player` — `camera_state()`; без него игрок на спауне. Правки берутся из `worldColumns`. */
-async function start(seed: number, player?: ArrayLike<number>) {
+async function start(seed: number, player?: ArrayLike<number>, time?: number) {
   resize()
   const camera = player ? Float32Array.from(player) : undefined
   const created = await Engine.create(canvas.value!, preferred, camera, seed)
@@ -440,6 +458,13 @@ async function start(seed: number, player?: ArrayLike<number>) {
     return
   }
   importColumns(created)
+  if (BENCH) {
+    created.set_time_of_day(BENCH_TIME)
+    created.set_time_frozen(true)
+    window.__benchEngine = created
+  } else if (time !== undefined && Number.isFinite(time)) {
+    created.set_time_of_day(time)
+  }
   applySettings(created)
   // Меню открыто (курсор не захвачен) — новый движок тоже начинает с паузы.
   created.set_paused(BENCH ? false : !locked.value)
@@ -479,6 +504,7 @@ async function switchApi(requested?: GraphicsApi) {
     }
     const camera = current.camera_state()
     const seed = current.seed()
+    const time = current.time_of_day()
     // Кроме записи в базу, `save` снимает правки в `worldColumns`: оттуда их получит новый движок.
     await save()
     stop()
@@ -486,7 +512,7 @@ async function switchApi(requested?: GraphicsApi) {
     saveGraphicsApi(target)
     canvasKey.value++
     await nextTick()
-    await start(seed, camera)
+    await start(seed, camera, time)
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -541,7 +567,7 @@ onMounted(async () => {
       void runBench(() => engine.value!, benchFrames, canvas.value!)
     } else {
       const world = await loadWorld()
-      await start(world.seed, world.player)
+      await start(world.seed, world.player, world.time)
       autosaveId = window.setInterval(save, AUTOSAVE_MS)
     }
   } catch (e) {

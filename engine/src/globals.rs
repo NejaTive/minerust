@@ -2,7 +2,7 @@ use glam::{Mat4, Vec3};
 
 /// Uniform `Globals` из `shader.wgsl`. Раскладка совпадает и в WGSL, и в std140
 /// для WebGL2: vec3 выровнен на 16 байт, а следующий за ним f32 занимает его хвост.
-/// Размер структуры в обоих округляется до 16 байт: за `underwater` 12 байт хвоста.
+/// Размер структуры в обоих округляется до 16 байт: за `darkness` 8 байт хвоста.
 pub struct Globals {
     pub view_proj: Mat4,
     pub camera_pos: Vec3,
@@ -15,6 +15,8 @@ pub struct Globals {
     /// 1, если глаза под водой (тон и туман по полному расстоянию), иначе 0. f32, а не
     /// bool: bool в uniform WGSL запрещён.
     pub underwater: f32,
+    /// Уровней солнечного света, которые отнимает ночь: 0 днём (`daytime::sky_state`).
+    pub darkness: f32,
 }
 
 impl Globals {
@@ -28,7 +30,7 @@ impl Globals {
             .chain(self.camera_pos.to_array())
             .chain([self.fog_start])
             .chain(self.fog_color.to_array())
-            .chain([self.fog_end, self.underwater]);
+            .chain([self.fog_end, self.underwater, self.darkness]);
         let mut bytes = [0; Self::SIZE];
         for (chunk, f) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(floats) {
             *chunk = f.to_le_bytes();
@@ -54,6 +56,7 @@ mod tests {
             fog_color: Vec3::new(104.0, 105.0, 106.0),
             fog_end: 107.0,
             underwater: 108.0,
+            darkness: 109.0,
         };
         let bytes = globals.to_bytes();
         assert_eq!(bytes.len(), 112);
@@ -66,6 +69,7 @@ mod tests {
         assert_eq!(f32_at(&bytes, 88), 106.0);
         assert_eq!(f32_at(&bytes, 92), 107.0);
         assert_eq!(f32_at(&bytes, 96), 108.0);
-        assert!(bytes[100..].iter().all(|&b| b == 0));
+        assert_eq!(f32_at(&bytes, 100), 109.0);
+        assert!(bytes[104..].iter().all(|&b| b == 0));
     }
 }
