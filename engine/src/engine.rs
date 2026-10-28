@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use glam::{IVec2, IVec3, Vec3};
+use glam::{IVec2, IVec3, Vec2, Vec3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, Performance};
 use wgpu::util::DeviceExt;
@@ -12,7 +12,7 @@ use crate::daytime::{self, DayTime};
 use crate::double_tap::DoubleTap;
 use crate::fog::Fog;
 use crate::frustum::Frustum;
-use crate::globals::Globals;
+use crate::globals::{Globals, view_dir_matrix};
 use crate::light::LightMap;
 use crate::loader::{Loader, NEIGHBORS, Progress};
 use crate::mesh::{self, Vertex};
@@ -23,7 +23,7 @@ use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
 use crate::save::{FORMAT_VERSION, decode_column, encode_column};
 use crate::section::SECTION_SIZE;
-use crate::terrain::Terrain;
+use crate::terrain::{Terrain, WATER_LEVEL};
 use crate::texture::{self, LAYER_COUNT, MIP_LEVELS, TILE_SIZE};
 use crate::world::{World, affected_sections, column_key};
 
@@ -75,6 +75,7 @@ pub struct Engine {
     /// Вода: со смешением, без записи глубины, после рамки.
     water_pipeline: wgpu::RenderPipeline,
     outline_pipeline: wgpu::RenderPipeline,
+    sky_pipeline: wgpu::RenderPipeline,
     /// Рёбра рамки вокруг `outline_block`.
     outline_buffer: wgpu::Buffer,
     /// Индексы квадов `0,1,2, 0,2,3` для всех мешей секций ([`mesh::quad_index_bytes`]):
@@ -364,6 +365,7 @@ impl Engine {
             ..Default::default()
         });
         let outline_pipeline = create_outline_pipeline(&device, &pipeline_layout, render_format);
+        let sky_pipeline = create_sky_pipeline(&device, &pipeline_layout, render_format);
         let outline_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outline"),
             size: (OUTLINE_VERTICES * OUTLINE_VERTEX_SIZE) as u64,
@@ -399,6 +401,7 @@ impl Engine {
             pipeline,
             water_pipeline,
             outline_pipeline,
+            sky_pipeline,
             outline_buffer,
             quad_index_buffer,
             outline_block: None,
@@ -878,6 +881,14 @@ impl Engine {
             fog_end: fog.end,
             underwater: f32::from(u8::from(underwater)),
             darkness: sky.darkness,
+            view_dir: view_dir_matrix(view_proj),
+            sun_dir: Vec3::from(daytime::sun_direction(self.day.fraction())),
+            night: sky.night,
+            zenith: Vec3::from(sky.zenith),
+            warm: sky.warm,
+            horizon_tilt: (self.camera.position.y - (WATER_LEVEL + 1) as f32).max(0.0)
+                / fog.end.max(1.0),
+            star_rotation: Vec2::from(daytime::star_rotation(self.day.fraction())),
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
@@ -958,6 +969,15 @@ impl Engine {
                 pass.set_pipeline(&self.outline_pipeline);
                 pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
                 pass.draw(0..OUTLINE_VERTICES as u32, 0..1);
+                counts.draw_calls += 1;
+            }
+
+            // Небо закрашивает только пустые пиксели (глубина 1.0), поэтому после рельефа и
+            // рамки, но до воды: вода смешивается уже с небом. Под водой неба нет, фон —
+            // подводный цвет.
+            if !underwater {
+                pass.set_pipeline(&self.sky_pipeline);
+                pass.draw(0..3, 0..1);
                 counts.draw_calls += 1;
             }
 
@@ -1560,6 +1580,43 @@ fn create_outline_pipeline(
         },
         // Рамка раздута над гранями, так что `LessEqual` показывает рёбра на видимых
         // гранях и прячет те, что за блоком. Без записи: рамка не должна заслонять ничего.
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// Пайплайн неба: треугольник на дальней плоскости без буферов. `LessEqual` без записи
+/// глубины оставляет рельеф и рамку нетронутыми.
+fn create_sky_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("sky.wgsl"));
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("sky"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(format.into())],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState::default(),
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: Some(false),
