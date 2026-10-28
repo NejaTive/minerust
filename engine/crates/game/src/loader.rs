@@ -6,7 +6,8 @@ use world::column::Column;
 use world::pos::ColumnPos;
 use world::world::World;
 
-/// Пределы дальности прорисовки, колонок. Фронт (`src/settings.ts`) держит те же числа.
+/// Пределы и значение по умолчанию дальности прорисовки, колонок; фронт берёт их из движка
+/// (`settings_limits()`).
 pub const MIN_RADIUS: i32 = 4;
 pub const MAX_RADIUS: i32 = 16;
 pub const DEFAULT_RADIUS: i32 = 8;

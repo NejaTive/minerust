@@ -1,3 +1,4 @@
+use crate::api::WorldStats;
 use render::FrameCounts;
 use web_sys::Performance;
 
@@ -147,30 +148,29 @@ impl Profiler {
         self.load_ms
     }
 
-    /// Порядок значений — контракт с фронтом, см. `Engine::stats`.
-    pub(crate) fn stats(&mut self, scene: &SceneStats) -> Vec<u32> {
+    pub(crate) fn stats(&mut self, scene: &SceneStats) -> WorldStats {
         let counts = scene.counts;
-        vec![
-            scene.loaded_columns as u32,
-            scene.meshed_columns as u32,
-            scene.sections as u32,
-            scene.pending as u32,
-            self.generate_time.take_micros(),
-            self.mesh_time.take_micros(),
-            scene.drawn_sections,
-            self.light_time.take_micros(),
-            self.edit_time.take_micros(),
-            scene.light_kib as u32,
-            self.stream_frame_time.take_micros(),
-            self.build_frame_time.take_micros(),
-            self.submit_frame_time.take_micros(),
-            counts.solid_vertices,
-            counts.solid_indices,
-            counts.water_vertices,
-            counts.water_indices,
-            counts.draw_calls,
-            scene.gpu_kib as u32,
-            self.load_ms,
-        ]
+        WorldStats {
+            columns: scene.loaded_columns as u32,
+            meshed_columns: scene.meshed_columns as u32,
+            meshed_sections: scene.sections as u32,
+            queued: scene.pending as u32,
+            generate_us: self.generate_time.take_micros(),
+            mesh_us: self.mesh_time.take_micros(),
+            drawn_sections: scene.drawn_sections,
+            light_us: self.light_time.take_micros(),
+            edit_us: self.edit_time.take_micros(),
+            light_kib: scene.light_kib as u32,
+            stream_us: self.stream_frame_time.take_micros(),
+            build_us: self.build_frame_time.take_micros(),
+            submit_us: self.submit_frame_time.take_micros(),
+            solid_vertices: counts.solid_vertices,
+            solid_indices: counts.solid_indices,
+            water_vertices: counts.water_vertices,
+            water_indices: counts.water_indices,
+            draw_calls: counts.draw_calls,
+            gpu_kib: scene.gpu_kib as u32,
+            load_ms: self.load_ms,
+        }
     }
 }

@@ -6,6 +6,7 @@ use world::block::Block;
 use world::pos::ColumnPos;
 use world::save::{FORMAT_VERSION, decode_column, encode_column};
 
+use crate::api::{EngineSettings, WorldStats};
 use crate::frame::frame_params;
 use crate::profiler::{Profiler, SceneStats};
 use crate::streamer::Streamer;
@@ -135,40 +136,22 @@ impl Engine {
         self.game.player().on_ground
     }
 
-    /// Дальность прорисовки в колонках; значение зажимается в 4..=16. Меняет круг загрузки,
-    /// туман и дальнюю плоскость. Можно вызывать в любой момент, в том числе сразу после create.
-    pub fn set_render_distance(&mut self, columns: i32) {
-        self.streamer.set_radius(columns);
-    }
-
-    pub fn render_distance(&self) -> i32 {
-        self.streamer.radius()
-    }
-
-    /// Включает или выключает затенение углов (AO). Меши всех колонок перестраиваются
+    /// Применяет настройки одним объектом; значения зажимаются в пределы
+    /// [`settings_limits`](crate::api::settings_limits). Идемпотентна, вызывается в любой
+    /// момент, в том числе сразу после create. Смена AO перестраивает меши всех колонок
     /// постепенно, ближние первыми, в бюджете подгрузки; до замены рисуются старые.
-    pub fn set_ambient_occlusion(&mut self, enabled: bool) {
+    pub fn apply_settings(&mut self, settings: &EngineSettings) {
+        self.streamer.set_radius(settings.render_distance);
         self.streamer
-            .set_ambient_occlusion(enabled, &self.game, &self.renderer);
+            .set_ambient_occlusion(settings.ambient_occlusion, &self.game, &self.renderer);
+        self.game
+            .camera_mut()
+            .set_sensitivity(settings.mouse_sensitivity);
+        self.game.camera_mut().set_fov(settings.fov);
     }
 
-    /// Включено ли затенение углов; по умолчанию — да.
-    pub fn ambient_occlusion(&self) -> bool {
-        self.streamer.ambient_occlusion()
-    }
-
-    /// Статистика для HUD: `[колонок загружено, колонок с мешами, секций с мешами,
-    /// колонок в очереди на меш (включая перестройку после смены AO и секции после
-    /// смены света), генерация колонки в мкс, меширование колонки в мкс, секций
-    /// нарисовано в прошлом кадре, свет колонки в мкс, правка блока со светом и
-    /// перестройкой в мкс, память на свет в КиБ, затем кадр: подгрузка и меш в бюджете в
-    /// мкс, сборка кадра до `finish` в мкс, `finish`+`submit`+`present` в мкс (эти три —
-    /// только при `set_profiling(true)`, иначе нули), вершин и индексов непрозрачных
-    /// мешей, вершин и индексов воды, draw-вызовов в последнем кадре, меши на GPU в КиБ,
-    /// полная загрузка мира в мс (0, пока идёт; считается от создания движка или
-    /// `set_camera_state`)]`. Время — среднее с прошлого вызова (или последнее известное,
-    /// если работы не было).
-    pub fn stats(&mut self) -> Vec<u32> {
+    /// Статистика для HUD и режима замера; поля и единицы — в [`WorldStats`].
+    pub fn stats(&mut self) -> WorldStats {
         let scene = SceneStats {
             loaded_columns: self.game.world.len(),
             meshed_columns: self.renderer.column_count(),
@@ -253,28 +236,6 @@ impl Engine {
         self.game.set_time_fast(fast);
     }
 
-    pub fn paused(&self) -> bool {
-        self.game.paused()
-    }
-
-    /// Множитель чувствительности мыши к базовым 0.002 рад/пиксель; зажимается в 0.25..=3.
-    pub fn set_mouse_sensitivity(&mut self, factor: f32) {
-        self.game.camera_mut().set_sensitivity(factor);
-    }
-
-    pub fn mouse_sensitivity(&self) -> f32 {
-        self.game.camera().sensitivity()
-    }
-
-    /// Вертикальный угол обзора в градусах; зажимается в 60..=110.
-    pub fn set_fov(&mut self, degrees: f32) {
-        self.game.camera_mut().set_fov(degrees);
-    }
-
-    pub fn fov(&self) -> f32 {
-        self.game.camera().fov()
-    }
-
     /// Поворот камеры мышью; `dx`/`dy` — `movementX/Y` при pointer lock.
     pub fn mouse_move(&mut self, dx: f32, dy: f32) {
         self.game.mouse_move(dx, dy);
@@ -307,11 +268,6 @@ impl Engine {
         } else {
             Err(JsError::new(&format!("unknown block: {name}")))
         }
-    }
-
-    /// Идёт ли игрок бегом (двойной W).
-    pub fn sprinting(&self) -> bool {
-        self.game.player().sprinting
     }
 
     /// Отпускает все клавиши и кнопки мыши (потеря pointer lock, blur окна).

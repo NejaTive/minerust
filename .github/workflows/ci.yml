@@ -61,3 +61,6 @@ jobs:
       # vue-tsc берёт типы из engine/pkg (алиас @engine), его создаёт только сборка wasm
       - run: npm run wasm
       - run: npx vue-tsc -b
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm test
