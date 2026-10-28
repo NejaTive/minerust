@@ -13,6 +13,7 @@ pub enum Block {
     Log,
     Leaves,
     Water,
+    Glowstone,
 }
 
 /// Высота поверхности воды над низом блока, если над ней не вода: как в Minecraft,
@@ -52,6 +53,14 @@ impl Block {
         !matches!(self, Block::Air | Block::Leaves | Block::Water)
     }
 
+    /// Уровень света блоков, который блок излучает (0 — не светится).
+    pub fn emission(self) -> u8 {
+        match self {
+            Block::Glowstone => 15,
+            _ => 0,
+        }
+    }
+
     pub fn is_water(self) -> bool {
         self == Block::Water
     }
@@ -66,7 +75,7 @@ impl Block {
     }
 
     /// Блок, который игрок может выбрать, по имени из интерфейса: `"grass"`, `"dirt"`,
-    /// `"stone"`, `"sand"`, `"log"`, `"leaves"`. Воздух не выбирается: для него есть ломание.
+    /// `"stone"`, `"sand"`, `"log"`, `"leaves"`, `"glowstone"`. Воздух не выбирается: для него есть ломание.
     pub fn from_name(name: &str) -> Option<Block> {
         match name {
             "grass" => Some(Block::Grass),
@@ -75,6 +84,7 @@ impl Block {
             "sand" => Some(Block::Sand),
             "log" => Some(Block::Log),
             "leaves" => Some(Block::Leaves),
+            "glowstone" => Some(Block::Glowstone),
             _ => None,
         }
     }
@@ -97,6 +107,7 @@ impl Block {
             (Block::Log, Facing::Side) => Tile::LogSide,
             (Block::Leaves, _) => Tile::Leaves,
             (Block::Water, _) => Tile::Water,
+            (Block::Glowstone, _) => Tile::Glowstone,
         })
     }
 }
@@ -116,6 +127,7 @@ impl TryFrom<u8> for Block {
             5 => Block::Log,
             6 => Block::Leaves,
             7 => Block::Water,
+            8 => Block::Glowstone,
             other => return Err(other),
         })
     }
@@ -125,7 +137,7 @@ impl TryFrom<u8> for Block {
 mod tests {
     use super::*;
 
-    const ALL: [Block; 8] = [
+    const ALL: [Block; 9] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -134,6 +146,7 @@ mod tests {
         Block::Log,
         Block::Leaves,
         Block::Water,
+        Block::Glowstone,
     ];
 
     #[test]
@@ -142,7 +155,7 @@ mod tests {
             assert_eq!(block as usize, i, "save numbers must not move");
             assert_eq!(Block::try_from(block as u8), Ok(block));
         }
-        assert_eq!(Block::try_from(8), Err(8));
+        assert_eq!(Block::try_from(9), Err(9));
         assert_eq!(Block::try_from(255), Err(255));
     }
 
@@ -162,6 +175,7 @@ mod tests {
         assert_eq!(Block::from_name("sand"), Some(Block::Sand));
         assert_eq!(Block::from_name("log"), Some(Block::Log));
         assert_eq!(Block::from_name("leaves"), Some(Block::Leaves));
+        assert_eq!(Block::from_name("glowstone"), Some(Block::Glowstone));
         assert_eq!(Block::from_name("air"), None);
         assert_eq!(Block::from_name("water"), None);
         assert_eq!(Block::from_name("Stone"), None);

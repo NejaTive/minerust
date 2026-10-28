@@ -14,10 +14,11 @@ pub enum Tile {
     LogTop,
     Leaves,
     Water,
+    Glowstone,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 9] = [
+    pub const ALL: [Tile; 10] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -27,6 +28,7 @@ impl Tile {
         Tile::LogTop,
         Tile::Leaves,
         Tile::Water,
+        Tile::Glowstone,
     ];
 
     pub fn layer(self) -> u32 {
@@ -58,6 +60,11 @@ const RINGS_LIGHT: [f32; 3] = [182.0, 148.0, 94.0];
 const RINGS_DARK: [f32; 3] = [150.0, 118.0, 72.0];
 const LEAVES: [f32; 3] = [58.0, 118.0, 38.0];
 const WATER: [f32; 3] = [52.0, 98.0, 196.0];
+/// Светокамень: тёплый жёлтый фон, светлые прожилки и тёмные впадины крупными
+/// пятнами 2×2 — на мипах 4×4 и 2×2 рисунок ещё читается.
+const GLOW_BASE: [f32; 3] = [226.0, 170.0, 72.0];
+const GLOW_BRIGHT: [f32; 3] = [255.0, 236.0, 150.0];
+const GLOW_DARK: [f32; 3] = [170.0, 108.0, 40.0];
 /// Непрозрачность воды: дно на глубине пары блоков ещё видно, а поверхность читается.
 const WATER_ALPHA: u8 = 180;
 /// Доля дырок в листве: примерно как в Minecraft, крона ещё читается как масса.
@@ -191,6 +198,11 @@ fn pixel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
         Tile::Sand => SAND,
         Tile::Leaves => LEAVES,
         Tile::Water => WATER,
+        Tile::Glowstone => match noise(tile, x / 2, y / 2) {
+            n if n > 0.7 => GLOW_BRIGHT,
+            n if n < 0.3 => GLOW_DARK,
+            _ => GLOW_BASE,
+        },
         // Продольные полосы коры: яркость по столбцу пикселей, заметнее пиксельного шума,
         // иначе вблизи кора неотличима от земли.
         Tile::LogSide => BARK.map(|c| c * (0.65 + 0.55 * noise(tile, x, TILE_SIZE))),

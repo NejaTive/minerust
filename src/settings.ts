@@ -6,7 +6,7 @@ export const API_LABELS: Record<GraphicsApi, string> = {
 }
 
 /** Блоки, которые игрок ставит; имена — как в `Engine.select_block`. */
-export type BlockName = 'grass' | 'dirt' | 'stone' | 'sand' | 'log' | 'leaves'
+export type BlockName = 'grass' | 'dirt' | 'stone' | 'sand' | 'log' | 'leaves' | 'glowstone'
 
 export const BLOCK_LABELS: Record<BlockName, string> = {
   grass: 'трава',
@@ -15,6 +15,7 @@ export const BLOCK_LABELS: Record<BlockName, string> = {
   sand: 'песок',
   log: 'бревно',
   leaves: 'листва',
+  glowstone: 'светокамень',
 }
 
 /**
@@ -28,7 +29,7 @@ export const HOTBAR: (BlockName | null)[] = [
   'sand',
   'log',
   'leaves',
-  null,
+  'glowstone',
   null,
   null,
 ]

@@ -120,7 +120,7 @@ mod tests {
     use super::*;
     use crate::terrain::Terrain;
 
-    const BLOCKS: [Block; 8] = [
+    const BLOCKS: [Block; 9] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -129,6 +129,7 @@ mod tests {
         Block::Log,
         Block::Leaves,
         Block::Water,
+        Block::Glowstone,
     ];
 
     fn assert_same(a: &Column, b: &Column) {
