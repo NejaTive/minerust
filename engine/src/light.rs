@@ -3,7 +3,7 @@ use std::hash::{BuildHasherDefault, Hasher};
 
 use glam::{IVec2, IVec3};
 
-use crate::block::Block;
+use crate::block::{Block, Shape};
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::section::SECTION_SIZE;
 use crate::world::{World, affected_sections, column_key};
@@ -78,7 +78,11 @@ impl Channel {
         if block.is_opaque() {
             return 0;
         }
-        if self == Channel::Sky && down && level == MAX_LIGHT && block == Block::Air {
+        if self == Channel::Sky
+            && down
+            && level == MAX_LIGHT
+            && (block == Block::Air || block.shape() != Shape::Cube)
+        {
             return MAX_LIGHT;
         }
         level.saturating_sub(if block.is_water() { 2 } else { 1 })

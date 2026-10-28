@@ -1,11 +1,11 @@
 use glam::{IVec2, IVec3};
 
-use crate::block::{Block, Facing, WATER_SURFACE};
+use crate::block::{Block, Facing, Shape, WATER_SURFACE};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
 use crate::mesh::{POSITION_UNITS, Vertex, day_shade, quantize_shade};
 use crate::section::{SECTION_SIZE, Section};
-use crate::texture::{LAYER_COUNT, Tile};
+use crate::texture::{LAYER_COUNT, TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile};
 use crate::world::World;
 
 // Слой хранится в вершине одним байтом.
@@ -360,6 +360,12 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
                 }
                 // Позиция вершины — шестнадцатые доли блока от угла секции.
                 let base = local * POSITION_UNITS;
+                if block.shape() != Shape::Cube {
+                    let (sky, block_light) = lights.at(index, 0);
+                    let light = [sky, block_light].map(|l| half_average(l, 1));
+                    push_shaped(&mut meshes.solid, block, base, light);
+                    continue;
+                }
                 if block.is_water() {
                     let top = if blocks.at(index, up).is_water() {
                         POSITION_UNITS
@@ -367,7 +373,10 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
                         WATER_SURFACE_UNITS
                     };
                     for (face, normal, _) in &faces {
-                        if blocks.at(index, *normal) == Block::Air {
+                        // Растения и факел не закрывают грань, но и не заполняют клетку.
+                        if blocks.at(index, *normal).shape() != Shape::Cube
+                            || blocks.at(index, *normal) == Block::Air
+                        {
                             let (sky, block) = lights.at(index, *normal);
                             let shade = quantize_shade(face.shade);
                             let light = [sky, block].map(|l| half_average(l, 1));
@@ -435,6 +444,94 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
         }
     }
     meshes
+}
+
+/// Яркость сторон креста: свет не зависит от направления, растение не должно быть
+/// темнее одной стороной.
+const CROSS_SHADE: f32 = 1.0;
+
+/// Столбик факела в шагах позиции: центр клетки, [`TORCH_PIXELS`] по x и z, высота
+/// от низа клетки до верха тайла без `TORCH_TOP_ROW` строк (10 из 16).
+const TORCH_BOX: ([i32; 3], [i32; 3]) = (
+    [TORCH_PIXELS.0 as i32, 0, TORCH_PIXELS.0 as i32],
+    [
+        TORCH_PIXELS.1 as i32,
+        (TILE_SIZE - TORCH_TOP_ROW) as i32,
+        TORCH_PIXELS.1 as i32,
+    ],
+);
+
+/// Геометрия блока не-куба: крест или столбик. Без AO, свет — одной клетки блока
+/// (`light` в половинках уровня), одинаковый на всех вершинах. Всё в слое Cutout вместе
+/// с кубами.
+fn push_shaped(mesh: &mut MeshData, block: Block, base: IVec3, light: [u8; 2]) {
+    let u = POSITION_UNITS;
+    let vertex = |p: IVec3, uv: [i32; 2], shade: u8, layer: u8| {
+        let p = base + p;
+        Vertex::new(
+            [p.x as u16, p.y as u16, p.z as u16],
+            [uv[0] as u8, uv[1] as u8],
+            shade,
+            layer,
+            light,
+        )
+    };
+    match block.shape() {
+        Shape::Cube => {}
+        Shape::Cross => {
+            let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
+            let shade = quantize_shade(CROSS_SHADE);
+            // Две диагонали клетки; каждая — квад в обе стороны (иначе `cull_mode: Back`
+            // скроет обратную): те же вершины в обратном порядке.
+            for (a, b) in [([0, 0], [u, u]), ([u, 0], [0, u])] {
+                let quad = [
+                    vertex(IVec3::new(a[0], 0, a[1]), [0, u], shade, layer),
+                    vertex(IVec3::new(b[0], 0, b[1]), [u, u], shade, layer),
+                    vertex(IVec3::new(b[0], u, b[1]), [u, 0], shade, layer),
+                    vertex(IVec3::new(a[0], u, a[1]), [0, 0], shade, layer),
+                ];
+                mesh.push_quad(quad.into_iter(), [0, 1, 2, 0, 2, 3]);
+                mesh.push_quad(quad.into_iter().rev(), [0, 1, 2, 0, 2, 3]);
+            }
+        }
+        Shape::Torch => {
+            let (lo, hi) = TORCH_BOX;
+            let layer = Tile::Torch.layer() as u8;
+            for face in FACES.iter().filter(|f| f.facing != Facing::Bottom) {
+                let shade = quantize_shade(face.shade);
+                let vertices = face.corners.iter().map(|&[cx, cy, cz]| {
+                    let c = [cx, cy, cz];
+                    let p = IVec3::from(std::array::from_fn(
+                        |i| {
+                            if c[i] == 1 { hi[i] } else { lo[i] }
+                        },
+                    ));
+                    // Текстура берётся по центру тайла: боковая грань — древко с огоньком
+                    // сверху (v от верха столбика), верхняя — два верхних ряда огонька.
+                    let uv = if face.facing == Facing::Top {
+                        [
+                            TORCH_PIXELS.0 as i32 + (TORCH_PIXELS.1 - TORCH_PIXELS.0) as i32 * cx,
+                            TORCH_TOP_ROW as i32 + 2 * (1 - cz),
+                        ]
+                    } else {
+                        let side = if face.normal.x != 0 { cz } else { cx };
+                        let side = if face.normal.x > 0 || face.normal.z < 0 {
+                            1 - side
+                        } else {
+                            side
+                        };
+                        [
+                            TORCH_PIXELS.0 as i32 + (TORCH_PIXELS.1 - TORCH_PIXELS.0) as i32 * side,
+                            TORCH_TOP_ROW as i32
+                                + (TILE_SIZE as i32 - TORCH_TOP_ROW as i32) * (1 - cy),
+                        ]
+                    };
+                    vertex(p, uv, shade, layer)
+                });
+                mesh.push_quad(vertices, [0, 1, 2, 0, 2, 3]);
+            }
+        }
+    }
 }
 
 /// Грань воды; `top` — высота верха блока над `base` в шагах позиции (16 или
@@ -1100,7 +1197,7 @@ mod tests {
     fn no_ao_keeps_plain_side_shading() {
         use crate::terrain::Terrain;
 
-        let column = Terrain::new(7).generate(IVec2::new(3, -2));
+        let column = Terrain::new(7).generate_trees(IVec2::new(3, -2));
         let with = mesh_column(&column, air, full, AO);
         let without = mesh_column(&column, air, full, NO_AO);
         for (with, without) in with.iter().zip(&without) {
@@ -1177,7 +1274,7 @@ mod tests {
         for z in -1..=1 {
             for x in -1..=1 {
                 let key = center + IVec2::new(x, z);
-                world.insert(key, terrain.generate(key));
+                world.insert(key, terrain.generate_trees(key));
             }
         }
 
@@ -1243,7 +1340,7 @@ mod tests {
         for z in -2..=2 {
             for x in -2..=2 {
                 let key = trunk + IVec2::new(x, z);
-                world.insert(key, terrain.generate(key));
+                world.insert(key, terrain.generate_trees(key));
             }
         }
         // Колонка ствола и все соседи, куда заходит крона.
@@ -1304,7 +1401,7 @@ mod tests {
         for z in -2..=1 {
             for x in -2..=1 {
                 let key = IVec2::new(x, z);
-                world.insert(key, terrain.generate(key));
+                world.insert(key, terrain.generate_trees(key));
             }
         }
         let mut light = world_light(&world);
@@ -1364,6 +1461,93 @@ mod tests {
             section.set(pos, block);
         }
         mesh_section(&section, air, full, AO)
+    }
+
+    /// Нормали квадов меша по порядку вершин (по четыре на квад).
+    fn quad_normals(mesh: &MeshData) -> Vec<IVec3> {
+        mesh.vertices.chunks(4).map(quad_normal).collect()
+    }
+
+    #[test]
+    fn cross_has_both_sides_of_both_planes() {
+        let at = IVec3::new(5, 5, 5);
+        for block in [Block::TallGrass, Block::Poppy, Block::Dandelion] {
+            let mesh = section_of(&[(at, block)]).solid;
+            assert_eq!(mesh.vertices.len(), 16, "{block:?}");
+            assert_eq!(mesh.indices.len(), 24, "{block:?}");
+            let normals = quad_normals(&mesh);
+            // Диагонали (±1, 0, ±1): у каждой плоскости обе стороны.
+            for n in [(1, -1), (-1, 1), (1, 1), (-1, -1)] {
+                let count = normals.iter().filter(|v| v.x == n.0 && v.z == n.1).count();
+                assert_eq!(count, 1, "{block:?} normal {n:?}: {normals:?}");
+            }
+            for v in &mesh.vertices {
+                assert_eq!(v.layer(), block.tile(Facing::Side).unwrap().layer() as u8);
+                let [x, y, z] = v.position();
+                assert!(
+                    (5.0..=6.0).contains(&x)
+                        && (5.0..=6.0).contains(&y)
+                        && (5.0..=6.0).contains(&z)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cross_has_light_of_its_own_cell_and_full_shade() {
+        let mesh = section_of(&[(IVec3::new(5, 5, 5), Block::Poppy)]).solid;
+        let first = mesh.vertices[0];
+        assert!(mesh.vertices.iter().all(|v| v.shade_byte() == 255
+            && v.sun_halves() == first.sun_halves()
+            && v.block_halves() == first.block_halves()));
+    }
+
+    #[test]
+    fn cube_next_to_cross_draws_its_face_toward_it() {
+        let mesh = pair(Block::Stone, Block::TallGrass);
+        // Камень рисует все шесть граней, трава — свой крест.
+        assert_eq!(mesh.vertices.len(), 24 + 16);
+    }
+
+    #[test]
+    fn cross_does_not_hide_cube_faces_or_shade_corners() {
+        let floor = IVec3::new(5, 4, 5);
+        let plain = section_of(&[(floor, Block::Stone)]).solid;
+        let with = section_of(&[(floor, Block::Stone), (floor + IVec3::Y, Block::Torch)]).solid;
+        // Верх камня остался, и тени от факела на нём нет: вершины камня те же.
+        assert_eq!(&with.vertices[..plain.vertices.len()], &plain.vertices[..]);
+    }
+
+    #[test]
+    fn torch_is_a_narrow_column_with_five_faces() {
+        let at = IVec3::new(5, 5, 5);
+        let mesh = section_of(&[(at, Block::Torch)]).solid;
+        assert_eq!(mesh.vertices.len(), 20);
+        let normals = quad_normals(&mesh);
+        assert!(!normals.contains(&IVec3::NEG_Y), "no bottom face");
+        assert!(normals.contains(&IVec3::Y));
+        let (mut min, mut max) = (Vec3::MAX, Vec3::MIN);
+        for v in &mesh.vertices {
+            min = min.min(v.position().into());
+            max = max.max(v.position().into());
+            assert_eq!(v.layer(), Tile::Torch.layer() as u8);
+        }
+        let origin = Vec3::new(5.0, 5.0, 5.0);
+        assert_eq!(min - origin, Vec3::new(7.0, 0.0, 7.0) / 16.0);
+        assert_eq!(max - origin, Vec3::new(9.0, 10.0, 9.0) / 16.0);
+    }
+
+    #[test]
+    fn torch_light_comes_from_its_cell() {
+        let torch = IVec3::new(5, 20, 5);
+        let (world, light) = small_world(|p| if p == torch { Block::Torch } else { Block::Air });
+        let mesh = mesh_world_section(&world, &light, IVec3::new(0, 1, 0), AO).unwrap();
+        assert!(
+            mesh.solid
+                .vertices
+                .iter()
+                .all(|v| v.block_halves() == 2 * 14)
+        );
     }
 
     #[test]
@@ -1488,7 +1672,7 @@ mod tests {
         for z in -1..=1 {
             for x in -1..=1 {
                 let key = center + IVec2::new(x, z);
-                world.insert(key, terrain.generate(key));
+                world.insert(key, terrain.generate_trees(key));
             }
         }
         let light = world_light(&world);
@@ -1527,7 +1711,7 @@ mod tests {
         for z in -1..=1 {
             for x in -1..=2 {
                 let key = IVec2::new(x, z);
-                world.insert(key, terrain.generate(key));
+                world.insert(key, terrain.generate_trees(key));
             }
         }
         let mut light = LightMap::new();

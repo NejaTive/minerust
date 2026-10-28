@@ -15,10 +15,14 @@ pub enum Tile {
     Leaves,
     Water,
     Glowstone,
+    TallGrass,
+    Poppy,
+    Dandelion,
+    Torch,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 10] = [
+    pub const ALL: [Tile; 14] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -29,10 +33,22 @@ impl Tile {
         Tile::Leaves,
         Tile::Water,
         Tile::Glowstone,
+        Tile::TallGrass,
+        Tile::Poppy,
+        Tile::Dandelion,
+        Tile::Torch,
     ];
 
     pub fn layer(self) -> u32 {
         self as u32
+    }
+
+    /// Тайл с дырками (двоичная альфа, мипы по большинству): листва, растения, факел.
+    pub fn is_cutout(self) -> bool {
+        matches!(
+            self,
+            Tile::Leaves | Tile::TallGrass | Tile::Poppy | Tile::Dandelion | Tile::Torch
+        )
     }
 }
 
@@ -50,7 +66,7 @@ pub const LAYER_COUNT: u32 = {
 };
 
 // Базовые цвета в sRGB: текстура `Rgba8UnormSrgb`, в линейный цвет переводит GPU.
-const GRASS: [f32; 3] = [93.0, 155.0, 58.0];
+const GRASS: [f32; 3] = [108.0, 168.0, 52.0];
 const DIRT: [f32; 3] = [134.0, 94.0, 60.0];
 const STONE: [f32; 3] = [128.0, 128.0, 128.0];
 const SAND: [f32; 3] = [219.0, 205.0, 160.0];
@@ -58,7 +74,7 @@ const BARK: [f32; 3] = [92.0, 68.0, 40.0];
 /// Годовые кольца на торце бревна: светлые и тёмные через одно.
 const RINGS_LIGHT: [f32; 3] = [182.0, 148.0, 94.0];
 const RINGS_DARK: [f32; 3] = [150.0, 118.0, 72.0];
-const LEAVES: [f32; 3] = [58.0, 118.0, 38.0];
+const LEAVES: [f32; 3] = [52.0, 100.0, 30.0];
 const WATER: [f32; 3] = [52.0, 98.0, 196.0];
 /// Светокамень: тёплый жёлтый фон, светлые прожилки и тёмные впадины крупными
 /// пятнами 2×2 — на мипах 4×4 и 2×2 рисунок ещё читается.
@@ -66,6 +82,21 @@ const GLOW_BASE: [f32; 3] = [226.0, 170.0, 72.0];
 const GLOW_BRIGHT: [f32; 3] = [255.0, 236.0, 150.0];
 const GLOW_DARK: [f32; 3] = [170.0, 108.0, 40.0];
 /// Непрозрачность воды: дно на глубине пары блоков ещё видно, а поверхность читается.
+/// Высокая трава: тёмный зелёный у корня и светлый желтоватый на кончиках (как в
+/// Minecraft). Светлее земной травы вверху, чтобы пучок отличался от луга, и темнее
+/// внизу, чтобы стоял на земле, а не парил.
+const TALL_GRASS_ROOT: [f32; 3] = [84.0, 124.0, 44.0];
+const TALL_GRASS_TIP: [f32; 3] = [150.0, 196.0, 80.0];
+const STEM: [f32; 3] = [60.0, 130.0, 40.0];
+const POPPY_PETAL: [f32; 3] = [214.0, 40.0, 36.0];
+const POPPY_CORE: [f32; 3] = [40.0, 24.0, 24.0];
+const DANDELION_PETAL: [f32; 3] = [250.0, 214.0, 40.0];
+/// Древко факела и огонёк на его верхних двух пикселях.
+const TORCH_STICK: [f32; 3] = [120.0, 84.0, 48.0];
+const TORCH_FLAME: [f32; 3] = [255.0, 200.0, 70.0];
+/// Столбик факела в тайле: столбцы 7..9, строки 6..16 (10 из 16, как 2×10×2 в мешере).
+pub const TORCH_PIXELS: (u32, u32) = (7, 9);
+pub const TORCH_TOP_ROW: u32 = 6;
 const WATER_ALPHA: u8 = 180;
 /// Доля дырок в листве: примерно как в Minecraft, крона ещё читается как масса.
 const LEAF_HOLES: f32 = 0.3;
@@ -87,7 +118,7 @@ pub fn generate() -> Vec<u8> {
         };
         let mut size = TILE_SIZE;
         data.extend_from_slice(&level);
-        let cutout = Tile::ALL.get(layer as usize) == Some(&Tile::Leaves);
+        let cutout = Tile::ALL.get(layer as usize).is_some_and(|t| t.is_cutout());
         while size > 1 {
             level = downsample(&level, size, cutout);
             size /= 2;
@@ -198,6 +229,9 @@ fn pixel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
         Tile::Sand => SAND,
         Tile::Leaves => LEAVES,
         Tile::Water => WATER,
+        Tile::TallGrass | Tile::Poppy | Tile::Dandelion | Tile::Torch => {
+            plant_pixel(tile, x, y).unwrap_or(STEM)
+        }
         Tile::Glowstone => match noise(tile, x / 2, y / 2) {
             n if n > 0.7 => GLOW_BRIGHT,
             n if n < 0.3 => GLOW_DARK,
@@ -231,10 +265,62 @@ fn pixel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
     base.map(|c| (c * brightness).min(255.0))
 }
 
-/// Прозрачный ли пиксель: дырки есть только у листвы.
+/// Цвет пикселя растения или факела; `None` — дырка.
+fn plant_pixel(tile: Tile, x: u32, y: u32) -> Option<[f32; 3]> {
+    let in_rect =
+        |x0: u32, x1: u32, y0: u32, y1: u32| (x0..x1).contains(&x) && (y0..y1).contains(&y);
+    match tile {
+        Tile::TallGrass => {
+            // Пучок травинок: часть столбцов пуста, высота остальных разная.
+            let present = noise(tile, x, TILE_SIZE + 1) > 0.2;
+            let height = 6 + (10.0 * noise(tile, x, TILE_SIZE)) as u32;
+            let tip = y as f32 / (TILE_SIZE - 1) as f32;
+            // y растёт вниз: у корня (tip = 1) цвет тёмный.
+            let color = std::array::from_fn(|i| {
+                TALL_GRASS_TIP[i] + (TALL_GRASS_ROOT[i] - TALL_GRASS_TIP[i]) * tip
+            });
+            (present && y >= TILE_SIZE - height).then_some(color)
+        }
+        Tile::Poppy | Tile::Dandelion => {
+            let (petal, core, head) = if tile == Tile::Poppy {
+                (POPPY_PETAL, POPPY_CORE, (5, 11, 2, 7))
+            } else {
+                (DANDELION_PETAL, DANDELION_PETAL, (6, 10, 3, 7))
+            };
+            if in_rect(7, 9, 7, 16) || [(5, 11), (6, 10), (9, 10), (10, 11)].contains(&(x, y)) {
+                Some(STEM)
+            } else if in_rect(7, 9, 4, 6) && tile == Tile::Poppy {
+                Some(core)
+            } else if in_rect(head.0, head.1, head.2, head.3) {
+                Some(petal)
+            } else {
+                None
+            }
+        }
+        Tile::Torch => {
+            let (x0, x1) = TORCH_PIXELS;
+            if in_rect(x0, x1, TORCH_TOP_ROW, TORCH_TOP_ROW + 2) {
+                Some(TORCH_FLAME)
+            } else if in_rect(x0, x1, TORCH_TOP_ROW + 2, TILE_SIZE) {
+                Some(TORCH_STICK)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Прозрачный ли пиксель: дырки есть у листвы, растений и факела.
 fn is_hole(tile: Tile, x: u32, y: u32) -> bool {
-    // Другой участок хеша, чем у яркости, чтобы дырки не совпадали с тёмными пикселями.
-    tile == Tile::Leaves && noise(tile, x + TILE_SIZE, y) < LEAF_HOLES
+    match tile {
+        // Другой участок хеша, чем у яркости, чтобы дырки не совпадали с тёмными пикселями.
+        Tile::Leaves => noise(tile, x + TILE_SIZE, y) < LEAF_HOLES,
+        Tile::TallGrass | Tile::Poppy | Tile::Dandelion | Tile::Torch => {
+            plant_pixel(tile, x, y).is_none()
+        }
+        _ => false,
+    }
 }
 
 /// Детерминированный «шум» 0..=1 по пикселю: целочисленный хеш, без зависимостей.
@@ -294,7 +380,7 @@ mod tests {
                 layer.chunks(4).all(|p| p[3] == 0 || p[3] == 255),
                 "{tile:?}"
             );
-            if tile != Tile::Leaves {
+            if !tile.is_cutout() {
                 assert!(layer.chunks(4).all(|p| p[3] == 255), "{tile:?}");
             }
         }
@@ -402,5 +488,42 @@ mod tests {
     fn layer_count_avoids_gl_guessing() {
         assert!(LAYER_COUNT != 1 && !LAYER_COUNT.is_multiple_of(6));
         assert!(LAYER_COUNT as usize >= Tile::ALL.len());
+    }
+
+    #[test]
+    fn layer_count_for_current_tiles() {
+        // 14 тайлов: не 1 и не кратно 6, выравнивающий слой не нужен.
+        assert_eq!(Tile::ALL.len(), 14);
+        assert_eq!(LAYER_COUNT, 14);
+    }
+
+    #[test]
+    fn plant_tiles_have_holes_and_binary_mips() {
+        let data = generate();
+        for tile in [Tile::TallGrass, Tile::Poppy, Tile::Dandelion, Tile::Torch] {
+            for level in 0..MIP_LEVELS {
+                let c = coverage(mip(&data, tile, level));
+                if level == 0 {
+                    assert!(c > 0.05 && c < 0.7, "{tile:?} coverage {c}");
+                }
+                assert!(
+                    mip(&data, tile, level)
+                        .chunks(4)
+                        .all(|p| p[3] == 0 || p[3] == 255),
+                    "{tile:?} level {level}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn torch_flame_is_on_top_of_stick() {
+        let px = tile_pixels(Tile::Torch);
+        let at = |x: u32, y: u32| &px[((y * TILE_SIZE + x) * 4) as usize..][..4];
+        assert_eq!(at(7, TORCH_TOP_ROW)[3], 255);
+        assert_eq!(at(8, 15)[3], 255);
+        assert_eq!(at(6, 10)[3], 0);
+        assert_eq!(at(7, TORCH_TOP_ROW - 1)[3], 0);
+        assert!(at(7, TORCH_TOP_ROW)[0] > at(7, 12)[0], "flame is brighter");
     }
 }

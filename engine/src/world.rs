@@ -71,6 +71,34 @@ impl World {
         true
     }
 
+    /// Можно ли поставить `block` в клетку `pos`: там воздух, вода или трава (она
+    /// заменяется), а растению и факелу снизу нужен твёрдый блок. Игрока не учитывает.
+    pub fn can_place(&self, pos: IVec3, block: Block) -> bool {
+        self.block(pos).is_replaceable()
+            && (!block.needs_support() || self.block(pos - IVec3::Y).is_solid())
+    }
+
+    /// Правка с опорой: ставит `block` и, если клетка перестала быть твёрдой, убирает
+    /// стоящие выше блоки, которым нужна опора (трава, цветы, факел). Возвращает
+    /// изменённые клетки — первой `pos`, затем снятые; пусто, если правка не прошла
+    /// (`set_block`). Одно место для ломания и установки: движок обновляет свет и меши
+    /// по каждой клетке списка.
+    pub fn set_block_supported(&mut self, pos: IVec3, block: Block) -> Vec<IVec3> {
+        if !self.set_block(pos, block) {
+            return Vec::new();
+        }
+        let mut changed = vec![pos];
+        let mut cell = pos;
+        while !self.block(cell).is_solid() {
+            cell += IVec3::Y;
+            if !self.block(cell).needs_support() || !self.set_block(cell, Block::Air) {
+                break;
+            }
+            changed.push(cell);
+        }
+        changed
+    }
+
     pub fn column(&self, key: IVec2) -> Option<&Column> {
         self.columns.get(&key)
     }
@@ -211,6 +239,78 @@ mod tests {
         assert_eq!(world.block(IVec3::new(-2, 10, 32)), Block::Air);
         assert_eq!(column_key(-1, -16), IVec2::new(-1, -1));
         assert_eq!(column_key(-17, 15), IVec2::new(-2, 0));
+    }
+
+    #[test]
+    fn placement_replaces_grass_and_needs_support() {
+        let mut world = World::new();
+        world.insert(IVec2::ZERO, Column::new());
+        let floor = IVec3::new(3, 10, 3);
+        let above = floor + IVec3::Y;
+        world.set_block(floor, Block::Stone);
+        world.set_block(above, Block::TallGrass);
+        assert!(world.can_place(above, Block::Torch));
+        assert!(world.can_place(above, Block::Stone));
+        world.set_block(above, Block::Dirt);
+        assert!(
+            !world.can_place(above, Block::Stone),
+            "cubes are not replaced"
+        );
+        // Без твёрдого блока снизу цветок и факел не ставятся, куб — ставится.
+        let air = floor + 3 * IVec3::Y;
+        assert!(!world.can_place(air, Block::Poppy) && !world.can_place(air, Block::Torch));
+        assert!(world.can_place(air, Block::Stone));
+        // Цветок не опора для другого цветка.
+        world.set_block(air, Block::Poppy);
+        assert!(!world.can_place(air + IVec3::Y, Block::Dandelion));
+        world.set_block(floor + 5 * IVec3::Y, Block::Water);
+        assert!(world.can_place(floor + 5 * IVec3::Y, Block::Stone));
+        assert!(
+            !world.can_place(floor + 5 * IVec3::Y, Block::Torch),
+            "water is no support"
+        );
+    }
+
+    #[test]
+    fn breaking_support_removes_plant_above() {
+        let mut world = World::new();
+        world.insert(IVec2::ZERO, Column::new());
+        let floor = IVec3::new(3, 10, 3);
+        world.set_block(floor, Block::Grass);
+        world.set_block(floor + IVec3::Y, Block::Poppy);
+        world.set_block(floor + 2 * IVec3::Y, Block::Stone);
+        let changed = world.set_block_supported(floor, Block::Air);
+        assert_eq!(changed, vec![floor, floor + IVec3::Y]);
+        assert_eq!(world.block(floor + IVec3::Y), Block::Air);
+        assert_eq!(world.block(floor + 2 * IVec3::Y), Block::Stone);
+    }
+
+    #[test]
+    fn replacing_support_with_solid_keeps_plant() {
+        let mut world = World::new();
+        world.insert(IVec2::ZERO, Column::new());
+        let floor = IVec3::new(3, 10, 3);
+        world.set_block(floor, Block::Grass);
+        world.set_block(floor + IVec3::Y, Block::Torch);
+        assert_eq!(world.set_block_supported(floor, Block::Stone), vec![floor]);
+        assert_eq!(world.block(floor + IVec3::Y), Block::Torch);
+        // Блок, не требующий опоры, над воздухом остаётся.
+        world.set_block(floor + 3 * IVec3::Y, Block::Stone);
+        assert_eq!(
+            world.set_block_supported(floor + 2 * IVec3::Y, Block::Air),
+            vec![floor + 2 * IVec3::Y]
+        );
+        assert_eq!(world.block(floor + 3 * IVec3::Y), Block::Stone);
+    }
+
+    #[test]
+    fn support_edit_in_unloaded_column_changes_nothing() {
+        let mut world = World::new();
+        assert!(
+            world
+                .set_block_supported(IVec3::new(500, 10, 0), Block::Air)
+                .is_empty()
+        );
     }
 
     #[test]

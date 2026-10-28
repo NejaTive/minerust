@@ -1,4 +1,6 @@
-use crate::texture::{Tile, tile_pixels};
+use glam::Vec3;
+
+use crate::texture::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile, tile_pixels};
 
 /// Тип блока. `repr(u8)`, чтобы секция занимала байт на блок.
 #[repr(u8)]
@@ -14,6 +16,10 @@ pub enum Block {
     Leaves,
     Water,
     Glowstone,
+    TallGrass,
+    Poppy,
+    Dandelion,
+    Torch,
 }
 
 /// Высота поверхности воды над низом блока, если над ней не вода: как в Minecraft,
@@ -32,6 +38,17 @@ pub enum RenderLayer {
     Translucent,
 }
 
+/// Геометрия блока в мешере.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Shape {
+    /// Полный куб (и вода): грани по соседям, AO.
+    Cube,
+    /// Две вертикальные плоскости по диагоналям клетки (трава, цветы).
+    Cross,
+    /// Столбик 2×10×2 (в 1/16) по центру клетки: факел.
+    Torch,
+}
+
 /// Куда смотрит грань блока; от этого зависит её тайл.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Facing {
@@ -43,20 +60,64 @@ pub enum Facing {
 impl Block {
     /// Для коллизий, прицела и проверки установки: всё, кроме воздуха и воды.
     pub fn is_solid(self) -> bool {
-        !matches!(self, Block::Air | Block::Water)
+        !matches!(self, Block::Air | Block::Water) && self.shape() == Shape::Cube
+    }
+
+    /// Можно ли навести на блок прицелом: твёрдые и растения с факелом (они не
+    /// мешают ходить, но их надо уметь сломать). Воздух и вода не выбираются.
+    pub fn is_targetable(self) -> bool {
+        self.is_solid() || self.shape() != Shape::Cube && self != Block::Air
+    }
+
+    pub fn shape(self) -> Shape {
+        match self {
+            Block::TallGrass | Block::Poppy | Block::Dandelion => Shape::Cross,
+            Block::Torch => Shape::Torch,
+            _ => Shape::Cube,
+        }
+    }
+
+    /// Бокс блока в долях клетки (min, max) — по нему рисуется рамка выделения. У креста
+    /// клетка целиком: бокс по высоте травы вышел бы разным для цветка и травы и
+    /// мерцал бы при наведении на соседние.
+    pub fn bounds(self) -> (Vec3, Vec3) {
+        match self.shape() {
+            Shape::Torch => {
+                let unit = 1.0 / TILE_SIZE as f32;
+                let (lo, hi) = (TORCH_PIXELS.0 as f32 * unit, TORCH_PIXELS.1 as f32 * unit);
+                (
+                    Vec3::new(lo, 0.0, lo),
+                    Vec3::new(hi, (TILE_SIZE - TORCH_TOP_ROW) as f32 * unit, hi),
+                )
+            }
+            _ => (Vec3::ZERO, Vec3::ONE),
+        }
+    }
+
+    /// Можно ли поставить блок в клетку с этим содержимым: воздух, вода и трава (она
+    /// заменяется).
+    pub fn is_replaceable(self) -> bool {
+        matches!(self, Block::Air | Block::Water | Block::TallGrass)
+    }
+
+    /// Нужна ли блоку твёрдая опора снизу: без неё он исчезает и ставится только на неё.
+    pub fn needs_support(self) -> bool {
+        self.shape() != Shape::Cube
     }
 
     /// Закрывает ли блок грань соседа и участвует ли в затенении углов: всё, кроме
-    /// воздуха, листвы и воды. Сквозь дырки листвы видно и грани за ней, и соседнюю
+    /// воздуха, листвы, воды и блоков не-кубов. Сквозь дырки листвы видно и грани за ней, и соседнюю
     /// листву; сквозь воду — дно и берег.
     pub fn is_opaque(self) -> bool {
-        !matches!(self, Block::Air | Block::Leaves | Block::Water)
+        !matches!(self, Block::Air | Block::Leaves | Block::Water) && self.shape() == Shape::Cube
     }
 
     /// Уровень света блоков, который блок излучает (0 — не светится).
     pub fn emission(self) -> u8 {
         match self {
             Block::Glowstone => 15,
+            // На единицу темнее светокамня: факел слабее блока-лампы.
+            Block::Torch => 14,
             _ => 0,
         }
     }
@@ -68,14 +129,16 @@ impl Block {
     /// Проход отрисовки. У воздуха граней нет, для него ответ не важен.
     pub fn render_layer(self) -> RenderLayer {
         match self {
-            Block::Leaves => RenderLayer::Cutout,
+            Block::Leaves | Block::TallGrass | Block::Poppy | Block::Dandelion | Block::Torch => {
+                RenderLayer::Cutout
+            }
             Block::Water => RenderLayer::Translucent,
             _ => RenderLayer::Opaque,
         }
     }
 
     /// Блок, который игрок может выбрать, по имени из интерфейса: `"grass"`, `"dirt"`,
-    /// `"stone"`, `"sand"`, `"log"`, `"leaves"`, `"glowstone"`. Воздух не выбирается: для него есть ломание.
+    /// `"stone"`, `"sand"`, `"log"`, `"leaves"`, `"glowstone"`, `"tall_grass"`, `"poppy"`, `"dandelion"`, `"torch"`. Воздух не выбирается: для него есть ломание.
     pub fn from_name(name: &str) -> Option<Block> {
         match name {
             "grass" => Some(Block::Grass),
@@ -85,6 +148,10 @@ impl Block {
             "log" => Some(Block::Log),
             "leaves" => Some(Block::Leaves),
             "glowstone" => Some(Block::Glowstone),
+            "tall_grass" => Some(Block::TallGrass),
+            "poppy" => Some(Block::Poppy),
+            "dandelion" => Some(Block::Dandelion),
+            "torch" => Some(Block::Torch),
             _ => None,
         }
     }
@@ -108,6 +175,10 @@ impl Block {
             (Block::Leaves, _) => Tile::Leaves,
             (Block::Water, _) => Tile::Water,
             (Block::Glowstone, _) => Tile::Glowstone,
+            (Block::TallGrass, _) => Tile::TallGrass,
+            (Block::Poppy, _) => Tile::Poppy,
+            (Block::Dandelion, _) => Tile::Dandelion,
+            (Block::Torch, _) => Tile::Torch,
         })
     }
 }
@@ -128,6 +199,10 @@ impl TryFrom<u8> for Block {
             6 => Block::Leaves,
             7 => Block::Water,
             8 => Block::Glowstone,
+            9 => Block::TallGrass,
+            10 => Block::Poppy,
+            11 => Block::Dandelion,
+            12 => Block::Torch,
             other => return Err(other),
         })
     }
@@ -137,7 +212,7 @@ impl TryFrom<u8> for Block {
 mod tests {
     use super::*;
 
-    const ALL: [Block; 9] = [
+    const ALL: [Block; 13] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -147,6 +222,10 @@ mod tests {
         Block::Leaves,
         Block::Water,
         Block::Glowstone,
+        Block::TallGrass,
+        Block::Poppy,
+        Block::Dandelion,
+        Block::Torch,
     ];
 
     #[test]
@@ -155,7 +234,7 @@ mod tests {
             assert_eq!(block as usize, i, "save numbers must not move");
             assert_eq!(Block::try_from(block as u8), Ok(block));
         }
-        assert_eq!(Block::try_from(9), Err(9));
+        assert_eq!(Block::try_from(13), Err(13));
         assert_eq!(Block::try_from(255), Err(255));
     }
 
@@ -197,9 +276,15 @@ mod tests {
     #[test]
     fn solid_and_opaque() {
         for block in ALL {
-            let solid = !matches!(block, Block::Air | Block::Water);
+            let plant = matches!(
+                block,
+                Block::TallGrass | Block::Poppy | Block::Dandelion | Block::Torch
+            );
+            let solid = !matches!(block, Block::Air | Block::Water) && !plant;
             assert_eq!(block.is_solid(), solid, "{block:?}");
-            let opaque = !matches!(block, Block::Air | Block::Leaves | Block::Water);
+            let opaque = !matches!(block, Block::Air | Block::Leaves | Block::Water) && !plant;
+            assert_eq!(block.is_targetable(), solid || plant, "{block:?}");
+            assert_eq!(block.needs_support(), plant, "{block:?}");
             assert_eq!(block.is_opaque(), opaque, "{block:?}");
             assert_eq!(block.is_water(), block == Block::Water, "{block:?}");
         }
@@ -209,7 +294,11 @@ mod tests {
     fn render_layers() {
         for block in ALL {
             let layer = match block {
-                Block::Leaves => RenderLayer::Cutout,
+                Block::Leaves
+                | Block::TallGrass
+                | Block::Poppy
+                | Block::Dandelion
+                | Block::Torch => RenderLayer::Cutout,
                 Block::Water => RenderLayer::Translucent,
                 _ => RenderLayer::Opaque,
             };
@@ -225,5 +314,50 @@ mod tests {
         assert_eq!(Block::Log.tile(Facing::Side), Some(Tile::LogSide));
         assert_eq!(Block::Sand.tile(Facing::Top), Some(Tile::Sand));
         assert_eq!(Block::Leaves.tile(Facing::Side), Some(Tile::Leaves));
+    }
+
+    #[test]
+    fn bounds_follow_shape() {
+        assert_eq!(Block::Stone.bounds(), (Vec3::ZERO, Vec3::ONE));
+        assert_eq!(Block::Poppy.bounds(), (Vec3::ZERO, Vec3::ONE));
+        let (lo, hi) = Block::Torch.bounds();
+        assert_eq!((lo.x, hi.x, hi.y), (7.0 / 16.0, 9.0 / 16.0, 10.0 / 16.0));
+    }
+
+    #[test]
+    fn replaceable_cells() {
+        for block in ALL {
+            let expected = matches!(block, Block::Air | Block::Water | Block::TallGrass);
+            assert_eq!(block.is_replaceable(), expected, "{block:?}");
+        }
+    }
+
+    #[test]
+    fn shapes_and_emission() {
+        for block in [Block::TallGrass, Block::Poppy, Block::Dandelion] {
+            assert_eq!(block.shape(), Shape::Cross, "{block:?}");
+            assert_eq!(block.emission(), 0);
+        }
+        assert_eq!(Block::Torch.shape(), Shape::Torch);
+        assert_eq!(Block::Torch.emission(), 14);
+        assert_eq!(Block::Stone.shape(), Shape::Cube);
+        assert_eq!(Block::Water.shape(), Shape::Cube);
+        assert!(!Block::Air.is_targetable() && !Block::Water.is_targetable());
+    }
+
+    #[test]
+    fn new_blocks_selectable_by_name() {
+        assert_eq!(Block::from_name("tall_grass"), Some(Block::TallGrass));
+        assert_eq!(Block::from_name("poppy"), Some(Block::Poppy));
+        assert_eq!(Block::from_name("dandelion"), Some(Block::Dandelion));
+        assert_eq!(Block::from_name("torch"), Some(Block::Torch));
+        for block in [
+            Block::TallGrass,
+            Block::Poppy,
+            Block::Dandelion,
+            Block::Torch,
+        ] {
+            assert!(block.icon_pixels().is_some());
+        }
     }
 }

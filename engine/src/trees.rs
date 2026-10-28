@@ -136,7 +136,7 @@ pub fn plant(terrain: &Terrain, key: IVec2, column: &mut Column) {
 }
 
 /// Хеш (сид, x, z, соль) через splitmix64: детерминированный и без зависимостей.
-fn hash(seed: i32, x: i32, z: i32, salt: u64) -> u32 {
+pub(crate) fn hash(seed: i32, x: i32, z: i32, salt: u64) -> u32 {
     let point = (u64::from(x as u32) << 32) | u64::from(z as u32);
     let stream = splitmix64((u64::from(seed as u32) << 8) | salt);
     (splitmix64(point ^ stream) >> 32) as u32
@@ -317,7 +317,7 @@ mod tests {
         for cz in -1..=1 {
             for cx in -1..=1 {
                 let key = center + IVec2::new(cx, cz);
-                let column = terrain.generate(key);
+                let column = terrain.generate_trees(key);
                 for y in 0..WORLD_HEIGHT {
                     for z in 0..SECTION_SIZE {
                         for x in 0..SECTION_SIZE {
@@ -349,7 +349,7 @@ mod tests {
             tree.base.z.div_euclid(SECTION_SIZE),
         );
         let ground = terrain.generate_carved(key);
-        let column = terrain.generate(key);
+        let column = terrain.generate_trees(key);
         let origin = IVec3::new(key.x, 0, key.y) * SECTION_SIZE;
         for log in tree.logs() {
             assert_eq!(column.get(log - origin), Block::Log);
