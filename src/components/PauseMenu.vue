@@ -36,6 +36,8 @@ const emit = defineEmits<{
   'new-world': []
 }>()
 
+const VERSION = __APP_COMMIT__ ? `v${__APP_VERSION__} · ${__APP_COMMIT__}` : `v${__APP_VERSION__}`
+
 const APIS: GraphicsApi[] = ['webgpu', 'webgl2']
 
 const CONTROLS = [
@@ -96,6 +98,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
         <button :disabled="busy" @click="go('confirm')">Новый мир</button>
         <button @click="go('settings')">Настройки</button>
         <button @click="go('controls')">Управление</button>
+        <p class="version">{{ VERSION }}</p>
       </template>
 
       <template v-else-if="screen === 'settings'">
@@ -352,6 +355,12 @@ kbd {
   background: #12151a;
   border: 1px solid #4a5361;
   border-radius: 4px;
+}
+.version {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #7b8494;
+  text-align: center;
 }
 .name kbd {
   margin-left: 4px;

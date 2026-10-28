@@ -99,6 +99,8 @@ function geometry(s: WorldStats) {
 export interface BenchResult {
   done: boolean
   error?: string
+  /** Версия и коммит сборки: замеры разных версий сравниваются по ним. */
+  version: string
   backend: string
   build: string
   seed: number
@@ -131,6 +133,7 @@ export async function runBench(
   const first = engine()
   const result: BenchResult = {
     done: false,
+    version: __APP_COMMIT__ ? `${__APP_VERSION__}+${__APP_COMMIT__}` : __APP_VERSION__,
     backend: first.backend(),
     build: (first.constructor as typeof Engine).build_profile(),
     seed: BENCH_SEED,
