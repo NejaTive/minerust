@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{IVec2, Vec3};
 
 use world::light::MAX_LIGHT;
 
@@ -502,7 +502,7 @@ fn flipped_quads_keep_winding() {
 fn no_ao_keeps_plain_side_shading() {
     use world::terrain::Terrain;
 
-    let column = Terrain::new(7).generate_trees(IVec2::new(3, -2));
+    let column = Terrain::new(7).generate_trees(ColumnPos::new(3, -2));
     let with = mesh_column(&column, air, full, AO);
     let without = mesh_column(&column, air, full, NO_AO);
     for (with, without) in with.iter().zip(&without) {
@@ -534,10 +534,10 @@ fn no_ao_keeps_plain_side_shading() {
 /// Видимые грани колонки `key` (`solid`, `water`), посчитанные по миру целиком, без
 /// деления на колонки и секции: у воды — к воздуху, у остальных блоков — к не
 /// непрозрачному соседу.
-fn world_face_count(world: &World, key: IVec2) -> (usize, usize) {
+fn world_face_count(world: &World, key: ColumnPos) -> (usize, usize) {
     use world::column::WORLD_HEIGHT;
 
-    let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+    let origin = key.origin();
     let (mut solid, mut water) = (0, 0);
     for y in 0..WORLD_HEIGHT {
         for z in 0..SECTION_SIZE {
@@ -573,7 +573,7 @@ fn no_seams_between_columns() {
     use world::terrain::Terrain;
 
     // Центр с отрицательными координатами, чтобы задеть и div_euclid на стыках.
-    let center = IVec2::new(-1, 2);
+    let center = ColumnPos::new(-1, 2);
     let terrain = Terrain::new(1337);
     let mut world = World::new();
     for z in -1..=1 {
@@ -584,7 +584,7 @@ fn no_seams_between_columns() {
     }
 
     let light = world_light(&world);
-    let origin = IVec3::new(center.x * SECTION_SIZE, 0, center.y * SECTION_SIZE);
+    let origin = center.origin();
     let meshes = mesh_world_column(&world, &light, center, AO).unwrap();
     assert_eq!(meshes.len(), COLUMN_SECTIONS as usize);
     let expected = world_face_count(&world, center);
@@ -637,10 +637,7 @@ fn tree_on_column_border_matches_whole_world() {
 
     let terrain = Terrain::new(1337);
     let tree = border_tree(&terrain);
-    let trunk = IVec2::new(
-        tree.base.x.div_euclid(SECTION_SIZE),
-        tree.base.z.div_euclid(SECTION_SIZE),
-    );
+    let trunk = ColumnPos::of_block(tree.base);
     let mut world = World::new();
     for z in -2..=2 {
         for x in -2..=2 {
@@ -649,16 +646,13 @@ fn tree_on_column_border_matches_whole_world() {
         }
     }
     // Колонка ствола и все соседи, куда заходит крона.
-    let mut keys: Vec<IVec2> = tree
-        .leaves()
-        .map(|l| IVec2::new(l.x.div_euclid(SECTION_SIZE), l.z.div_euclid(SECTION_SIZE)))
-        .collect();
-    keys.sort_by_key(|k| k.to_array());
+    let mut keys: Vec<ColumnPos> = tree.leaves().map(ColumnPos::of_block).collect();
+    keys.sort();
     keys.dedup();
     assert!(keys.len() > 1);
     let light = world_light(&world);
     for key in keys {
-        let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+        let origin = key.origin();
         let column = world.column(key).unwrap();
         assert!(
             (0..COLUMN_SECTIONS).any(|sy| {
@@ -687,7 +681,7 @@ fn tree_on_column_border_matches_whole_world() {
 }
 
 /// Меши секции `key` с соседями из `world`, в сравнимом виде.
-fn world_mesh(world: &World, light: &LightMap, key: IVec3) -> [(Vec<Vertex>, Vec<u16>); 2] {
+fn world_mesh(world: &World, light: &LightMap, key: SectionPos) -> [(Vec<Vertex>, Vec<u16>); 2] {
     let SectionMeshes { solid, water } = mesh_world_section(world, light, key, AO).unwrap();
     [
         (solid.vertices, solid.indices),
@@ -704,15 +698,16 @@ fn edits_on_seams_remesh_exactly_affected_sections() {
     let mut world = World::new();
     for z in -2..=1 {
         for x in -2..=1 {
-            let key = IVec2::new(x, z);
+            let key = ColumnPos::new(x, z);
             world.insert(key, terrain.generate_trees(key));
         }
     }
     let mut light = world_light(&world);
     // Секции колонок -1..=0, у которых загружены все 8 соседних колонок.
-    let sections: Vec<IVec3> = (-1..=0)
+    let sections: Vec<SectionPos> = (-1..=0)
         .flat_map(|z| {
-            (-1..=0).flat_map(move |x| (0..COLUMN_SECTIONS).map(move |sy| IVec3::new(x, sy, z)))
+            (-1..=0)
+                .flat_map(move |x| (0..COLUMN_SECTIONS).map(move |sy| SectionPos::new(x, sy, z)))
         })
         .collect();
 
@@ -843,7 +838,7 @@ fn torch_is_a_narrow_column_with_five_faces() {
 fn torch_light_comes_from_its_cell() {
     let torch = IVec3::new(5, 20, 5);
     let (world, light) = small_world(|p| if p == torch { Block::Torch } else { Block::Air });
-    let mesh = mesh_world_section(&world, &light, IVec3::new(0, 1, 0), AO).unwrap();
+    let mesh = mesh_world_section(&world, &light, SectionPos::new(0, 1, 0), AO).unwrap();
     assert!(
         mesh.solid
             .vertices
@@ -979,7 +974,7 @@ fn lake_on_column_seams_matches_whole_world() {
         }
     }
     let light = world_light(&world);
-    let origin = IVec3::new(center.x * SECTION_SIZE, 0, center.y * SECTION_SIZE);
+    let origin = center.origin();
     let meshes = mesh_world_column(&world, &light, center, AO).unwrap();
     let expected = world_face_count(&world, center);
     assert!(expected.1 > 0, "no water faces in {center}");
@@ -1013,7 +1008,7 @@ fn world_cache_matches_closure_cache() {
     // Колонка (2, 0) намеренно без восточного соседа (3, 0) и юго-восточного.
     for z in -1..=1 {
         for x in -1..=2 {
-            let key = IVec2::new(x, z);
+            let key = ColumnPos::new(x, z);
             world.insert(key, terrain.generate_trees(key));
         }
     }
@@ -1021,8 +1016,12 @@ fn world_cache_matches_closure_cache() {
     for key in world.keys().collect::<Vec<_>>() {
         light.add_column(&world, key);
     }
-    for key in [IVec2::new(0, 0), IVec2::new(2, 0), IVec2::new(-1, 1)] {
-        let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+    for key in [
+        ColumnPos::new(0, 0),
+        ColumnPos::new(2, 0),
+        ColumnPos::new(-1, 1),
+    ] {
+        let origin = key.origin();
         let fast = mesh_world_column(&world, &light, key, AO).unwrap();
         let slow = mesh_column(
             world.column(key).unwrap(),
@@ -1035,9 +1034,7 @@ fn world_cache_matches_closure_cache() {
             assert!(a.solid.indices == b.solid.indices, "{key} section {sy}");
             assert!(a.water.vertices == b.water.vertices, "{key} water {sy}");
             assert!(a.water.indices == b.water.indices, "{key} water {sy}");
-            let single =
-                mesh_world_section(&world, &light, IVec3::new(key.x, sy as i32, key.y), AO)
-                    .unwrap();
+            let single = mesh_world_section(&world, &light, key.section(sy as i32), AO).unwrap();
             assert!(
                 single.solid.vertices == a.solid.vertices,
                 "{key} single {sy}"
@@ -1052,7 +1049,7 @@ fn world_cache_matches_closure_cache() {
 #[test]
 fn quantization_error_is_below_one_step() {
     let (world, light) = small_world(|p| if p.y < 5 { Block::Stone } else { Block::Air });
-    let mesh = mesh_world_section(&world, &light, IVec3::new(0, 0, 0), AO).unwrap();
+    let mesh = mesh_world_section(&world, &light, SectionPos::new(0, 0, 0), AO).unwrap();
     for v in &mesh.solid.vertices {
         let exact = v.shade_byte() as f32 / 255.0;
         assert_eq!(v.shade(), exact);
@@ -1066,7 +1063,7 @@ fn quantization_error_is_below_one_step() {
 fn gpu_vertex_order_reproduces_mesher_triangles() {
     use world::terrain::Terrain;
 
-    let column = Terrain::new(7).generate(IVec2::new(3, -2));
+    let column = Terrain::new(7).generate(ColumnPos::new(3, -2));
     let mut flipped = 0;
     for meshes in mesh_column(&column, air, full, AO) {
         let gpu = crate::mesh::gpu_vertices(&meshes.solid.vertices, &meshes.solid.indices);
@@ -1091,7 +1088,7 @@ fn small_world(block_at: impl Fn(IVec3) -> Block) -> (World, LightMap) {
     let mut world = World::new();
     for z in -1..=1 {
         for x in -1..=1 {
-            let key = IVec2::new(x, z);
+            let key = ColumnPos::new(x, z);
             let mut column = Column::new();
             for y in 0..WORLD_HEIGHT {
                 for lz in 0..SECTION_SIZE {
@@ -1117,7 +1114,7 @@ fn glowstone_lights_a_dark_room_by_the_brighter_channel() {
         (1, ..) => Block::Air,
         _ => Block::Stone,
     });
-    let mesh = mesh_world_section(&world, &light, IVec3::ZERO, AO)
+    let mesh = mesh_world_section(&world, &light, SectionPos::default(), AO)
         .unwrap()
         .solid;
     assert_shades_match(
@@ -1147,7 +1144,7 @@ fn floor_under_canopy_is_darker_and_fades() {
             Block::Air
         }
     });
-    let mesh = mesh_world_section(&world, &light, IVec3::ZERO, AO)
+    let mesh = mesh_world_section(&world, &light, SectionPos::default(), AO)
         .unwrap()
         .solid;
     let brightest = |x| {
@@ -1181,7 +1178,7 @@ fn opaque_cells_do_not_darken_average() {
             Block::Air
         }
     });
-    let mesh = mesh_world_section(&world, &light, IVec3::ZERO, AO)
+    let mesh = mesh_world_section(&world, &light, SectionPos::default(), AO)
         .unwrap()
         .solid;
     let (beside, _) = top_face(&mesh, IVec3::new(7, 0, 8));
@@ -1197,7 +1194,7 @@ fn water_takes_light_of_cell_in_front() {
         4 if p.x >= 8 => Block::Stone,
         _ => Block::Air,
     });
-    let water = mesh_world_section(&world, &light, IVec3::ZERO, AO)
+    let water = mesh_world_section(&world, &light, SectionPos::default(), AO)
         .unwrap()
         .water;
     let top_shade = |x: i32| {
@@ -1226,13 +1223,13 @@ fn water_takes_light_of_cell_in_front() {
 #[test]
 fn world_section_outside_is_none() {
     let mut world = World::new();
-    world.insert(IVec2::ZERO, Column::new());
+    world.insert(ColumnPos::ZERO, Column::new());
     let light = world_light(&world);
     for (key, some) in [
-        (IVec3::new(0, 0, 0), true),
-        (IVec3::new(0, COLUMN_SECTIONS, 0), false),
-        (IVec3::new(0, -1, 0), false),
-        (IVec3::new(1, 0, 0), false),
+        (SectionPos::new(0, 0, 0), true),
+        (SectionPos::new(0, COLUMN_SECTIONS, 0), false),
+        (SectionPos::new(0, -1, 0), false),
+        (SectionPos::new(1, 0, 0), false),
     ] {
         assert_eq!(
             mesh_world_section(&world, &light, key, AO).is_some(),

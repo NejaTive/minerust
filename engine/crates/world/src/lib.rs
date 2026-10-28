@@ -3,6 +3,7 @@ mod caves;
 pub mod column;
 pub mod light;
 mod plants;
+pub mod pos;
 pub mod save;
 pub mod section;
 pub mod terrain;

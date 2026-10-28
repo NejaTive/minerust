@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use glam::{IVec2, IVec3, Mat4, Vec2, Vec3};
+use glam::{IVec3, Mat4, Vec2, Vec3};
 use mesh::mesh::quad_index_bytes;
 use mesh::mesher::SectionMeshes;
 use wgpu::util::DeviceExt;
 use world::block::Block;
+use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 
 use crate::frustum::Frustum;
@@ -85,7 +86,7 @@ pub struct Renderer {
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     /// Меши колонок по ключу колонки, по секции снизу вверх; `None` — пустая секция.
-    column_meshes: HashMap<IVec2, ColumnMeshes>,
+    column_meshes: HashMap<ColumnPos, ColumnMeshes>,
     depth_view: wgpu::TextureView,
     /// Сколько секций прошло отсечение по пирамиде видимости в последнем кадре.
     drawn_sections: u32,
@@ -287,8 +288,8 @@ impl Renderer {
 
     /// Загружает меши колонки на GPU (секции снизу вверх), заменяя прежние. Пустые
     /// секции буферов не занимают.
-    pub fn upload_column(&mut self, key: IVec2, data: &[SectionMeshes]) {
-        let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+    pub fn upload_column(&mut self, key: ColumnPos, data: &[SectionMeshes]) {
+        let origin = key.origin();
         let meshes = std::array::from_fn(|sy| {
             let min = (origin + IVec3::Y * sy as i32 * SECTION_SIZE).as_vec3();
             upload_section(&self.device, &data[sy], min)
@@ -296,26 +297,26 @@ impl Renderer {
         self.column_meshes.insert(key, meshes);
     }
 
-    /// Заменяет меш одной секции `(x колонки, номер секции, z колонки)`. Колонку без
+    /// Заменяет меш одной секции. Колонку без
     /// меша пропускает: её загрузят целиком позже.
-    pub fn upload_section(&mut self, key: IVec3, data: &SectionMeshes) {
-        let Some(meshes) = self.column_meshes.get_mut(&IVec2::new(key.x, key.z)) else {
+    pub fn upload_section(&mut self, key: SectionPos, data: &SectionMeshes) {
+        let Some(meshes) = self.column_meshes.get_mut(&key.column()) else {
             return;
         };
-        let min = (key * SECTION_SIZE).as_vec3();
-        meshes[key.y as usize] = upload_section(&self.device, data, min);
+        let min = key.origin().as_vec3();
+        meshes[key.y() as usize] = upload_section(&self.device, data, min);
     }
 
     /// Освобождает буферы колонки.
-    pub fn remove_column(&mut self, key: IVec2) {
+    pub fn remove_column(&mut self, key: ColumnPos) {
         self.column_meshes.remove(&key);
     }
 
-    pub fn has_column(&self, key: IVec2) -> bool {
+    pub fn has_column(&self, key: ColumnPos) -> bool {
         self.column_meshes.contains_key(&key)
     }
 
-    pub fn column_keys(&self) -> impl Iterator<Item = IVec2> + '_ {
+    pub fn column_keys(&self) -> impl Iterator<Item = ColumnPos> + '_ {
         self.column_meshes.keys().copied()
     }
 

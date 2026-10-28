@@ -22,6 +22,8 @@ const props = defineProps<{
   busy: boolean
   /** Браузер отказал в захвате курсора. */
   lockFailed: boolean
+  /** В базе мир более новой версии игры: он не загружен, «Новый мир» его сотрёт. */
+  newerSave: boolean
 }>()
 
 const emit = defineEmits<{
@@ -88,6 +90,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
           {{ busy ? 'Загрузка…' : started ? 'Продолжить' : 'Играть' }}
         </button>
         <p v-if="lockFailed" class="warn">Браузер не дал захватить курсор — нажмите ещё раз</p>
+        <p v-if="newerSave" class="warn">
+          Сохранение из более новой версии игры: оно не загружено и не изменится, пока вы не
+          начнёте новый мир
+        </p>
         <button :disabled="busy" @click="go('confirm')">Новый мир</button>
         <button @click="go('settings')">Настройки</button>
         <button @click="go('controls')">Управление</button>

@@ -1,9 +1,10 @@
-use glam::{IVec2, IVec3};
+use glam::IVec3;
 
 use crate::mesh::{POSITION_UNITS, Vertex, day_shade, quantize_shade};
 use world::block::{Block, Facing, Shape, WATER_SURFACE};
 use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
+use world::pos::{ColumnPos, SectionPos};
 use world::section::{SECTION_SIZE, Section};
 use world::tile::{LAYER_COUNT, TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile};
 use world::world::World;
@@ -181,7 +182,7 @@ pub struct Surroundings<'a> {
 
 impl<'a> Surroundings<'a> {
     /// `None`, если колонка `key` не загружена.
-    pub fn new(world: &'a World, light: &'a LightMap, key: IVec2) -> Option<Self> {
+    pub fn new(world: &'a World, light: &'a LightMap, key: ColumnPos) -> Option<Self> {
         let columns = world.neighborhood(key);
         columns[4]?;
         Some(Self {
@@ -649,7 +650,7 @@ pub fn mesh_column(
 pub fn mesh_world_column(
     world: &World,
     light: &LightMap,
-    key: IVec2,
+    key: ColumnPos,
     options: MeshOptions,
 ) -> Option<Vec<SectionMeshes>> {
     let around = Surroundings::new(world, light, key)?;
@@ -668,24 +669,24 @@ pub fn mesh_world_column(
     )
 }
 
-/// Меш одной секции по ключу `(x колонки, номер секции 0..8, z колонки)` с соседями
+/// Меш одной секции `key` с соседями
 /// из `world` и светом из `light` — для перестройки после правки блока или света.
 /// `None`, если колонка не загружена или номер секции вне 0..COLUMN_SECTIONS.
 pub fn mesh_world_section(
     world: &World,
     light: &LightMap,
-    key: IVec3,
+    key: SectionPos,
     options: MeshOptions,
 ) -> Option<SectionMeshes> {
-    if !(0..COLUMN_SECTIONS).contains(&key.y) {
+    if !(0..COLUMN_SECTIONS).contains(&key.y()) {
         return None;
     }
-    let around = Surroundings::new(world, light, IVec2::new(key.x, key.z))?;
-    if around.columns[4]?.section(key.y).is_air() {
+    let around = Surroundings::new(world, light, key.column())?;
+    if around.columns[4]?.section(key.y()).is_air() {
         return Some(SectionMeshes::empty());
     }
     let (mut blocks, mut lights) = new_caches();
-    around.fill(key.y, &mut blocks, &mut lights);
+    around.fill(key.y(), &mut blocks, &mut lights);
     Some(mesh_cached(&blocks, &lights, options))
 }
 

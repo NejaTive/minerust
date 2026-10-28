@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 
-use glam::{IVec2, IVec3, Vec3};
+use glam::{IVec3, Vec3};
 use world::block::Block;
 use world::column::{Column, WORLD_HEIGHT};
 use world::light::LightMap;
+use world::pos::{ColumnPos, SectionPos};
 use world::terrain::Terrain;
-use world::world::{World, affected_sections, column_key};
+use world::world::{World, affected_sections};
 
 use crate::camera::Camera;
 use crate::daytime::{self, DayTime, SkyState};
@@ -31,10 +32,10 @@ const DOUBLE_TAP_S: f32 = 0.3;
 /// Что изменила правка блоков за кадр; перестраивает меши тот, кто их держит.
 #[derive(Default)]
 pub struct Edits {
-    /// Секции `(x колонки, номер секции, z колонки)` с изменёнными блоками: их мешуют сразу.
-    pub dirty: Vec<IVec3>,
+    /// Секции с изменёнными блоками: их мешуют сразу.
+    pub dirty: Vec<SectionPos>,
     /// Секции, где изменился только свет, без `dirty`.
-    pub lit: Vec<IVec3>,
+    pub lit: Vec<SectionPos>,
 }
 
 /// Состояние симуляции: мир, свет, игрок, камера, время суток и ввод. Не знает ни про
@@ -87,7 +88,7 @@ impl Game {
                 // Ноги — на верхнюю грань самого верхнего блока столбца (0, 0): по одной
                 // `surface_height` игрок мог бы появиться внутри ствола или кроны, а
                 // по твёрдым блокам — на дне озера.
-                let spawn = terrain.generate(IVec2::ZERO);
+                let spawn = terrain.generate(ColumnPos::ZERO);
                 let ground = (0..WORLD_HEIGHT)
                     .rev()
                     .find(|&y| spawn.get(IVec3::new(0, y, 0)) != Block::Air)
@@ -146,9 +147,9 @@ impl Game {
     }
 
     /// Ключ колонки, над которой стоит камера.
-    pub fn camera_column(&self) -> IVec2 {
+    pub fn camera_column(&self) -> ColumnPos {
         let p = self.camera.position.floor().as_ivec3();
-        column_key(p.x, p.z)
+        ColumnPos::of_block(p)
     }
 
     /// Состояние `[x, y, z, yaw, pitch, mode]` для передачи в новый `Game`: x, y, z —
@@ -383,7 +384,7 @@ impl Game {
 
     /// Импорт сохранённой колонки: свет есть только у загруженной колонки, и
     /// `add_column` пересчитывает его заново вместе с соседями.
-    pub fn import_column(&mut self, key: IVec2, column: Column) {
+    pub fn import_column(&mut self, key: ColumnPos, column: Column) {
         self.world.import(key, column);
         if self.light.column(key).is_some() {
             self.light.add_column(&self.world, key);
@@ -398,7 +399,12 @@ impl Game {
     }
 
     /// Собирает секции и свет по клеткам правки (`World::set_block_supported`).
-    fn apply_edit(&mut self, changed: &[IVec3], dirty: &mut HashSet<IVec3>, lit: &mut Vec<IVec3>) {
+    fn apply_edit(
+        &mut self,
+        changed: &[IVec3],
+        dirty: &mut HashSet<SectionPos>,
+        lit: &mut Vec<SectionPos>,
+    ) {
         for &pos in changed {
             dirty.extend(affected_sections(pos));
             lit.extend(self.light.block_changed(&self.world, pos));
@@ -454,8 +460,9 @@ impl Game {
         let (min, max) = self.player.aabb();
         let lo = (min - Vec3::ONE).floor().as_ivec3();
         let hi = (max + Vec3::ONE).floor().as_ivec3();
-        let (lo, hi) = (column_key(lo.x, lo.z), column_key(hi.x, hi.z));
-        (lo.x..=hi.x).all(|x| (lo.y..=hi.y).all(|z| self.world.column(IVec2::new(x, z)).is_some()))
+        let (lo, hi) = (ColumnPos::of_block(lo), ColumnPos::of_block(hi));
+        (lo.x()..=hi.x())
+            .all(|x| (lo.z()..=hi.z()).all(|z| self.world.column(ColumnPos::new(x, z)).is_some()))
     }
 }
 

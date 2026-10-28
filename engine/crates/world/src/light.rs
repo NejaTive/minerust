@@ -5,8 +5,9 @@ use glam::{IVec2, IVec3};
 
 use crate::block::{Block, Shape};
 use crate::column::{Column, WORLD_HEIGHT};
+use crate::pos::{ColumnPos, SectionPos};
 use crate::section::SECTION_SIZE;
-use crate::world::{World, affected_sections, column_key};
+use crate::world::{World, affected_sections};
 
 pub const MAX_LIGHT: u8 = 15;
 
@@ -137,11 +138,11 @@ fn column_index(local: IVec3) -> usize {
 /// одном блоке вокруг неё окончателен, как только загружены её 8 соседей, — ровно
 /// тогда загрузчик и строит её меш.
 pub struct LightMap {
-    columns: HashMap<IVec2, ColumnLight>,
+    columns: HashMap<ColumnPos, ColumnLight>,
     /// Колонки, где свет блоков когда-либо был ярче 0 (с запасом: после снятия ключ
     /// остаётся). Без источников и без таких соседей проход по свету блоков не нужен —
     /// а это почти все колонки, пока игрок не ставил светокамень и не нашёл его в мире.
-    block_lit: HashSet<IVec2>,
+    block_lit: HashSet<ColumnPos>,
 }
 
 impl LightMap {
@@ -173,7 +174,7 @@ impl LightMap {
         if pos.y < 0 {
             return 0;
         }
-        let key = column_key(pos.x, pos.z);
+        let key = ColumnPos::of_block(pos);
         let local = IVec3::new(
             pos.x.rem_euclid(SECTION_SIZE),
             pos.y,
@@ -183,12 +184,12 @@ impl LightMap {
     }
 
     /// Свет колонки `key`, если она в карте.
-    pub fn column(&self, key: IVec2) -> Option<&ColumnLight> {
+    pub fn column(&self, key: ColumnPos) -> Option<&ColumnLight> {
         self.columns.get(&key)
     }
 
     /// Свет колонки `key` и восьми соседей: индекс `dx + 1 + 3·(dz + 1)`, центр — 4.
-    pub fn neighborhood(&self, key: IVec2) -> [Option<&ColumnLight>; 9] {
+    pub fn neighborhood(&self, key: ColumnPos) -> [Option<&ColumnLight>; 9] {
         std::array::from_fn(|i| {
             self.columns
                 .get(&(key + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1)))
@@ -198,7 +199,7 @@ impl LightMap {
     /// Байт света по локальным координатам колонки `key`, в том числе за её краем (x, z в
     /// −16..32), как [`LightMap::packed`]. Мешер спрашивает свет всех клеток колонки, и
     /// поиск колонки в `HashMap` на каждую был бы заметен: колонки 3×3 берутся заранее.
-    pub fn column_sampler(&self, key: IVec2) -> impl Fn(IVec3) -> u8 + '_ {
+    pub fn column_sampler(&self, key: ColumnPos) -> impl Fn(IVec3) -> u8 + '_ {
         let columns = self.neighborhood(key);
         move |local: IVec3| {
             if local.y >= WORLD_HEIGHT {
@@ -222,7 +223,7 @@ impl LightMap {
     }
 
     /// Ключи колонок со светом, в произвольном порядке.
-    pub fn keys(&self) -> impl Iterator<Item = IVec2> + '_ {
+    pub fn keys(&self) -> impl Iterator<Item = ColumnPos> + '_ {
         self.columns.keys().copied()
     }
 
@@ -249,7 +250,7 @@ impl LightMap {
     /// перестраивает тот, кто добавляет колонку (загрузчик строит меш только после
     /// загрузки всех 8 соседей). Колонку, которой нет в `world`, пропускает;
     /// уже добавленную — пересчитывает заново.
-    pub fn add_column(&mut self, world: &World, key: IVec2) -> Vec<IVec3> {
+    pub fn add_column(&mut self, world: &World, key: ColumnPos) -> Vec<SectionPos> {
         let Some(column) = world.column(key) else {
             return Vec::new();
         };
@@ -278,7 +279,7 @@ impl LightMap {
     /// Убирает свет колонки `key` и снимает свет соседей, пришедший через неё; `world`
     /// нужен для блоков соседей, чтобы заново растечь их собственный свет. Возвращает
     /// ключи секций, чей меш зависит от изменившегося света соседей.
-    pub fn remove_column(&mut self, world: &World, key: IVec2) -> Vec<IVec3> {
+    pub fn remove_column(&mut self, world: &World, key: ColumnPos) -> Vec<SectionPos> {
         let Some(old) = self.columns.remove(&key) else {
             return Vec::new();
         };
@@ -317,8 +318,8 @@ impl LightMap {
     /// `pos`, и заново растекает его от границы снятого и от соседей `pos`. Возвращает
     /// ключи всех секций, чей меш зависит от изменившегося света. Вне высоты мира и в
     /// колонке без света ничего не делает.
-    pub fn block_changed(&mut self, world: &World, pos: IVec3) -> Vec<IVec3> {
-        let key = column_key(pos.x, pos.z);
+    pub fn block_changed(&mut self, world: &World, pos: IVec3) -> Vec<SectionPos> {
+        let key = ColumnPos::of_block(pos);
         if !(0..WORLD_HEIGHT).contains(&pos.y) || !self.columns.contains_key(&key) {
             return Vec::new();
         }
@@ -369,7 +370,7 @@ impl LightMap {
     }
 
     /// Есть ли свет блоков в колонке или её 8 соседях.
-    fn near_block_light(&self, key: IVec2) -> bool {
+    fn near_block_light(&self, key: ColumnPos) -> bool {
         !self.block_lit.is_empty()
             && (-1..=1)
                 .any(|dz| (-1..=1).any(|dx| self.block_lit.contains(&(key + IVec2::new(dx, dz)))))
@@ -377,7 +378,7 @@ impl LightMap {
 
     /// Запоминает колонки окна вокруг `center`, куда проход записал свет блоков;
     /// `touched` — их битовая маска по номеру в окне ([`Window::touched_columns`]).
-    fn mark_block_lit(&mut self, center: IVec2, touched: u16) {
+    fn mark_block_lit(&mut self, center: ColumnPos, touched: u16) {
         for i in 0..9 {
             if touched >> i & 1 != 0 {
                 self.block_lit
@@ -394,12 +395,12 @@ impl Default for LightMap {
 }
 
 /// Убирает дубли, по желанию — секции колонки `skip`, и сортирует ради одинакового порядка.
-fn finish(keys: Vec<IVec3>, skip: Option<IVec2>) -> Vec<IVec3> {
-    let mut keys: Vec<IVec3> = keys
+fn finish(keys: Vec<SectionPos>, skip: Option<ColumnPos>) -> Vec<SectionPos> {
+    let mut keys: Vec<SectionPos> = keys
         .into_iter()
-        .filter(|k| skip != Some(IVec2::new(k.x, k.z)))
+        .filter(|k| skip != Some(k.column()))
         .collect();
-    keys.sort_by_key(|k| k.to_array());
+    keys.sort();
     keys.dedup();
     keys
 }
@@ -512,13 +513,13 @@ struct Window<'a> {
 
 impl<'a> Window<'a> {
     fn new(
-        columns: &'a mut HashMap<IVec2, ColumnLight>,
+        columns: &'a mut HashMap<ColumnPos, ColumnLight>,
         world: &'a World,
-        center: IVec2,
+        center: ColumnPos,
         track_center: bool,
         channel: Channel,
     ) -> Self {
-        let keys: [IVec2; 9] =
+        let keys: [ColumnPos; 9] =
             std::array::from_fn(|i| center + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1));
         let mut light = columns
             .get_disjoint_mut(keys.each_ref())
@@ -533,11 +534,7 @@ impl<'a> Window<'a> {
         Self {
             light,
             blocks,
-            origin: IVec3::new(
-                (center.x - 1) * SECTION_SIZE,
-                0,
-                (center.y - 1) * SECTION_SIZE,
-            ),
+            origin: (center + IVec2::NEG_ONE).origin(),
             queue: Default::default(),
             original: HashMap::default(),
             track_center,
@@ -779,7 +776,7 @@ impl<'a> Window<'a> {
     /// Изменённых клеток бывают тысячи (свет залил зал), а набор задетых секций у них
     /// определяется секцией клетки и тем, у каких её граней клетка лежит, — поэтому
     /// `affected_sections` зовётся один раз на такой набор.
-    fn changed_sections(&self) -> Vec<IVec3> {
+    fn changed_sections(&self) -> Vec<SectionPos> {
         const SECTIONS: usize = 9 * (WORLD_HEIGHT / SECTION_SIZE) as usize;
         let mut seen = vec![false; SECTIONS * 27];
         let mut keys = HashSet::new();

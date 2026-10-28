@@ -1,11 +1,12 @@
 //! Golden-хеши генерации и мешей: страхуют рефакторинг от тихой смены поведения.
 //! Константы меняются только при намеренной смене генерации, света или формата меша.
-use glam::{IVec2, IVec3};
+use glam::IVec3;
 
 use crate::mesh::{gpu_vertices, vertex_bytes};
 use crate::mesher::{MeshOptions, mesh_world_column};
 use world::column::WORLD_HEIGHT;
 use world::light::LightMap;
+use world::pos::ColumnPos;
 use world::terrain::Terrain;
 use world::world::World;
 
@@ -29,7 +30,7 @@ fn generated_blocks_match_golden() {
     let hashes: Vec<u64> = KEYS
         .iter()
         .map(|&(x, z)| {
-            let column = terrain.generate(IVec2::new(x, z));
+            let column = terrain.generate(ColumnPos::new(x, z));
             let mut hash = FNV_START;
             for y in 0..WORLD_HEIGHT {
                 for lz in 0..16 {
@@ -51,7 +52,7 @@ fn meshes_match_golden() {
     for &(kx, kz) in &KEYS {
         for z in kz - 1..=kz + 1 {
             for x in kx - 1..=kx + 1 {
-                let key = IVec2::new(x, z);
+                let key = ColumnPos::new(x, z);
                 if world.column(key).is_none() {
                     world.insert(key, terrain.generate(key));
                 }
@@ -59,8 +60,8 @@ fn meshes_match_golden() {
         }
     }
     let mut light = LightMap::new();
-    let mut keys: Vec<IVec2> = world.keys().collect();
-    keys.sort_by_key(|k| (k.x, k.y));
+    let mut keys: Vec<ColumnPos> = world.keys().collect();
+    keys.sort();
     for key in keys {
         light.add_column(&world, key);
     }
@@ -68,7 +69,7 @@ fn meshes_match_golden() {
         .iter()
         .map(|&(x, z)| {
             let sections =
-                mesh_world_column(&world, &light, IVec2::new(x, z), MeshOptions::default())
+                mesh_world_column(&world, &light, ColumnPos::new(x, z), MeshOptions::default())
                     .expect("column is loaded");
             let mut hash = FNV_START;
             for section in &sections {

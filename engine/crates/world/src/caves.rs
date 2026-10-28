@@ -1,8 +1,9 @@
 use fastnoise_lite::{FastNoiseLite, NoiseType};
-use glam::{IVec2, IVec3};
+use glam::IVec3;
 
 use crate::block::Block;
 use crate::column::{Column, WORLD_HEIGHT};
+use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
 use crate::terrain::{WATER_LEVEL, smoothstep};
 
@@ -103,28 +104,28 @@ impl Caves {
     /// песок и камень: воду, брёвна и листву не трогает.
     pub fn carve(
         &self,
-        key: IVec2,
+        key: ColumnPos,
         column: &mut Column,
         surface: impl Fn(i32, i32) -> i32,
         has_tree: impl Fn(i32, i32) -> bool,
     ) {
-        let origin = key * SECTION_SIZE;
+        let origin = key.origin();
         // Поверхность с полосой в один столбец вокруг: вода соседа тоже ограничивает.
         const SIDE: i32 = SECTION_SIZE + 2;
         let mut heights = [0; (SIDE * SIDE) as usize];
         for z in 0..SIDE {
             for x in 0..SIDE {
-                heights[(z * SIDE + x) as usize] = surface(origin.x + x - 1, origin.y + z - 1);
+                heights[(z * SIDE + x) as usize] = surface(origin.x + x - 1, origin.z + z - 1);
             }
         }
         let cached =
-            |x: i32, z: i32| heights[((z - origin.y + 1) * SIDE + x - origin.x + 1) as usize];
+            |x: i32, z: i32| heights[((z - origin.z + 1) * SIDE + x - origin.x + 1) as usize];
 
         let mut limits = [[Limits::default(); SECTION_SIZE as usize]; SECTION_SIZE as usize];
         let mut top = FLOOR;
         for z in 0..SECTION_SIZE {
             for x in 0..SECTION_SIZE {
-                let l = self.limits(origin.x + x, origin.y + z, cached, &has_tree);
+                let l = self.limits(origin.x + x, origin.z + z, cached, &has_tree);
                 top = top.max(l.top);
                 limits[z as usize][x as usize] = l;
             }
@@ -141,7 +142,7 @@ impl Caves {
         for j in low..=high {
             for k in 0..NODES_XZ as i32 {
                 for i in 0..NODES_XZ as i32 {
-                    let pos = IVec3::new(origin.x, 0, origin.y) + IVec3::new(i, j, k) * CELL;
+                    let pos = origin + IVec3::new(i, j, k) * CELL;
                     nodes[j as usize][k as usize * NODES_XZ + i as usize] = self.node(pos);
                 }
             }
@@ -280,6 +281,8 @@ fn bilinear([c00, c10, c01, c11]: [Sample; 4], tx: f32, tz: f32) -> Sample {
 
 #[cfg(test)]
 mod tests {
+    use glam::IVec2;
+
     use super::*;
     use crate::terrain::{Terrain, lake_key};
     use crate::trees::tree_at;
@@ -288,22 +291,22 @@ mod tests {
         IVec3::new(pos.x.rem_euclid(16), pos.y, pos.z.rem_euclid(16))
     }
 
-    fn keys(center: IVec2, radius: i32) -> impl Iterator<Item = IVec2> {
+    fn keys(center: ColumnPos, radius: i32) -> impl Iterator<Item = ColumnPos> {
         (-radius..=radius)
             .flat_map(move |z| (-radius..=radius).map(move |x| center + IVec2::new(x, z)))
     }
 
     /// Колонка без деревьев до и после пещер.
-    fn ground_and_carved(terrain: &Terrain, key: IVec2) -> (Column, Column) {
+    fn ground_and_carved(terrain: &Terrain, key: ColumnPos) -> (Column, Column) {
         (terrain.generate_ground(key), terrain.generate_carved(key))
     }
 
     /// Мировые координаты блоков колонки `key`.
-    fn blocks(key: IVec2) -> impl Iterator<Item = IVec3> {
-        let origin = key * 16;
+    fn blocks(key: ColumnPos) -> impl Iterator<Item = IVec3> {
+        let origin = key.origin();
         (0..WORLD_HEIGHT).flat_map(move |y| {
             (0..16)
-                .flat_map(move |z| (0..16).map(move |x| IVec3::new(origin.x + x, y, origin.y + z)))
+                .flat_map(move |z| (0..16).map(move |x| IVec3::new(origin.x + x, y, origin.z + z)))
         })
     }
 
@@ -323,7 +326,7 @@ mod tests {
         assert!(differs > caves / 2, "{differs} of {caves}");
 
         let terrain = Terrain::new(42);
-        for key in [IVec2::new(-3, 7), IVec2::new(100, -40)] {
+        for key in [ColumnPos::new(-3, 7), ColumnPos::new(100, -40)] {
             let (_, x) = ground_and_carved(&terrain, key);
             let (_, y) = ground_and_carved(&Terrain::new(42), key);
             assert!(blocks(key).all(|p| x.get(local(p)) == y.get(local(p))));
@@ -367,10 +370,10 @@ mod tests {
         let has_tree = |x, z| tree_at(&terrain, x, z).is_some();
         let mut carved_total = 0;
         for key in [
-            IVec2::new(2, -5),
-            IVec2::new(3, -5),
-            IVec2::new(-1, 0),
-            IVec2::new(0, 0),
+            ColumnPos::new(2, -5),
+            ColumnPos::new(3, -5),
+            ColumnPos::new(-1, 0),
+            ColumnPos::new(0, 0),
         ] {
             let (ground, carved) = ground_and_carved(&terrain, key);
             for p in blocks(key) {
@@ -392,7 +395,7 @@ mod tests {
         for seed in [1337, 42] {
             let terrain = Terrain::new(seed);
             let (mut solid, mut hollow) = (0, 0);
-            for key in keys(IVec2::new(5, -3), 3) {
+            for key in keys(ColumnPos::new(5, -3), 3) {
                 let (ground, carved) = ground_and_carved(&terrain, key);
                 for p in blocks(key).filter(|p| p.y > FLOOR) {
                     let p = local(p);
@@ -410,7 +413,7 @@ mod tests {
     #[test]
     fn bottom_layers_stay_stone() {
         let terrain = Terrain::new(1337);
-        for key in keys(IVec2::new(-4, 9), 2) {
+        for key in keys(ColumnPos::new(-4, 9), 2) {
             let column = terrain.generate(key);
             for p in blocks(key).filter(|p| p.y <= FLOOR) {
                 assert_eq!(column.get(local(p)), Block::Stone, "{p}");
@@ -447,10 +450,10 @@ mod tests {
     fn trees_stand_on_ground() {
         let terrain = Terrain::new(1337);
         let mut trees = 0;
-        for key in keys(IVec2::new(0, 0), 6) {
+        for key in keys(ColumnPos::new(0, 0), 6) {
             let column = terrain.generate(key);
-            let origin = key * 16;
-            for z in origin.y..origin.y + 16 {
+            let origin = key.origin();
+            for z in origin.z..origin.z + 16 {
                 for x in origin.x..origin.x + 16 {
                     let Some(tree) = tree_at(&terrain, x, z) else {
                         continue;
@@ -487,10 +490,10 @@ mod tests {
         let terrain = Terrain::new(1337);
         let caves = &terrain.caves;
         let mut openings = 0;
-        for key in keys(IVec2::new(0, 0), 8) {
+        for key in keys(ColumnPos::new(0, 0), 8) {
             let (ground, carved) = ground_and_carved(&terrain, key);
-            let origin = key * 16;
-            for z in origin.y..origin.y + 16 {
+            let origin = key.origin();
+            for z in origin.z..origin.z + 16 {
                 for x in origin.x..origin.x + 16 {
                     let h = terrain.surface_height(x, z);
                     let opened = (h - ROOF + 1..=h).any(|y| {

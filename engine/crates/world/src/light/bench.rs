@@ -8,8 +8,8 @@ use crate::terrain::Terrain;
 #[ignore]
 fn light_timing() {
     let terrain = Terrain::new(1337);
-    let keys: Vec<IVec2> = (-6..6)
-        .flat_map(|z| (-6..6).map(move |x| IVec2::new(x, z)))
+    let keys: Vec<ColumnPos> = (-6..6)
+        .flat_map(|z| (-6..6).map(move |x| ColumnPos::new(x, z)))
         .collect();
     let mut world = World::new();
     for &key in &keys {
@@ -46,7 +46,7 @@ fn light_timing() {
 #[ignore]
 fn cave_edit_timing() {
     let terrain = Terrain::new(838037976);
-    let center = column_key(142, -70);
+    let center = ColumnPos::of_block(IVec3::new(142, 0, -70));
     let mut world = World::new();
     for z in -2..=2 {
         for x in -2..=2 {
