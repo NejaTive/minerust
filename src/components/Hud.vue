@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { BLOCK_LABELS, type BlockName } from '../settings'
-import type { PlayerInfo, TimeInfo, WorldStats } from './GameCanvas.vue'
+import type { WorldStats } from '@engine'
+import { blockLabel } from '../engine/info'
+import type { PlayerInfo, TimeInfo } from '../engine/types'
 
 defineProps<{
   fps: number
   stats?: WorldStats
   time?: TimeInfo
   /** Блок в выбранном слоте; `null` — слот пуст. */
-  block: BlockName | null
+  block: string | null
   player?: PlayerInfo
   notice?: string
   showDebug: boolean
@@ -65,7 +66,7 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
         >Режим: ходьба<template v-if="player.onGround"> · на земле</template></template
       >
     </div>
-    <div>Блок: {{ block ? BLOCK_LABELS[block] : 'пусто' }}</div>
+    <div>Блок: {{ block ? blockLabel(block) : 'пусто' }}</div>
     <div v-if="notice" class="notice">{{ notice }}</div>
   </div>
 </template>

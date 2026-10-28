@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, useTemplateRef } from 'vue'
 import { block_icon } from '@engine'
-import { BLOCK_LABELS, HOTBAR } from '../settings'
+import { blockLabel } from '../engine/info'
+import { HOTBAR } from '../settings/hotbar'
 
 defineProps<{ slotIndex: number }>()
 
@@ -30,7 +31,7 @@ onMounted(() => {
       :key="index"
       class="slot"
       :class="{ selected: index === slotIndex }"
-      :title="name ? BLOCK_LABELS[name] : undefined"
+      :title="name ? blockLabel(name) : undefined"
     >
       <canvas v-if="name" :data-block="name" :width="ICON_SIZE" :height="ICON_SIZE" />
       <span class="number">{{ index + 1 }}</span>

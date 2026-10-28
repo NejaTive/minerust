@@ -1,0 +1,58 @@
+import init, { Engine, blocks, default_settings, settings_limits } from '@engine'
+import type { EngineSettings, SettingsLimits } from '../settings/settings'
+
+export interface BlockInfo {
+  name: string
+  label: string
+  placeable: boolean
+}
+
+/** Всё, что движок сообщает до создания `Engine`: простые объекты, без указателей в wasm. */
+export interface EngineInfo {
+  formatVersion: number
+  blocks: BlockInfo[]
+  limits: SettingsLimits
+  defaults: EngineSettings
+}
+
+let loaded: EngineInfo | undefined
+
+/** Инициализирует wasm и читает справочные данные движка; вызывается один раз до монтирования. */
+export async function loadEngineInfo(): Promise<EngineInfo> {
+  await init()
+  const list = blocks()
+  const limits = settings_limits()
+  const defaults = default_settings()
+  loaded = {
+    formatVersion: Engine.format_version(),
+    blocks: list.map(({ name, label, placeable }) => ({ name, label, placeable })),
+    limits: {
+      renderDistanceMin: limits.renderDistanceMin,
+      renderDistanceMax: limits.renderDistanceMax,
+      mouseSensitivityMin: limits.mouseSensitivityMin,
+      mouseSensitivityMax: limits.mouseSensitivityMax,
+      fovMin: limits.fovMin,
+      fovMax: limits.fovMax,
+    },
+    defaults: {
+      renderDistance: defaults.renderDistance,
+      ambientOcclusion: defaults.ambientOcclusion,
+      mouseSensitivity: defaults.mouseSensitivity,
+      fov: defaults.fov,
+    },
+  }
+  list.forEach((block) => block.free())
+  limits.free()
+  defaults.free()
+  return loaded
+}
+
+export function engineInfo(): EngineInfo {
+  if (!loaded) throw new Error('loadEngineInfo() must finish before the app is mounted')
+  return loaded
+}
+
+/** Подпись блока для интерфейса; неизвестное имя возвращается как есть. */
+export function blockLabel(name: string): string {
+  return engineInfo().blocks.find((block) => block.name === name)?.label ?? name
+}
