@@ -171,6 +171,44 @@ pub struct SectionMeshes {
     pub water: MeshData,
 }
 
+/// Копирует блоки секции в середину кэша; `false`, если в ней один воздух.
+/// Вынесено из [`mesh_section`], чтобы замер по этапам (`mesh_stages`) видел этап отдельно.
+fn fill_blocks(blocks: &mut Neighborhood, section: &Section) -> bool {
+    let mut any_block = false;
+    for y in 0..SECTION_SIZE {
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                let local = IVec3::new(x, y, z);
+                let block = section.get(local);
+                blocks.0[Neighborhood::index(local)] = block;
+                any_block |= block != Block::Air;
+            }
+        }
+    }
+    any_block
+}
+
+/// Добирает у кэша блоки соседей по краям и заполняет кэш света для всех клеток −1..=16.
+fn fill_halo(
+    blocks: &mut Neighborhood,
+    lights: &mut Lights,
+    neighbor: impl Fn(IVec3) -> Block,
+    light: impl Fn(IVec3) -> u8,
+) {
+    for y in -1..=SECTION_SIZE {
+        for z in -1..=SECTION_SIZE {
+            for x in -1..=SECTION_SIZE {
+                let local = IVec3::new(x, y, z);
+                let index = Neighborhood::index(local);
+                if !Section::contains(local) {
+                    blocks.0[index] = neighbor(local);
+                }
+                lights.0[index] = light(local);
+            }
+        }
+    }
+}
+
 /// Строит меши видимых граней секции. Позиции вершин мировые.
 ///
 /// Грань блока рисуется, если сосед в её направлении не непрозрачный: так грани за
@@ -204,33 +242,11 @@ pub fn mesh_section(
         water: MeshData::new(),
     };
     let mut blocks = Neighborhood([Block::Air; (PADDED * PADDED * PADDED) as usize]);
-    let mut any_block = false;
-    for y in 0..SECTION_SIZE {
-        for z in 0..SECTION_SIZE {
-            for x in 0..SECTION_SIZE {
-                let local = IVec3::new(x, y, z);
-                let block = section.get(local);
-                blocks.0[Neighborhood::index(local)] = block;
-                any_block |= block != Block::Air;
-            }
-        }
-    }
-    if !any_block {
+    if !fill_blocks(&mut blocks, section) {
         return meshes;
     }
     let mut lights = Lights([0; (PADDED * PADDED * PADDED) as usize]);
-    for y in -1..=SECTION_SIZE {
-        for z in -1..=SECTION_SIZE {
-            for x in -1..=SECTION_SIZE {
-                let local = IVec3::new(x, y, z);
-                let index = Neighborhood::index(local);
-                if !Section::contains(local) {
-                    blocks.0[index] = neighbor(local);
-                }
-                lights.0[index] = light(local);
-            }
-        }
-    }
+    fill_halo(&mut blocks, &mut lights, neighbor, light);
 
     let faces = FACES.each_ref().map(|face| {
         (
@@ -1482,14 +1498,14 @@ mod tests {
 
 #[cfg(test)]
 mod bench {
+    use std::hint::black_box;
+    use std::time::{Duration, Instant};
+
     use super::*;
     use crate::terrain::Terrain;
 
-    /// Среднее время `mesh_column` на квадрате колонок 12×12 (соседи загружены);
-    /// запуск: `cargo test --release mesh_timing -- --ignored --nocapture`.
-    #[test]
-    #[ignore]
-    fn mesh_timing() {
+    /// Мир 14×14 колонок с светом и ключи внутренних 12×12 (у них все соседи загружены).
+    fn setup() -> (World, LightMap, Vec<IVec2>) {
         let terrain = Terrain::new(1337);
         let mut world = World::new();
         for z in -7..7 {
@@ -1498,18 +1514,27 @@ mod bench {
                 world.insert(key, terrain.generate(key));
             }
         }
-        let keys: Vec<IVec2> = (-6..6)
+        let keys = (-6..6)
             .flat_map(|z| (-6..6).map(move |x| IVec2::new(x, z)))
             .collect();
         let mut light = LightMap::new();
         for key in world.keys().collect::<Vec<_>>() {
             light.add_column(&world, key);
         }
-        let start = std::time::Instant::now();
+        (world, light, keys)
+    }
+
+    /// Среднее время `mesh_column` на квадрате колонок 12×12 (соседи загружены);
+    /// запуск: `cargo test --release mesh_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn mesh_timing() {
+        let (world, light, keys) = setup();
+        let start = Instant::now();
         for &key in &keys {
             let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
             let column = world.column(key).unwrap();
-            std::hint::black_box(mesh_column(
+            black_box(mesh_column(
                 column,
                 origin,
                 |local| world.block(origin + local),
@@ -1519,5 +1544,87 @@ mod bench {
         }
         let per_column = start.elapsed() / keys.len() as u32;
         println!("mesh: {per_column:?} per column");
+    }
+
+    /// Время `mesh_column` по этапам, на колонку, при AO и без. Кэш (блоки и свет с
+    /// соседями) меряется отдельно через `fill_blocks`/`fill_halo`. Цикл граней (AO, свет
+    /// вершин, запись) отдельно не выделить без правки мешера, поэтому его время — это
+    /// полный `mesh_section` минус кэш, а запись вершин оценивается пересборкой готовых
+    /// мешей через `push_quad` (те же вызовы, без расчёта AO и света). Расчёт AO и
+    /// света вершин — остаток. Запуск:
+    /// `cargo test --release mesh_stages -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn mesh_stages() {
+        const REPEATS: u32 = 3;
+        let (world, light, keys) = setup();
+        for options in [
+            MeshOptions::default(),
+            MeshOptions {
+                ambient_occlusion: false,
+            },
+        ] {
+            let (mut total, mut cache, mut write) =
+                (Duration::ZERO, Duration::ZERO, Duration::ZERO);
+            let mut quads = 0usize;
+            for _ in 0..REPEATS {
+                let mut meshes = Vec::new();
+                for &key in &keys {
+                    let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
+                    let column = world.column(key).unwrap();
+                    let sampler = light.column_sampler(key);
+                    for sy in 0..COLUMN_SECTIONS {
+                        let offset = IVec3::new(0, sy * SECTION_SIZE, 0);
+                        let neighbor = |local: IVec3| {
+                            let in_column = local + offset;
+                            if Column::contains(in_column) {
+                                column.get(in_column)
+                            } else {
+                                world.block(origin + in_column)
+                            }
+                        };
+                        let sample = |local: IVec3| sampler(local + offset);
+                        let section = column.section(sy);
+
+                        let start = Instant::now();
+                        let mut blocks =
+                            Neighborhood([Block::Air; (PADDED * PADDED * PADDED) as usize]);
+                        if fill_blocks(&mut blocks, section) {
+                            let mut lights = Lights([0; (PADDED * PADDED * PADDED) as usize]);
+                            fill_halo(&mut blocks, &mut lights, neighbor, sample);
+                            black_box((&blocks, &lights));
+                        }
+                        cache += start.elapsed();
+
+                        let start = Instant::now();
+                        let data =
+                            mesh_section(section, origin + offset, neighbor, sample, options);
+                        total += start.elapsed();
+                        meshes.push(black_box(data));
+                    }
+                }
+                let start = Instant::now();
+                for data in &meshes {
+                    for mesh in [&data.solid, &data.water] {
+                        let mut copy = MeshData::new();
+                        for quad in mesh.vertices.as_chunks::<4>().0 {
+                            copy.push_quad(quad.iter().copied(), [0, 1, 2, 2, 3, 0]);
+                            quads += 1;
+                        }
+                        black_box(copy);
+                    }
+                }
+                write += start.elapsed();
+            }
+            let per = |d: Duration| d / (REPEATS * keys.len() as u32);
+            let (total, cache, write) = (per(total), per(cache), per(write));
+            println!(
+                "ao={}: total {total:?} | cache {cache:?} | faces (AO+light+write) {:?} | write ≈ {write:?} | AO+light ≈ {:?} | quads/column {}",
+                options.ambient_occlusion,
+                total.saturating_sub(cache),
+                total.saturating_sub(cache + write),
+                quads / (REPEATS as usize * keys.len()),
+            );
+        }
     }
 }

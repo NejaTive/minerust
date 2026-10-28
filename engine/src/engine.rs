@@ -123,6 +123,20 @@ pub struct Engine {
     light_time: AverageTime,
     /// Правка блока: свет и немедленная перестройка задетых секций.
     edit_time: AverageTime,
+    /// Замеры кадра включены (`set_profiling`): иначе нет лишних вызовов `performance.now`.
+    profiling: bool,
+    /// CPU за кадр: подгрузка и меш в бюджете (`stream_columns`).
+    stream_frame_time: AverageTime,
+    /// CPU за кадр: всё остальное до `finish` (физика, матрицы, отсечение, запись команд).
+    build_frame_time: AverageTime,
+    /// CPU за кадр: `finish`, `submit`, `present`.
+    submit_frame_time: AverageTime,
+    /// Счётчики последнего кадра; считаются всегда, это сложение целых.
+    frame_counts: FrameCounts,
+    /// Момент (мс `performance.now`) начала текущей загрузки мира: старт или `set_camera_state`.
+    load_started: Option<f64>,
+    /// Длительность последней завершённой загрузки, мс; 0, пока идёт.
+    load_ms: u32,
     depth_view: wgpu::TextureView,
     /// Взгляд игрока. Позицию задаёт `player`: каждый кадр камера ставится в его глаза.
     camera: Camera,
@@ -244,6 +258,7 @@ impl Engine {
         let depth_view = create_depth_view(&device, width, height);
 
         let performance = web_sys::window().and_then(|w| w.performance());
+        let load_started = performance.as_ref().map(|p| p.now());
         let mut generate_time = AverageTime::default();
         let mut mesh_time = AverageTime::default();
         let mut light_time = AverageTime::default();
@@ -402,6 +417,13 @@ impl Engine {
             mesh_time,
             light_time,
             edit_time: AverageTime::default(),
+            profiling: false,
+            stream_frame_time: AverageTime::default(),
+            build_frame_time: AverageTime::default(),
+            submit_frame_time: AverageTime::default(),
+            frame_counts: FrameCounts::default(),
+            load_started,
+            load_ms: 0,
             depth_view,
             camera,
             prev_feet: player.feet,
@@ -556,10 +578,25 @@ impl Engine {
     /// колонок в очереди на меш (включая перестройку после смены AO и секции после
     /// смены света), генерация колонки в мкс, меширование колонки в мкс, секций
     /// нарисовано в прошлом кадре, свет колонки в мкс, правка блока со светом и
-    /// перестройкой в мкс, память на свет в КиБ]`. Время — среднее с прошлого вызова
-    /// (или последнее известное, если работы не было).
+    /// перестройкой в мкс, память на свет в КиБ, затем кадр: подгрузка и меш в бюджете в
+    /// мкс, сборка кадра до `finish` в мкс, `finish`+`submit`+`present` в мкс (эти три —
+    /// только при `set_profiling(true)`, иначе нули), вершин и индексов непрозрачных
+    /// мешей, вершин и индексов воды, draw-вызовов в последнем кадре, меши на GPU в КиБ,
+    /// полная загрузка мира в мс (0, пока идёт; считается от создания движка или
+    /// `set_camera_state`)]`. Время — среднее с прошлого вызова (или последнее известное,
+    /// если работы не было).
     pub fn stats(&mut self) -> Vec<u32> {
         let sections = self.column_meshes.values().flatten().flatten().count();
+        let gpu_bytes: u64 = self
+            .column_meshes
+            .values()
+            .flatten()
+            .flatten()
+            .flat_map(|mesh| [&mesh.solid, &mesh.water])
+            .flatten()
+            .map(GpuMesh::bytes)
+            .sum();
+        let counts = self.frame_counts;
         vec![
             self.world.len() as u32,
             self.column_meshes.len() as u32,
@@ -571,7 +608,57 @@ impl Engine {
             self.light_time.take_micros(),
             self.edit_time.take_micros(),
             (self.light.memory_bytes() / 1024) as u32,
+            self.stream_frame_time.take_micros(),
+            self.build_frame_time.take_micros(),
+            self.submit_frame_time.take_micros(),
+            counts.solid_vertices,
+            counts.solid_indices,
+            counts.water_vertices,
+            counts.water_indices,
+            counts.draw_calls,
+            (gpu_bytes / 1024) as u32,
+            self.load_ms,
         ]
+    }
+
+    /// Длительность последней завершённой загрузки мира, мс; 0, пока идёт. В отличие от
+    /// `stats()` ничего не сбрасывает, так что режим замера опрашивает её каждый кадр.
+    pub fn load_ms(&self) -> u32 {
+        self.load_ms
+    }
+
+    /// Замеры времени кадра для `stats()`: три `performance.now` за кадр. Выключены по
+    /// умолчанию, включаются отладочным HUD и режимом замера.
+    pub fn set_profiling(&mut self, enabled: bool) {
+        self.profiling = enabled;
+    }
+
+    /// Отладочная: ставит игрока и взгляд из `[x, y, z, yaw, pitch, mode]` (как
+    /// [`Engine::camera_state`]) и начинает отсчёт полной загрузки заново. Нужна режиму
+    /// замера `?bench`; в обычной игре не вызывается.
+    pub fn set_camera_state(&mut self, state: Vec<f32>) -> Result<(), JsError> {
+        let (camera, player) = restore_player(&state)
+            .ok_or_else(|| JsError::new("camera state must be 5 or 6 finite numbers"))?;
+        self.camera.position = camera.position;
+        self.camera.yaw = camera.yaw;
+        self.camera.pitch = camera.pitch;
+        self.prev_feet = player.feet;
+        self.player = player;
+        self.clock.reset();
+        self.target = None;
+        self.load_started = self.performance.as_ref().map(|p| p.now());
+        self.load_ms = 0;
+        Ok(())
+    }
+
+    /// `"release"` или `"dev"`: профиль, с которым собран wasm (влияет на цифры замеров).
+    pub fn build_profile() -> String {
+        if cfg!(debug_assertions) {
+            "dev"
+        } else {
+            "release"
+        }
+        .to_owned()
     }
 
     /// Вызывается при изменении размеров canvas (в физических пикселях).
@@ -704,6 +791,7 @@ impl Engine {
 
     /// Рисует один кадр. `time` — секунды с начала работы страницы.
     pub fn render(&mut self, time: f32) -> Result<(), JsError> {
+        let t_start = self.tick();
         let dt = self
             .last_time
             .map_or(0.0, |last| (time - last).clamp(0.0, MAX_DT));
@@ -712,7 +800,9 @@ impl Engine {
         if !self.paused {
             self.update_player(dt);
         }
+        let t_stream = self.tick();
         self.stream_columns();
+        let t_streamed = self.tick();
         if !self.paused {
             self.interact(time);
         }
@@ -813,8 +903,12 @@ impl Engine {
                 .flatten()
                 .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max))
                 .collect();
+            let mut counts = FrameCounts::default();
             for mesh in visible.iter().filter_map(|mesh| mesh.solid.as_ref()) {
                 mesh.draw(&mut pass);
+                counts.solid_vertices += mesh.vertex_count;
+                counts.solid_indices += mesh.index_count;
+                counts.draw_calls += 1;
             }
             self.drawn_sections = visible.len() as u32;
 
@@ -823,6 +917,7 @@ impl Engine {
                 pass.set_pipeline(&self.outline_pipeline);
                 pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
                 pass.draw(0..OUTLINE_VERTICES as u32, 0..1);
+                counts.draw_calls += 1;
             }
 
             // Вода — последней и от дальних секций к ближним: глубину она не пишет,
@@ -842,11 +937,30 @@ impl Engine {
                 pass.set_pipeline(&self.water_pipeline);
                 for (_, mesh) in water {
                     mesh.draw(&mut pass);
+                    counts.water_vertices += mesh.vertex_count;
+                    counts.water_indices += mesh.index_count;
+                    counts.draw_calls += 1;
                 }
             }
+            self.frame_counts = counts;
         }
+        let t_encoded = self.tick();
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
+        let t_end = self.tick();
+        if let [
+            Some(start),
+            Some(stream),
+            Some(streamed),
+            Some(encoded),
+            Some(end),
+        ] = [t_start, t_stream, t_streamed, t_encoded, t_end]
+        {
+            self.stream_frame_time.record(streamed - stream);
+            self.build_frame_time
+                .record((stream - start) + (encoded - streamed));
+            self.submit_frame_time.record(end - encoded);
+        }
         Ok(())
     }
 }
@@ -879,6 +993,7 @@ impl Engine {
             } else if !self.advance_loader() {
                 loader_done = true;
                 if self.stale.is_empty() && self.stale_sections.is_empty() {
+                    self.finish_load();
                     break;
                 }
                 continue;
@@ -892,6 +1007,26 @@ impl Engine {
             if !in_time {
                 break;
             }
+        }
+    }
+
+    /// Время `performance.now`, если замеры кадра включены.
+    fn tick(&self) -> Option<f64> {
+        if self.profiling {
+            self.performance.as_ref().map(|p| p.now())
+        } else {
+            None
+        }
+    }
+
+    /// Мир догружен целиком: фиксирует время с начала загрузки (один раз на загрузку).
+    fn finish_load(&mut self) {
+        let Some(start) = self.load_started.take() else {
+            return;
+        };
+        if let Some(p) = &self.performance {
+            // Не меньше 1: ноль в `stats()` значит «ещё грузится».
+            self.load_ms = ((p.now() - start) as u32).max(1);
         }
     }
 
@@ -1177,10 +1312,21 @@ impl AverageTime {
     }
 }
 
+/// Счётчики последнего кадра для `stats()`.
+#[derive(Clone, Copy, Default)]
+struct FrameCounts {
+    solid_vertices: u32,
+    solid_indices: u32,
+    water_vertices: u32,
+    water_indices: u32,
+    draw_calls: u32,
+}
+
 /// GPU-буферы одного меша. Индексы `u16`: на секцию их всегда хватает.
 struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    vertex_count: u32,
     index_count: u32,
 }
 
@@ -1203,8 +1349,14 @@ impl GpuMesh {
         Some(GpuMesh {
             vertex_buffer,
             index_buffer,
+            vertex_count: data.vertices.len() as u32,
             index_count: data.indices.len() as u32,
         })
+    }
+
+    /// Размер обоих буферов на GPU, байт.
+    fn bytes(&self) -> u64 {
+        self.vertex_buffer.size() + self.index_buffer.size()
     }
 
     /// Пайплайн и bind group уже выставлены.
