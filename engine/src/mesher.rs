@@ -2,7 +2,7 @@ use glam::{IVec2, IVec3};
 
 use crate::block::{Block, Facing, WATER_SURFACE};
 use crate::column::{COLUMN_SECTIONS, Column};
-use crate::light::{LightMap, average_brightness, brightness};
+use crate::light::{LightMap, average_brightness, block_level, brightness, sky_level};
 use crate::mesh::Vertex;
 use crate::section::{SECTION_SIZE, Section};
 use crate::texture::Tile;
@@ -130,12 +130,15 @@ impl Neighborhood {
     }
 }
 
-/// Уровни света секции и соседей, как [`Neighborhood`] для блоков.
+/// Байты света секции и соседей ([`crate::light::pack_light`]), как [`Neighborhood`]
+/// для блоков.
 struct Lights([u8; (PADDED * PADDED * PADDED) as usize]);
 
 impl Lights {
-    fn at(&self, index: usize, offset: isize) -> u32 {
-        u32::from(self.0[index.wrapping_add_signed(offset)])
+    /// Солнечный уровень и уровень света блоков клетки.
+    fn at(&self, index: usize, offset: isize) -> (u32, u32) {
+        let packed = self.0[index.wrapping_add_signed(offset)];
+        (u32::from(sky_level(packed)), u32::from(block_level(packed)))
     }
 }
 
@@ -255,8 +258,8 @@ pub fn mesh_section(
                     };
                     for (face, normal, _) in &faces {
                         if blocks.at(index, *normal) == Block::Air {
-                            let level = lights.at(index, *normal) as u8;
-                            let shade = face.shade * brightness(level);
+                            let (sky, block) = lights.at(index, *normal);
+                            let shade = face.shade * brightness(sky.max(block) as u8);
                             push_water_face(&mut meshes.water, face, base, top, shade);
                         }
                     }
@@ -279,18 +282,24 @@ pub fn mesh_section(
                         } else {
                             3
                         };
-                        let (mut sum, mut count) = (front, 1);
+                        let (mut sky, mut block_sum, mut count) = (front.0, front.1, 1);
                         for (offset, open) in [
                             (side1, open1),
                             (side2, open2),
                             (corner, open_corner && (open1 || open2)),
                         ] {
                             if open {
-                                sum += lights.at(index, offset);
+                                let (s, b) = lights.at(index, offset);
+                                sky += s;
+                                block_sum += b;
                                 count += 1;
                             }
                         }
-                        face.shade * AO_BRIGHTNESS[usize::from(ao)] * average_brightness(sum, count)
+                        // Свет вершины — больший из двух средних: два источника не складываются,
+                        // а под открытым небом без светокамня картинка прежняя.
+                        face.shade
+                            * AO_BRIGHTNESS[usize::from(ao)]
+                            * average_brightness(sky.max(block_sum), count)
                     });
                     let vertices = face.corners.iter().zip(CORNER_UVS).zip(shades).map(
                         |((&corner, uv), shade)| Vertex {
@@ -676,10 +685,14 @@ mod tests {
                     levels.push(light_at(cell));
                 }
             }
-            let sum: u32 = levels.iter().map(|&l| u32::from(l)).sum();
+            let count = levels.len() as f32;
+            let mean = |channel: fn(u8) -> u8| {
+                levels.iter().map(|&l| f32::from(channel(l))).sum::<f32>() / count
+            };
+            let level = mean(sky_level).max(mean(block_level));
             face_shade(normal)
                 * AO_BRIGHTNESS[usize::from(ao)]
-                * average_brightness(sum, levels.len() as u32)
+                * average_brightness((level * count).round() as u32, count as u32)
         })
     }
 
@@ -1018,7 +1031,7 @@ mod tests {
                 && local.y % 16.0 == 0.0
         };
         let block_at = |p| world.block(p);
-        let light_at = |p| light.sky(p);
+        let light_at = |p| light.packed(p);
         let edge: usize = meshes
             .iter()
             .map(|mesh| assert_shades_match(&mesh.solid, block_at, light_at, on_edge))
@@ -1082,7 +1095,12 @@ mod tests {
                 "{key}"
             );
             for mesh in &meshes {
-                assert_shades_match(&mesh.solid, |p| world.block(p), |p| light.sky(p), |_| true);
+                assert_shades_match(
+                    &mesh.solid,
+                    |p| world.block(p),
+                    |p| light.packed(p),
+                    |_| true,
+                );
             }
         }
     }
@@ -1304,7 +1322,12 @@ mod tests {
         assert!(expected.1 > 0, "no water faces in {center}");
         assert_eq!(column_face_count(&meshes), expected);
         for mesh in &meshes {
-            assert_shades_match(&mesh.solid, |p| world.block(p), |p| light.sky(p), |_| true);
+            assert_shades_match(
+                &mesh.solid,
+                |p| world.block(p),
+                |p| light.packed(p),
+                |_| true,
+            );
         }
         // Вода на западном краю колонки, и сосед за краем — тоже вода: грани между
         // ними нет ни в одной из двух колонок.
@@ -1341,6 +1364,28 @@ mod tests {
     }
 
     #[test]
+    fn glowstone_lights_a_dark_room_by_the_brighter_channel() {
+        // Закрытая комната 1 блок высотой с светокамнем: солнца нет, свет только блочный.
+        let (world, light) = small_world(|p| match (p.y, p.x, p.z) {
+            (1, 8, 8) => Block::Glowstone,
+            (1, ..) => Block::Air,
+            _ => Block::Stone,
+        });
+        let mesh = mesh_world_section(&world, &light, IVec3::ZERO, AO)
+            .unwrap()
+            .solid;
+        assert_shades_match(&mesh, |p| world.block(p), |p| light.packed(p), |_| true);
+        let top_of_floor = |x: f32| {
+            mesh.vertices
+                .iter()
+                .filter(|v| v.position[1] == 1.0 && v.position[0] == x && v.position[2] == 4.0)
+                .map(|v| v.shade)
+                .fold(0.0f32, f32::max)
+        };
+        assert!(top_of_floor(7.0) > top_of_floor(1.0));
+    }
+
+    #[test]
     fn floor_under_canopy_is_darker_and_fades() {
         // Пол на y = 0, навес на y = 3 над x ≥ 6: под ним свет убывает от края.
         let (world, light) = small_world(|p| {
@@ -1363,7 +1408,7 @@ mod tests {
         assert!(under[0] < 1.0, "{under:?}");
         assert!(under.windows(2).all(|w| w[1] < w[0]), "{under:?}");
         assert!(under[7] < 0.5, "{under:?}");
-        assert_shades_match(&mesh, |p| world.block(p), |p| light.sky(p), |_| true);
+        assert_shades_match(&mesh, |p| world.block(p), |p| light.packed(p), |_| true);
     }
 
     #[test]

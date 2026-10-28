@@ -37,22 +37,65 @@ pub fn average_brightness(sum: u32, count: u32) -> f32 {
     TABLE[(sum * 12 / count) as usize]
 }
 
-/// Свет, который клетка с блоком `block` получает от соседа с уровнем `level`.
-/// Солнечный свет 15 идёт вниз по воздуху без потерь — так столбец под открытым небом
-/// весь светлый. В остальных случаях шаг стоит 1, а вода гасит 2 за блок; листва — как
-/// воздух, 1 за шаг, поэтому под одним слоем листвы уже 14, а ниже свет убывает по 1.
-/// Непрозрачный блок света не получает.
-fn spread(level: u8, down: bool, block: Block) -> u8 {
-    if block.is_opaque() {
-        return 0;
-    }
-    if down && level == MAX_LIGHT && block == Block::Air {
-        return MAX_LIGHT;
-    }
-    level.saturating_sub(if block.is_water() { 2 } else { 1 })
+/// Два канала света в одном байте: солнечный в младших 4 битах, свет блоков в старших.
+/// Мешеру нужны оба уровня клетки, и один байт на клетку держит память колонки в 32 КиБ.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Channel {
+    Sky,
+    Block,
 }
 
-/// Уровни света колонки, индекс `x + 16·z + 256·y` — как у блоков ([`Column::get_index`]).
+/// Байт света из уровней солнца и блоков (каждый 0..=15).
+pub fn pack_light(sky: u8, block: u8) -> u8 {
+    debug_assert!(sky <= MAX_LIGHT && block <= MAX_LIGHT);
+    sky | block << 4
+}
+
+/// Солнечный уровень байта света.
+pub fn sky_level(packed: u8) -> u8 {
+    packed & MAX_LIGHT
+}
+
+/// Уровень света блоков байта света.
+pub fn block_level(packed: u8) -> u8 {
+    packed >> 4
+}
+
+impl Channel {
+    /// Уровень этого канала в байте света.
+    fn of(self, packed: u8) -> u8 {
+        match self {
+            Channel::Sky => sky_level(packed),
+            Channel::Block => block_level(packed),
+        }
+    }
+
+    /// Байт света с заменённым уровнем этого канала.
+    fn with(self, packed: u8, level: u8) -> u8 {
+        match self {
+            Channel::Sky => pack_light(level, block_level(packed)),
+            Channel::Block => pack_light(sky_level(packed), level),
+        }
+    }
+
+    /// Свет, который клетка с блоком `block` получает от соседа с уровнем `level`.
+    /// Солнечный свет 15 идёт вниз по воздуху без потерь — так столбец под открытым
+    /// небом весь светлый; у света блоков такого правила нет. В остальных случаях шаг
+    /// стоит 1, а вода гасит 2 за блок; листва — как воздух, 1 за шаг, поэтому под одним
+    /// слоем листвы солнца уже 14, а ниже свет убывает по 1. Непрозрачный блок света не
+    /// получает (свой уровень излучающего блока ставится отдельно, не через шаг).
+    fn step(self, level: u8, down: bool, block: Block) -> u8 {
+        if block.is_opaque() {
+            return 0;
+        }
+        if self == Channel::Sky && down && level == MAX_LIGHT && block == Block::Air {
+            return MAX_LIGHT;
+        }
+        level.saturating_sub(if block.is_water() { 2 } else { 1 })
+    }
+}
+
+/// Байты света колонки ([`pack_light`]), индекс `x + 16·z + 256·y` — как у блоков ([`Column::get_index`]).
 pub struct ColumnLight(Box<[u8; COLUMN_VOLUME]>);
 
 impl ColumnLight {
@@ -66,7 +109,7 @@ impl ColumnLight {
         )
     }
 
-    /// Уровень по локальным координатам колонки; за её пределами — panic.
+    /// Байт света по локальным координатам колонки; за её пределами — panic.
     pub fn get(&self, local: IVec3) -> u8 {
         assert!(
             Column::contains(local),
@@ -80,7 +123,7 @@ fn column_index(local: IVec3) -> usize {
     (local.x + SECTION_SIZE * local.z + SECTION_SIZE * SECTION_SIZE * local.y) as usize
 }
 
-/// Уровни солнечного света загруженного мира; на диск не сохраняются — выводятся из блоков.
+/// Свет загруженного мира (солнце и блоки); на диск не сохраняются — выводятся из блоков.
 ///
 /// Свет — неподвижная точка распространения ([`spread`]) по колонкам, добавленным в
 /// карту: недобавленные колонки считаются непрозрачной стеной. Поэтому результат не
@@ -93,18 +136,35 @@ fn column_index(local: IVec3) -> usize {
 /// тогда загрузчик и строит её меш.
 pub struct LightMap {
     columns: HashMap<IVec2, ColumnLight>,
+    /// Колонки, где свет блоков когда-либо был ярче 0 (с запасом: после снятия ключ
+    /// остаётся). Без источников и без таких соседей проход по свету блоков не нужен —
+    /// а это почти все колонки, пока игрок не ставил светокамень и не нашёл его в мире.
+    block_lit: HashSet<IVec2>,
 }
 
 impl LightMap {
     pub fn new() -> Self {
         Self {
             columns: HashMap::new(),
+            block_lit: HashSet::new(),
         }
     }
 
-    /// Свет по мировым координатам; выше мира — [`MAX_LIGHT`], ниже мира и в
-    /// незагруженной колонке — 0.
+    /// Солнечный уровень по мировым координатам; выше мира — [`MAX_LIGHT`], ниже мира
+    /// и в незагруженной колонке — 0.
     pub fn sky(&self, pos: IVec3) -> u8 {
+        sky_level(self.packed(pos))
+    }
+
+    /// Уровень света блоков по мировым координатам; вне мира и в незагруженной
+    /// колонке — 0.
+    pub fn block(&self, pos: IVec3) -> u8 {
+        block_level(self.packed(pos))
+    }
+
+    /// Байт света ([`pack_light`]) по мировым координатам; выше мира — солнце 15,
+    /// ниже мира и в незагруженной колонке — 0.
+    pub fn packed(&self, pos: IVec3) -> u8 {
         if pos.y >= WORLD_HEIGHT {
             return MAX_LIGHT;
         }
@@ -125,8 +185,8 @@ impl LightMap {
         self.columns.get(&key)
     }
 
-    /// Свет по локальным координатам колонки `key`, в том числе за её краем (x, z в
-    /// −16..32), как [`LightMap::sky`]. Мешер спрашивает свет всех клеток колонки, и
+    /// Байт света по локальным координатам колонки `key`, в том числе за её краем (x, z в
+    /// −16..32), как [`LightMap::packed`]. Мешер спрашивает свет всех клеток колонки, и
     /// поиск колонки в `HashMap` на каждую был бы заметен: колонки 3×3 берутся заранее.
     pub fn column_sampler(&self, key: IVec2) -> impl Fn(IVec3) -> u8 + '_ {
         let columns: [Option<&ColumnLight>; 9] = std::array::from_fn(|i| {
@@ -190,10 +250,21 @@ impl LightMap {
         let beams = sky_beams(column, &mut light);
         let mut changes = self.remove_column(world, key);
         self.columns.insert(key, light);
-        let mut window = Window::new(&mut self.columns, world, key, false);
+
+        let mut window = Window::new(&mut self.columns, world, key, false, Channel::Sky);
         window.seed_center(&beams);
         window.spread();
         changes.extend(window.changed_sections());
+
+        let emits = (0..WORLD_HEIGHT / SECTION_SIZE).any(|sy| column.section(sy).emits_light());
+        if emits || self.near_block_light(key) {
+            let mut window = Window::new(&mut self.columns, world, key, false, Channel::Block);
+            window.seed_emitters(column);
+            window.spread();
+            changes.extend(window.changed_sections());
+            let touched = window.touched_columns();
+            self.mark_block_lit(key, touched);
+        }
         finish(changes, Some(key))
     }
 
@@ -204,24 +275,35 @@ impl LightMap {
         let Some(old) = self.columns.remove(&key) else {
             return Vec::new();
         };
-        let mut window = Window::new(&mut self.columns, world, key, true);
-        let mut removal = Vec::new();
-        for (dir, side) in SIDES {
-            for y in 0..WORLD_HEIGHT {
-                for i in 0..SECTION_SIZE {
-                    let edge = side.edge(i, y);
-                    let level = old.0[column_index(edge)];
-                    if level > 0 {
-                        // Клетка соседа за краем — в координатах окна.
-                        let cell = edge + IVec3::new(SECTION_SIZE, 0, SECTION_SIZE) + dir;
-                        window.unlight_neighbor(cell, level, false, &mut removal);
+        let block_lit = self.block_lit.remove(&key);
+        let mut changes = Vec::new();
+        for channel in [Channel::Sky, Channel::Block] {
+            if channel == Channel::Block && !block_lit {
+                // Своего света блоков не было — снимать у соседей нечего.
+                continue;
+            }
+            let mut window = Window::new(&mut self.columns, world, key, true, channel);
+            let mut removal = Vec::new();
+            for (dir, side) in SIDES {
+                for y in 0..WORLD_HEIGHT {
+                    for i in 0..SECTION_SIZE {
+                        let edge = side.edge(i, y);
+                        let level = channel.of(old.0[column_index(edge)]);
+                        if level > 0 {
+                            // Клетка соседа за краем — в координатах окна.
+                            let cell = edge + IVec3::new(SECTION_SIZE, 0, SECTION_SIZE) + dir;
+                            window.unlight_neighbor(cell, level, false, &mut removal);
+                        }
                     }
                 }
             }
+            window.unspread(removal);
+            window.spread();
+            changes.extend(window.changed_sections());
+            let touched = window.touched_columns();
+            self.mark_block_lit(key, touched);
         }
-        window.unspread(removal);
-        window.spread();
-        finish(window.changed_sections(), None)
+        finish(changes, None)
     }
 
     /// После `world.set_block(pos, ..)`: снимает свет, который мог зависеть от клетки
@@ -233,28 +315,68 @@ impl LightMap {
         if !(0..WORLD_HEIGHT).contains(&pos.y) || !self.columns.contains_key(&key) {
             return Vec::new();
         }
-        let mut window = Window::new(&mut self.columns, world, key, true);
-        let cell = pos - window.origin;
-        let slot = window.slot(cell).expect("edited column is in the window");
-        let old = window.level(slot);
-        let mut removal = Vec::new();
-        if old > 0 {
-            window.set(cell, slot, 0);
-            removal.push((cell, old));
+        let mut changes = Vec::new();
+        for channel in [Channel::Sky, Channel::Block] {
+            if channel == Channel::Block
+                && world.block(pos).emission() == 0
+                && !self.near_block_light(key)
+            {
+                continue;
+            }
+            let mut window = Window::new(&mut self.columns, world, key, true, channel);
+            let cell = pos - window.origin;
+            let slot = window.slot(cell).expect("edited column is in the window");
+            let old = window.level(slot);
+            let mut removal = Vec::new();
+            if old > 0 {
+                window.set(cell, slot, 0);
+                removal.push((cell, old));
+            }
+            window.unspread(removal);
+            // Излучающий блок держит свой уровень сам; остальное придёт от соседей.
+            let emission = if channel == Channel::Block {
+                window.block(slot).emission()
+            } else {
+                0
+            };
+            if emission > 0 {
+                window.set(cell, slot, emission);
+                window.enqueue(cell, emission);
+            }
+            // Свет самой клетки заново придёт от соседей (и от неба, если она верхняя).
+            for dir in DIRECTIONS {
+                let neighbor = cell + dir;
+                if let Some(slot) = window.slot(neighbor) {
+                    window.enqueue(neighbor, window.level(slot));
+                }
+            }
+            if channel == Channel::Sky && cell.y == WORLD_HEIGHT - 1 {
+                window.relight_from_sky(cell);
+            }
+            window.spread();
+            changes.extend(window.changed_sections());
+            let touched = window.touched_columns();
+            self.mark_block_lit(key, touched);
         }
-        window.unspread(removal);
-        // Свет самой клетки заново придёт от соседей (и от неба, если она верхняя).
-        for dir in DIRECTIONS {
-            let neighbor = cell + dir;
-            if let Some(slot) = window.slot(neighbor) {
-                window.enqueue(neighbor, window.level(slot));
+        finish(changes, None)
+    }
+
+    /// Есть ли свет блоков в колонке или её 8 соседях.
+    fn near_block_light(&self, key: IVec2) -> bool {
+        !self.block_lit.is_empty()
+            && (-1..=1)
+                .any(|dz| (-1..=1).any(|dx| self.block_lit.contains(&(key + IVec2::new(dx, dz)))))
+    }
+
+    /// Запоминает колонки окна вокруг `center`, куда проход записал свет блоков;
+    /// `touched` — их битовая маска по номеру в окне ([`Window::touched_columns`]).
+    fn mark_block_lit(&mut self, center: IVec2, touched: u16) {
+        for i in 0..9 {
+            if touched >> i & 1 != 0 {
+                self.block_lit
+                    .insert(center + IVec2::new(i % 3 - 1, i / 3 - 1));
             }
         }
-        if cell.y == WORLD_HEIGHT - 1 {
-            window.relight_from_sky(cell);
-        }
-        window.spread();
-        finish(window.changed_sections(), None)
     }
 }
 
@@ -295,7 +417,7 @@ fn sky_beams(column: &Column, light: &mut ColumnLight) -> Beams {
         let mut level = MAX_LIGHT;
         for y in (0..WORLD_HEIGHT).rev() {
             let index = xz + (y * SECTION_SIZE * SECTION_SIZE) as usize;
-            level = spread(level, true, column.get_index(index));
+            level = Channel::Sky.step(level, true, column.get_index(index));
             if level == 0 {
                 break;
             }
@@ -375,6 +497,10 @@ struct Window<'a> {
     original: HashMap<u32, u8, BuildHasherDefault<CellHasher>>,
     /// Учитывать ли записи в центральную колонку (у новой они неинтересны и дороги).
     track_center: bool,
+    /// Какой канал света окно считает; второй канал байта оно не трогает.
+    channel: Channel,
+    /// Колонки окна (битами по номеру), куда писался свет блоков ярче 0.
+    block_touched: u16,
 }
 
 impl<'a> Window<'a> {
@@ -383,6 +509,7 @@ impl<'a> Window<'a> {
         world: &'a World,
         center: IVec2,
         track_center: bool,
+        channel: Channel,
     ) -> Self {
         let keys: [IVec2; 9] =
             std::array::from_fn(|i| center + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1));
@@ -407,6 +534,8 @@ impl<'a> Window<'a> {
             queue: Default::default(),
             original: HashMap::default(),
             track_center,
+            channel,
+            block_touched: 0,
         }
     }
 
@@ -428,7 +557,8 @@ impl<'a> Window<'a> {
     }
 
     fn level(&self, slot: Slot) -> u8 {
-        self.light[slot.column].as_ref().expect("slot is lit")[slot.index]
+        self.channel
+            .of(self.light[slot.column].as_ref().expect("slot is lit")[slot.index])
     }
 
     fn block(&self, slot: Slot) -> Block {
@@ -439,10 +569,16 @@ impl<'a> Window<'a> {
 
     fn set(&mut self, cell: IVec3, slot: Slot, level: u8) {
         let light = self.light[slot.column].as_mut().expect("slot is lit");
+        let packed = light[slot.index];
         if self.track_center || slot.column != CENTER {
-            self.original.entry(pack(cell)).or_insert(light[slot.index]);
+            self.original
+                .entry(pack(cell))
+                .or_insert(self.channel.of(packed));
         }
-        light[slot.index] = level;
+        light[slot.index] = self.channel.with(packed, level);
+        if self.channel == Channel::Block && level > 0 {
+            self.block_touched |= 1 << slot.column;
+        }
     }
 
     fn enqueue(&mut self, cell: IVec3, level: u8) {
@@ -500,6 +636,42 @@ impl<'a> Window<'a> {
         }
     }
 
+    /// Начало растекания света блоков новой центральной колонки: излучающие блоки
+    /// колонки и крайние клетки соседей, чей свет идёт внутрь. Блоки света в соседях
+    /// уже растеклись и в новую колонку (до неё она была стеной) не попали.
+    fn seed_emitters(&mut self, column: &Column) {
+        let base = IVec3::new(SECTION_SIZE, 0, SECTION_SIZE);
+        for sy in 0..WORLD_HEIGHT / SECTION_SIZE {
+            if !column.section(sy).emits_light() {
+                continue;
+            }
+            for y in sy * SECTION_SIZE..(sy + 1) * SECTION_SIZE {
+                for z in 0..SECTION_SIZE {
+                    for x in 0..SECTION_SIZE {
+                        let local = IVec3::new(x, y, z);
+                        let emission = column.get_index(column_index(local)).emission();
+                        if emission > 0 {
+                            let cell = base + local;
+                            let slot = self.slot(cell).expect("center is lit");
+                            self.set(cell, slot, emission);
+                            self.enqueue(cell, emission);
+                        }
+                    }
+                }
+            }
+        }
+        for (dir, side) in SIDES {
+            for y in 0..WORLD_HEIGHT {
+                for i in 0..SECTION_SIZE {
+                    let beside = side.edge(i, y) + base + dir;
+                    if let Some(slot) = self.slot(beside) {
+                        self.enqueue(beside, self.level(slot));
+                    }
+                }
+            }
+        }
+    }
+
     /// Нижняя клетка непрерывного уровня 15 от верха мира в столбце `column` (y не
     /// важен); `None` — столбец в стене.
     fn full_from(&self, column: IVec3) -> Option<i32> {
@@ -519,7 +691,7 @@ impl<'a> Window<'a> {
             return;
         }
         if let Some(slot) = self.slot(cell) {
-            let lit = spread(level, down, self.block(slot));
+            let lit = self.channel.step(level, down, self.block(slot));
             self.raise(cell, slot, lit);
         }
     }
@@ -569,12 +741,16 @@ impl<'a> Window<'a> {
         if level == 0 {
             return;
         }
+        // Излучающий блок держит свой уровень сам и снятию не подлежит.
+        let emitter = self.channel == Channel::Block && self.block(slot).emission() > 0;
         // Свет, пришедший от снятой клетки, всегда темнее её — кроме солнечного
         // столбца, который идёт вниз без потерь.
-        if level < old || (down && old == MAX_LIGHT && level == MAX_LIGHT) {
+        let sunbeam =
+            self.channel == Channel::Sky && down && old == MAX_LIGHT && level == MAX_LIGHT;
+        if !emitter && (level < old || sunbeam) {
             self.set(cell, slot, 0);
             removal.push((cell, level));
-            if cell.y == WORLD_HEIGHT - 1 {
+            if self.channel == Channel::Sky && cell.y == WORLD_HEIGHT - 1 {
                 self.relight_from_sky(cell);
             }
         } else {
@@ -585,6 +761,11 @@ impl<'a> Window<'a> {
     /// Верхняя клетка мира получает солнце прямо с неба.
     fn relight_from_sky(&mut self, cell: IVec3) {
         self.light_neighbor(cell, MAX_LIGHT, true);
+    }
+
+    /// Колонки окна (битами по номеру), куда писался свет блоков ярче 0.
+    fn touched_columns(&self) -> u16 {
+        self.block_touched
     }
 
     /// Секции, чей меш зависит от клеток, уровень которых за операцию изменился.
@@ -699,27 +880,42 @@ mod tests {
         light
     }
 
-    /// Эталон: свет всех колонок `keys` целиком, отдельной простой реализацией —
-    /// очередь с повторной постановкой при улучшении, без затравки по столбцам и без
-    /// окна. Незагруженное — стена, как и в [`LightMap`].
+    /// Эталон: байты света ([`pack_light`]) всех колонок `keys` целиком; клетки без
+    /// света в карту не входят.
     fn reference(world: &World, keys: &[IVec2]) -> HashMap<IVec3, u8> {
+        let mut packed = reference_channel(world, keys, Channel::Sky);
+        for (pos, level) in reference_channel(world, keys, Channel::Block) {
+            let sky = packed.get(&pos).copied().unwrap_or(0);
+            packed.insert(pos, sky | level << 4);
+        }
+        packed
+    }
+
+    /// Эталон одного канала, отдельной простой реализацией — очередь с повторной
+    /// постановкой при улучшении, без затравки по столбцам и без окна. Незагруженное —
+    /// стена, как и в [`LightMap`].
+    fn reference_channel(world: &World, keys: &[IVec2], channel: Channel) -> HashMap<IVec3, u8> {
         let loaded: HashSet<IVec2> = keys.iter().copied().collect();
         let inside =
             |p: IVec3| (0..WORLD_HEIGHT).contains(&p.y) && loaded.contains(&column_key(p.x, p.z));
         let mut light: HashMap<IVec3, u8> = HashMap::new();
         let mut queue = VecDeque::new();
         for &key in keys {
-            for z in 0..SECTION_SIZE {
-                for x in 0..SECTION_SIZE {
-                    let pos = IVec3::new(
-                        key.x * SECTION_SIZE + x,
-                        WORLD_HEIGHT - 1,
-                        key.y * SECTION_SIZE + z,
-                    );
-                    let level = spread(MAX_LIGHT, true, world.block(pos));
-                    if level > 0 {
-                        light.insert(pos, level);
-                        queue.push_back(pos);
+            for y in 0..WORLD_HEIGHT {
+                for z in 0..SECTION_SIZE {
+                    for x in 0..SECTION_SIZE {
+                        let pos = IVec3::new(key.x * SECTION_SIZE + x, y, key.y * SECTION_SIZE + z);
+                        let level = match channel {
+                            Channel::Sky if y == WORLD_HEIGHT - 1 => {
+                                channel.step(MAX_LIGHT, true, world.block(pos))
+                            }
+                            Channel::Sky => 0,
+                            Channel::Block => world.block(pos).emission(),
+                        };
+                        if level > 0 {
+                            light.insert(pos, level);
+                            queue.push_back(pos);
+                        }
                     }
                 }
             }
@@ -731,7 +927,7 @@ mod tests {
                 if !inside(next) {
                     continue;
                 }
-                let value = spread(level, dir == IVec3::NEG_Y, world.block(next));
+                let value = channel.step(level, dir == IVec3::NEG_Y, world.block(next));
                 if value > light.get(&next).copied().unwrap_or(0) {
                     light.insert(next, value);
                     queue.push_back(next);
@@ -750,7 +946,7 @@ mod tests {
                     for x in 0..SECTION_SIZE {
                         let pos = IVec3::new(key.x * SECTION_SIZE + x, y, key.y * SECTION_SIZE + z);
                         let want = expected.get(&pos).copied().unwrap_or(0);
-                        assert_eq!(light.sky(pos), want, "{context}: {pos}");
+                        assert_eq!(light.packed(pos), want, "{context}: {pos}");
                     }
                 }
             }
@@ -938,6 +1134,7 @@ mod tests {
             Block::Stone,
             Block::Leaves,
             Block::Water,
+            Block::Glowstone,
         ];
         let origin = IVec3::new(center.x - 1, 0, center.y - 1) * SECTION_SIZE;
         for step in 0..40 {
@@ -987,6 +1184,136 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Закрытый зал 3×3 колонок: камень, внутри воздух от y=10 до y=40.
+    fn dark_hall() -> (World, Vec<IVec2>) {
+        let keys = square(IVec2::ZERO, 1);
+        let world = world_of(&keys, |p| {
+            if (10..=40).contains(&p.y) && (-16..32).contains(&p.x) && (-16..32).contains(&p.z) {
+                Block::Air
+            } else {
+                Block::Stone
+            }
+        });
+        (world, keys)
+    }
+
+    fn place(world: &mut World, light: &mut LightMap, pos: IVec3, block: Block) {
+        assert!(world.set_block(pos, block));
+        light.block_changed(world, pos);
+    }
+
+    #[test]
+    fn light_bits_are_packed_independently() {
+        for sky in 0..=MAX_LIGHT {
+            for block in 0..=MAX_LIGHT {
+                let packed = pack_light(sky, block);
+                assert_eq!((sky_level(packed), block_level(packed)), (sky, block));
+                assert_eq!(Channel::Sky.with(packed, 7), pack_light(7, block));
+                assert_eq!(Channel::Block.with(packed, 7), pack_light(sky, 7));
+            }
+        }
+        assert_eq!(pack_light(MAX_LIGHT, 0), MAX_LIGHT);
+    }
+
+    #[test]
+    fn glowstone_fades_by_one_across_column_border() {
+        let (mut world, keys) = dark_hall();
+        let mut light = lit(&world, &keys);
+        let source = IVec3::new(8, 20, 8);
+        place(&mut world, &mut light, source, Block::Glowstone);
+        assert_eq!(light.block(source), 15);
+        for d in 1..=14 {
+            let level = 15 - d as u8;
+            // x = 8 + d пересекает границу колонки на d = 8.
+            assert_eq!(light.block(source + IVec3::X * d), level, "x {d}");
+            assert_eq!(light.block(source + IVec3::NEG_Z * d), level, "z {d}");
+        }
+        assert_eq!(light.block(source + IVec3::X * 15), 0);
+        assert_eq!(light.sky(source), 0);
+        assert_matches_reference(&light, &world, &keys, "placed");
+    }
+
+    #[test]
+    fn breaking_glowstone_removes_its_light() {
+        let (mut world, keys) = dark_hall();
+        let mut light = lit(&world, &keys);
+        let source = IVec3::new(15, 20, 15);
+        place(&mut world, &mut light, source, Block::Glowstone);
+        place(&mut world, &mut light, source, Block::Air);
+        for y in 0..WORLD_HEIGHT {
+            for z in -16..32 {
+                for x in -16..32 {
+                    assert_eq!(light.packed(IVec3::new(x, y, z)), 0, "{x} {y} {z}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn two_sources_do_not_add_up_and_one_can_go() {
+        let (mut world, keys) = dark_hall();
+        let mut light = lit(&world, &keys);
+        let (a, b) = (IVec3::new(10, 20, 8), IVec3::new(12, 20, 8));
+        place(&mut world, &mut light, a, Block::Glowstone);
+        place(&mut world, &mut light, b, Block::Glowstone);
+        // Между ними — максимум, а не сумма: 14 от каждого.
+        assert_eq!(light.block(IVec3::new(11, 20, 8)), 14);
+        assert_eq!(light.block(a), 15);
+        place(&mut world, &mut light, a, Block::Air);
+        assert_eq!(light.block(a), 13);
+        assert_eq!(light.block(IVec3::new(11, 20, 8)), 14);
+        assert_eq!(light.block(b), 15);
+        assert_matches_reference(&light, &world, &keys, "one removed");
+    }
+
+    #[test]
+    fn opaque_block_shadows_and_removing_wall_lets_light_through() {
+        let (mut world, keys) = dark_hall();
+        let mut light = lit(&world, &keys);
+        let source = IVec3::new(2, 20, 8);
+        place(&mut world, &mut light, source, Block::Glowstone);
+        // Стена поперёк зала (x = 4) на всю высоту зала, кроме проёма никакого нет.
+        for y in 10..=40 {
+            for z in -16..32 {
+                world.set_block(IVec3::new(4, y, z), Block::Stone);
+            }
+        }
+        for y in 10..=40 {
+            for z in -16..32 {
+                light.block_changed(&world, IVec3::new(4, y, z));
+            }
+        }
+        assert_eq!(light.block(IVec3::new(3, 20, 8)), 14);
+        assert_eq!(light.block(IVec3::new(5, 20, 8)), 0);
+        assert_matches_reference(&light, &world, &keys, "walled");
+        place(&mut world, &mut light, IVec3::new(4, 20, 8), Block::Air);
+        assert_eq!(light.block(IVec3::new(4, 20, 8)), 13);
+        assert_eq!(light.block(IVec3::new(5, 20, 8)), 12);
+        assert_matches_reference(&light, &world, &keys, "opened");
+    }
+
+    #[test]
+    fn glowstone_light_does_not_depend_on_load_order() {
+        let (mut world, keys) = dark_hall();
+        for pos in [
+            IVec3::new(15, 20, 15),
+            IVec3::new(16, 30, 0),
+            IVec3::new(-1, 12, 31),
+        ] {
+            world.set_block(pos, Block::Glowstone);
+        }
+        let reversed: Vec<IVec2> = keys.iter().rev().copied().collect();
+        let a = lit(&world, &keys);
+        let b = lit(&world, &reversed);
+        assert_matches_reference(&a, &world, &keys, "forward");
+        assert_matches_reference(&b, &world, &keys, "reversed");
+        // Вынули и вернули колонку, куда светили соседи.
+        let mut c = lit(&world, &keys);
+        c.remove_column(&world, IVec2::new(1, 1));
+        c.add_column(&world, IVec2::new(1, 1));
+        assert_matches_reference(&c, &world, &keys, "reloaded");
     }
 
     #[test]
