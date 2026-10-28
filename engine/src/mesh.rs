@@ -137,9 +137,8 @@ pub fn quantize_shade(shade: f32) -> u8 {
 const ORIGIN_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![1 => Float32x3];
 
 /// Буфер с мировым углом секции (3 × f32, 16 байт с выравниванием) на один экземпляр:
-/// шаг `Instance` и `draw_indexed(.., 0..1)` работают и на WebGPU, и на WebGL2, где нет
-/// ни `base_vertex`, ни push-констант; динамический uniform-сдвиг потребовал бы
-/// bind group на каждую секцию.
+/// шаг `Instance` и `draw_indexed(.., 0..1)` не требуют ни `base_vertex`, ни
+/// push-констант; динамический uniform-сдвиг потребовал бы bind group на каждую секцию.
 pub fn origin_layout() -> wgpu::VertexBufferLayout<'static> {
     wgpu::VertexBufferLayout {
         array_stride: ORIGIN_BYTES as wgpu::BufferAddress,

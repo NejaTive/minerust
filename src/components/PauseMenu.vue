@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
 import {
-  API_LABELS,
-  type GraphicsApi,
   MAX_FOV,
   MAX_MOUSE_SENSITIVITY,
   MAX_RENDER_DISTANCE,
@@ -11,7 +9,6 @@ import {
   MIN_RENDER_DISTANCE,
   type Settings,
 } from '../settings'
-import type { ApiInfo } from './GameCanvas.vue'
 
 /** Экраны меню; новый пункт — новое значение здесь и ветка в шаблоне. */
 export type MenuScreen = 'main' | 'settings' | 'controls' | 'confirm'
@@ -19,7 +16,6 @@ export type MenuScreen = 'main' | 'settings' | 'controls' | 'confirm'
 const props = defineProps<{
   screen: MenuScreen
   settings: Settings
-  api?: ApiInfo
   /** Игра уже шла: вместо «Играть» — «Продолжить». */
   started: boolean
   /** Движок грузится или пересоздаётся: играть и менять мир пока нельзя. */
@@ -32,13 +28,11 @@ const emit = defineEmits<{
   'update:screen': [screen: MenuScreen]
   'update:settings': [patch: Partial<Settings>]
   play: []
-  'set-api': [api: GraphicsApi]
   'new-world': []
 }>()
 
 const VERSION = __APP_COMMIT__ ? `v${__APP_VERSION__} · ${__APP_COMMIT__}` : `v${__APP_VERSION__}`
 
-const APIS: GraphicsApi[] = ['webgpu', 'webgl2']
 
 const CONTROLS = [
   { keys: ['Esc'], action: 'пауза и меню' },
@@ -52,7 +46,6 @@ const CONTROLS = [
   { keys: ['ЛКМ'], action: 'сломать блок' },
   { keys: ['ПКМ'], action: 'поставить блок' },
   { keys: ['1–9', 'колесо'], action: 'слот хотбара' },
-  { keys: ['G'], action: 'графический API' },
   { keys: ['N'], action: 'новый мир' },
   { keys: ['[', ']'], action: 'дальность прорисовки' },
 ]
@@ -125,23 +118,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
               @change="patch({ ambientOcclusion: checkedOf($event) })"
             />
           </label>
-
-          <div class="row">
-            <span class="name">Графический API <kbd>G</kbd></span>
-            <div class="segmented">
-              <button
-                v-for="name in APIS"
-                :key="name"
-                :class="{ active: api?.backend === name }"
-                :aria-pressed="api?.backend === name"
-                :disabled="busy || api?.backend === name"
-                @click="emit('set-api', name)"
-              >
-                {{ API_LABELS[name] }}
-              </button>
-            </div>
-            <span v-if="api?.fallback" class="note">WebGPU недоступен — работает WebGL2</span>
-          </div>
 
           <label class="row">
             <span class="name">Чувствительность мыши</span>
@@ -300,10 +276,6 @@ button:disabled {
   margin: 0;
   accent-color: #3f9a64;
 }
-.row .segmented,
-.row .note {
-  grid-column: 1 / -1;
-}
 .toggle input {
   width: 20px;
   height: 20px;
@@ -313,21 +285,6 @@ button:disabled {
 .value {
   font-variant-numeric: tabular-nums;
   color: #b8c0cc;
-}
-.note {
-  color: #ffd75e;
-  font-size: 13px;
-}
-.segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-.segmented .active {
-  color: #fff;
-  background: #2f7d4f;
-  border-color: #3f9a64;
-  opacity: 1;
 }
 
 .controls {

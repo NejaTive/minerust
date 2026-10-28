@@ -14,7 +14,7 @@ png = "0.18.1"
 wasm-bindgen = "0.2.129"
 wasm-bindgen-futures = "0.4.79"
 web-sys = { version = "0.3.106", features = ["HtmlCanvasElement", "Performance", "Window"] }
-wgpu = { version = "30.0.1", default-features = false, features = ["webgpu", "webgl", "wgsl"] }
+wgpu = { version = "30.0.1", default-features = false, features = ["webgpu", "wgsl"] }
 
 # wasm-pack --dev собирает cargo-профиль dev. Без оптимизаций меш колонки в браузере
 # занимает ~9 мс, и подгрузка роняет FPS ниже 30. opt-level = 1 для своего крейта

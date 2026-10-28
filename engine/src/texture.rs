@@ -52,18 +52,8 @@ impl Tile {
     }
 }
 
-/// Сколько слоёв выделить на GPU: на один больше, если тайлов 1 или кратно 6.
-/// GL-бэкенд wgpu угадывает тип текстуры по числу слоёв (`get_info_from_desc` в wgpu-hal
-/// 30, issues gfx-rs/wgpu#1574, #1614): 1 слой — `TEXTURE_2D`, квадратная с кратным 6 —
-/// cube map. Оба не совпадут с `texture_2d_array` в шейдере, и на WebGL2 будет ошибка.
-pub const LAYER_COUNT: u32 = {
-    let tiles = Tile::ALL.len() as u32;
-    if tiles == 1 || tiles.is_multiple_of(6) {
-        tiles + 1
-    } else {
-        tiles
-    }
-};
+/// Сколько слоёв выделить на GPU: по слою на тайл.
+pub const LAYER_COUNT: u32 = Tile::ALL.len() as u32;
 
 /// Столбик факела в тайле: столбцы 7..9, строки 6..16 (10 из 16, как 2×10×2 в мешере).
 /// Договорённость с `torch.png`: мешер строит по ней коробку и верх, картинка обязана
@@ -399,14 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn layer_count_avoids_gl_guessing() {
-        assert!(LAYER_COUNT != 1 && !LAYER_COUNT.is_multiple_of(6));
-        assert!(LAYER_COUNT as usize >= Tile::ALL.len());
-    }
-
-    #[test]
     fn layer_count_for_current_tiles() {
-        // 14 тайлов: не 1 и не кратно 6, выравнивающий слой не нужен.
         assert_eq!(Tile::ALL.len(), 14);
         assert_eq!(LAYER_COUNT, 14);
     }

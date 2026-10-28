@@ -1,7 +1,7 @@
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
-/// Uniform `Globals` из `shader.wgsl`. Раскладка совпадает и в WGSL, и в std140
-/// для WebGL2: vec3 выровнен на 16 байт, а следующий за ним f32 занимает его хвост.
+/// Uniform `Globals` из `shader.wgsl`. Раскладка по правилам выравнивания WGSL
+/// для uniform: vec3 выровнен на 16 байт, а следующий за ним f32 занимает его хвост.
 /// После `darkness` 8 байт пустоты: mat4 начинается с кратного 16 смещения.
 pub struct Globals {
     pub view_proj: Mat4,

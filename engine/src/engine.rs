@@ -154,16 +154,14 @@ pub struct Engine {
     last_time: Option<f32>,
     /// Пауза: физика, ввод и действия мыши стоят, мир подгружается и рисуется.
     paused: bool,
-    /// Фактический бэкенд адаптера: при предпочтении WebGPU может оказаться GL.
-    backend: wgpu::Backend,
 }
 
 #[wasm_bindgen]
 impl Engine {
     /// Инициализирует графику на canvas.
     ///
-    /// `preferred` — `"webgpu"` (без поддержки в браузере тихо откатывается на WebGL2)
-    /// или `"webgl2"`. `camera` — `[x, y, z, yaw, pitch, mode]` из [`Engine::camera_state`]
+    /// Нужен браузер с WebGPU: без адаптера или устройства возвращает ошибку.
+    /// `camera` — `[x, y, z, yaw, pitch, mode]` из [`Engine::camera_state`]
     /// (старые 5 значений без `mode` тоже принимаются, режим тогда — ходьба); без него
     /// игрок встаёт на землю над точкой (0, 0). `seed` — сид мира: один сид — один рельеф.
     ///
@@ -171,17 +169,11 @@ impl Engine {
     /// до первого `render`.
     pub async fn create(
         canvas: HtmlCanvasElement,
-        preferred: &str,
         camera: Option<Vec<f32>>,
         seed: i32,
     ) -> Result<Engine, JsError> {
         console_error_panic_hook::set_once();
 
-        let backends = match preferred {
-            "webgpu" => wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL,
-            "webgl2" => wgpu::Backends::GL,
-            other => return Err(JsError::new(&format!("unknown graphics API: {other}"))),
-        };
         let terrain = Terrain::new(seed);
         let (camera, player) = match camera {
             Some(state) => restore_player(&state)
@@ -204,10 +196,8 @@ impl Engine {
         let height = canvas.height().max(1);
 
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        instance_desc.backends = backends;
-        // Проверка нужна до create_surface: тип контекста canvas фиксируется первым
-        // getContext, и после неудачного "webgpu" тот же canvas не отдаст "webgl2".
-        let instance = wgpu::util::new_instance_with_webgpu_detection(instance_desc).await;
+        instance_desc.backends = wgpu::Backends::BROWSER_WEBGPU;
+        let instance = wgpu::Instance::new(instance_desc);
         let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas))?;
 
         let adapter = instance
@@ -215,18 +205,17 @@ impl Engine {
                 compatible_surface: Some(&surface),
                 ..Default::default()
             })
-            .await?;
-        let backend = adapter.get_info().backend;
+            .await
+            .map_err(|e| JsError::new(&format!("WebGPU adapter is unavailable: {e}")))?;
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("device"),
-                // Лимиты WebGL2 — самый слабый общий знаменатель.
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                    .using_resolution(adapter.limits()),
+                required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
                 ..Default::default()
             })
-            .await?;
+            .await
+            .map_err(|e| JsError::new(&format!("WebGPU device is unavailable: {e}")))?;
 
         let caps = surface.get_capabilities(&adapter);
         // Канвас WebGPU не умеет sRGB-форматы поверхности (только `*8unorm`), зато
@@ -447,28 +436,13 @@ impl Engine {
             keys: HashSet::new(),
             last_time: None,
             paused: false,
-            backend,
         })
-    }
-
-    /// Есть ли в браузере рабочий WebGPU (не только `navigator.gpu`, но и адаптер).
-    pub async fn webgpu_supported() -> bool {
-        wgpu::util::is_browser_webgpu_supported().await
     }
 
     /// Версия формата сохранения (`save::FORMAT_VERSION`): фронт пишет её в метаданные
     /// мира и не загружает сохранение другой версии.
     pub fn format_version() -> u8 {
         FORMAT_VERSION
-    }
-
-    /// Фактический графический API: `"webgpu"` или `"webgl2"`.
-    pub fn backend(&self) -> String {
-        match self.backend {
-            wgpu::Backend::BrowserWebGpu => "webgpu",
-            _ => "webgl2",
-        }
-        .to_owned()
     }
 
     /// Состояние `[x, y, z, yaw, pitch, mode]` для передачи в новый `Engine`: x, y, z —
