@@ -5,27 +5,28 @@ use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, Performance};
 use wgpu::util::DeviceExt;
 
-use crate::block::Block;
-use crate::camera::Camera;
-use crate::column::{COLUMN_SECTIONS, WORLD_HEIGHT};
-use crate::daytime::{self, DayTime};
-use crate::double_tap::DoubleTap;
-use crate::fog::Fog;
-use crate::frustum::Frustum;
-use crate::globals::{Globals, view_dir_matrix};
-use crate::light::LightMap;
-use crate::loader::{Loader, NEIGHBORS, Progress};
-use crate::mesh::{self, Vertex};
-use crate::mesher::{MeshData, MeshOptions, SectionMeshes, mesh_world_column, mesh_world_section};
-use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
-use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, next_fov_scale};
-use crate::raycast::{Hit, raycast};
-use crate::repeat::Repeat;
-use crate::save::{FORMAT_VERSION, decode_column, encode_column};
-use crate::section::SECTION_SIZE;
-use crate::terrain::{Terrain, WATER_LEVEL};
-use crate::texture::{self, LAYER_COUNT, MIP_LEVELS, TILE_SIZE};
-use crate::world::{World, affected_sections, column_key};
+use game::camera::Camera;
+use game::daytime::{self, DayTime};
+use game::double_tap::DoubleTap;
+use game::loader::{Loader, NEIGHBORS, Progress};
+use game::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, next_fov_scale};
+use game::raycast::{Hit, raycast};
+use game::repeat::Repeat;
+use mesh::mesher::{MeshData, MeshOptions, SectionMeshes, mesh_world_column, mesh_world_section};
+use render::fog::Fog;
+use render::frustum::Frustum;
+use render::globals::{Globals, view_dir_matrix};
+use render::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
+use render::shaders;
+use render::texture::{self, MIP_LEVELS};
+use world::block::Block;
+use world::column::{COLUMN_SECTIONS, WORLD_HEIGHT};
+use world::light::LightMap;
+use world::save::{FORMAT_VERSION, decode_column, encode_column};
+use world::section::SECTION_SIZE;
+use world::terrain::{Terrain, WATER_LEVEL};
+use world::tile::{LAYER_COUNT, TILE_SIZE};
+use world::world::{World, affected_sections, column_key};
 
 /// Туман и фон под водой: муть в пару десятков блоков, тёмно-синяя, в линейном цвете.
 const UNDERWATER_FOG: Fog = Fog {
@@ -78,7 +79,7 @@ pub struct Engine {
     sky_pipeline: wgpu::RenderPipeline,
     /// Рёбра рамки вокруг `outline_block`.
     outline_buffer: wgpu::Buffer,
-    /// Индексы квадов `0,1,2, 0,2,3` для всех мешей секций ([`mesh::quad_index_bytes`]):
+    /// Индексы квадов `0,1,2, 0,2,3` для всех мешей секций ([`::mesh::mesh::quad_index_bytes`]):
     /// диагональ выбирается порядком вершин, так что своих индексов у секции нет.
     quad_index_buffer: wgpu::Buffer,
     /// Блок, чья рамка сейчас лежит в `outline_buffer`.
@@ -347,7 +348,7 @@ impl Engine {
             ],
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let shader = shaders::module(&device, "shader", shaders::BLOCK_SHADER);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("main"),
             bind_group_layouts: &[Some(&globals_layout)],
@@ -363,7 +364,7 @@ impl Engine {
         });
         let quad_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("quad indices"),
-            contents: &mesh::quad_index_bytes(),
+            contents: &::mesh::mesh::quad_index_bytes(),
             usage: wgpu::BufferUsages::INDEX,
         });
         let pipeline = create_block_pipeline(
@@ -1389,7 +1390,10 @@ impl GpuMesh {
         }
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("section vertices"),
-            contents: &mesh::vertex_bytes(&mesh::gpu_vertices(&data.vertices, &data.indices)),
+            contents: &::mesh::mesh::vertex_bytes(&::mesh::mesh::gpu_vertices(
+                &data.vertices,
+                &data.indices,
+            )),
             usage: wgpu::BufferUsages::VERTEX,
         });
         Some(GpuMesh {
@@ -1466,7 +1470,7 @@ fn upload_section(device: &wgpu::Device, data: &SectionMeshes, min: Vec3) -> Opt
     }
     let origin = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("section origin"),
-        contents: &mesh::origin_bytes(min.to_array()),
+        contents: &::mesh::mesh::origin_bytes(min.to_array()),
         usage: wgpu::BufferUsages::VERTEX,
     });
     Some(SectionMesh {
@@ -1502,7 +1506,10 @@ fn create_block_pipeline(
         vertex: wgpu::VertexState {
             module: shader,
             entry_point: Some("vs_main"),
-            buffers: &[Some(Vertex::layout()), Some(mesh::origin_layout())],
+            buffers: &[
+                Some(render::layout::vertex_layout()),
+                Some(render::layout::origin_layout()),
+            ],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
@@ -1540,7 +1547,7 @@ fn create_outline_pipeline(
     layout: &wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("outline.wgsl"));
+    let shader = shaders::module(device, "outline", shaders::OUTLINE_SHADER);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("outline"),
         layout: Some(layout),
@@ -1586,7 +1593,7 @@ fn create_sky_pipeline(
     layout: &wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("sky.wgsl"));
+    let shader = shaders::module(device, "sky", shaders::SKY_SHADER);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("sky"),
         layout: Some(layout),

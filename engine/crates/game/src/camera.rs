@@ -164,11 +164,19 @@ mod tests {
     #[test]
     fn fov_changes_projection() {
         let mut c = camera();
+        // Точка сбоку от взгляда: матрица включает поворот, так что по `x_axis.x` угол
+        // обзора не сравнить. Тест раньше шёл только на wasm32 и этого не замечал.
+        let right = c.forward().cross(Vec3::Y).normalize();
+        let point = (c.position + c.forward() * 10.0 + right * 3.0).extend(1.0);
+        let ndc_x = |c: &Camera| {
+            let clip = c.view_proj(1.0, 100.0, 1.0) * point;
+            (clip.x / clip.w).abs()
+        };
         c.set_fov(60.0);
-        let narrow = c.view_proj(1.0, 100.0, 1.0);
+        let narrow = ndc_x(&c);
         c.set_fov(110.0);
-        let wide = c.view_proj(1.0, 100.0, 1.0);
+        let wide = ndc_x(&c);
         // Больше угол — меньше масштаб по X/Y.
-        assert!(wide.x_axis.x < narrow.x_axis.x);
+        assert!(wide < narrow);
     }
 }

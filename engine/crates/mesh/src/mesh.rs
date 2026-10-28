@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use crate::light::{MAX_LIGHT, level_brightness};
+use world::light::{MAX_LIGHT, level_brightness};
 
 /// Шагов позиции на блок: позиция вершины — целое число шестнадцатых долей блока.
 /// Хватает и для воды (верх на 14/16 = 0.875), и для любой части блока в будущем.
@@ -41,8 +41,6 @@ const LIGHT_MASK: u32 = 0x1F;
 pub const MAX_LIGHT_HALVES: u8 = 2 * MAX_LIGHT;
 
 impl Vertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Uint32x2];
-
     /// `position` — шаги 1/16 блока от угла секции (0..=[`MAX_POSITION`]), `uv` — шаги
     /// 1/16 тайла (0..=16, v = 0 — верх тайла), `shade` — сторона × AO, 0..=255,
     /// `light` — `[солнце, блоки]` в половинках уровня (0..=[`MAX_LIGHT_HALVES`]).
@@ -101,14 +99,6 @@ impl Vertex {
     pub fn layer(self) -> u8 {
         (self.0[1] >> 5) as u8
     }
-
-    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBUTES,
-        }
-    }
 }
 
 /// Яркость света вершины: `brightness(max(солнце − тьма, блоки))` по уровням, которые
@@ -132,19 +122,6 @@ pub fn day_shade(shade: u8, sun_halves: u8, block_halves: u8) -> u8 {
 /// диагональ квада выбиралась по тем же числам, что увидит шейдер.
 pub fn quantize_shade(shade: f32) -> u8 {
     (shade.clamp(0.0, 1.0) * 255.0).round() as u8
-}
-
-const ORIGIN_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![1 => Float32x3];
-
-/// Буфер с мировым углом секции (3 × f32, 16 байт с выравниванием) на один экземпляр:
-/// шаг `Instance` и `draw_indexed(.., 0..1)` не требуют ни `base_vertex`, ни
-/// push-констант; динамический uniform-сдвиг потребовал бы bind group на каждую секцию.
-pub fn origin_layout() -> wgpu::VertexBufferLayout<'static> {
-    wgpu::VertexBufferLayout {
-        array_stride: ORIGIN_BYTES as wgpu::BufferAddress,
-        step_mode: wgpu::VertexStepMode::Instance,
-        attributes: &ORIGIN_ATTRIBUTES,
-    }
 }
 
 /// Размер буфера угла секции, байт.
@@ -228,8 +205,8 @@ mod tests {
     #[test]
     fn water_surface_is_exact() {
         let v = Vertex::new([0, 14, 0], [0, 2], 0, 0, [0, 0]);
-        assert_eq!(v.position()[1], crate::block::WATER_SURFACE);
-        assert_eq!(v.uv()[1], 1.0 - crate::block::WATER_SURFACE);
+        assert_eq!(v.position()[1], world::block::WATER_SURFACE);
+        assert_eq!(v.uv()[1], 1.0 - world::block::WATER_SURFACE);
     }
 
     #[test]
@@ -339,19 +316,9 @@ mod tests {
         for level in 0..=MAX_LIGHT {
             assert_eq!(
                 light_brightness(level * 2, 0, 0.0),
-                crate::light::brightness(level)
+                world::light::brightness(level)
             );
         }
-    }
-
-    #[test]
-    fn shader_constants_match_cpu() {
-        let source = include_str!("shader.wgsl");
-        assert!(source.contains("const LIGHT_BASE: f32 = 0.8;"));
-        assert!(source.contains("const MIN_BRIGHTNESS: f32 = 0.05;"));
-        assert!(source.contains("const MAX_LIGHT: f32 = 15.0;"));
-        assert_eq!(MAX_LIGHT, 15);
-        assert_eq!(level_brightness(0.0), 0.8f32.powi(15).max(0.05));
     }
 
     #[test]

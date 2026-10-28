@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use crate::texture::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile, tile_pixels};
+use crate::tile::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile, tile_pixels};
 
 /// Тип блока. `repr(u8)`, чтобы секция занимала байт на блок.
 #[repr(u8)]

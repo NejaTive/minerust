@@ -1,7 +1,7 @@
 //! Туман и дальняя плоскость камеры — производные дальности прорисовки.
 
-use crate::column::WORLD_HEIGHT;
-use crate::section::SECTION_SIZE;
+use world::column::WORLD_HEIGHT;
+use world::section::SECTION_SIZE;
 
 /// Доля `fog_end`, с которой начинается туман: ближе рельеф чистый, дальше плавно
 /// уходит в цвет неба.
