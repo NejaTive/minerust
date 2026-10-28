@@ -1,14 +1,15 @@
 {
   "name": "minerust",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.19.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run wasm:release && vue-tsc -b && vite build",
     "preview": "vite preview",
     "wasm": "wasm-pack build engine --target web --dev",
-    "wasm:release": "wasm-pack build engine --target web --release"
+    "wasm:release": "wasm-pack build engine --target web --release",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "vue": "^3.5.44"
