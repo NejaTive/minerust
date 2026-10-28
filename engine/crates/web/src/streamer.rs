@@ -1,9 +1,9 @@
 use game::loader::{Loader, NEIGHBORS, Progress};
 use game::{Edits, Game};
-use glam::{IVec2, IVec3};
 use mesh::mesher::{MeshOptions, mesh_world_column, mesh_world_section};
 use render::Renderer;
 use world::light::LightMap;
+use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 use world::world::World;
 
@@ -25,15 +25,14 @@ pub(crate) struct Streamer {
     mesh_options: MeshOptions,
     /// Колонки, чьи меши построены со старыми `mesh_options`, дальние первыми: их
     /// перестраивает `update` в бюджете кадра, с конца. До замены рисуются старые.
-    stale: Vec<IVec2>,
-    /// Секции `(x колонки, номер секции, z колонки)`, где после правки или подгрузки
-    /// изменился свет, дальние первыми: их перестраивает `update` с конца, раньше
+    stale: Vec<ColumnPos>,
+    /// Секции, где после правки или подгрузки изменился свет, дальние первыми: их перестраивает `update` с конца, раньше
     /// подгрузки — их немного, и правка должна дойти до экрана сразу.
-    stale_sections: Vec<IVec3>,
+    stale_sections: Vec<SectionPos>,
 }
 
 impl Streamer {
-    pub(crate) fn new(center: IVec2) -> Self {
+    pub(crate) fn new(center: ColumnPos) -> Self {
         Streamer {
             loader: Loader::new(center),
             mesh_options: MeshOptions::default(),
@@ -172,7 +171,7 @@ impl Streamer {
     /// Перестраивает меши колонки и её соседей, если они уже есть. Соседей целиком, а не
     /// только граничные секции: импорт идёт раз при старте, до первого кадра, и простота
     /// тут дороже пары лишних мешей. Диагональные — из-за AO на углу колонки.
-    pub(crate) fn remesh_around(&self, game: &Game, renderer: &mut Renderer, key: IVec2) {
+    pub(crate) fn remesh_around(&self, game: &Game, renderer: &mut Renderer, key: ColumnPos) {
         for key in std::iter::once(key).chain(NEIGHBORS.map(|n| key + n)) {
             if renderer.has_column(key) {
                 self.upload_column(&game.world, &game.light, renderer, key);
@@ -224,7 +223,7 @@ impl Streamer {
         light: &LightMap,
         renderer: &mut Renderer,
         profiler: &mut Profiler,
-        key: IVec2,
+        key: ColumnPos,
     ) {
         profiler.mesh_time.measure(&profiler.performance, || {
             self.upload_column(world, light, renderer, key)
@@ -233,7 +232,13 @@ impl Streamer {
 
     /// Строит меш колонки и загружает её на GPU. Загрузчик отдаёт колонку на меш только
     /// вместе с 8 соседями, так что грани и AO на стыках верные сразу.
-    fn upload_column(&self, world: &World, light: &LightMap, renderer: &mut Renderer, key: IVec2) {
+    fn upload_column(
+        &self,
+        world: &World,
+        light: &LightMap,
+        renderer: &mut Renderer,
+        key: ColumnPos,
+    ) {
         let data = mesh_world_column(world, light, key, self.mesh_options)
             .expect("loader meshes only loaded columns");
         renderer.upload_column(key, &data);
@@ -246,7 +251,7 @@ impl Streamer {
         if game.light.len() <= game.world.len() {
             return;
         }
-        let gone: Vec<IVec2> = game
+        let gone: Vec<ColumnPos> = game
             .light
             .keys()
             .filter(|&key| game.world.column(key).is_none())
@@ -259,29 +264,28 @@ impl Streamer {
 
     /// Ставит секции в очередь на перестройку из-за света. Секции колонок без меша
     /// пропускает: загрузчик построит их целиком позже, уже с новым светом.
-    fn queue_sections(&mut self, keys: Vec<IVec3>, game: &Game, renderer: &Renderer) {
+    fn queue_sections(&mut self, keys: Vec<SectionPos>, game: &Game, renderer: &Renderer) {
         if keys.is_empty() {
             return;
         }
         for key in keys {
-            if renderer.has_column(IVec2::new(key.x, key.z)) && !self.stale_sections.contains(&key)
-            {
+            if renderer.has_column(key.column()) && !self.stale_sections.contains(&key) {
                 self.stale_sections.push(key);
             }
         }
         let eye = game.camera().position;
-        let distance = |key: &IVec3| {
-            let center = (key.as_vec3() + 0.5) * SECTION_SIZE as f32;
+        let distance = |key: &SectionPos| {
+            let center = (key.0.as_vec3() + 0.5) * SECTION_SIZE as f32;
             (center - eye).length_squared()
         };
         self.stale_sections
             .sort_by(|a, b| distance(b).total_cmp(&distance(a)));
     }
 
-    /// Перестраивает меш секции `(x колонки, номер секции, z колонки)` по текущему миру.
+    /// Перестраивает меш секции по текущему миру.
     /// Колонку без меша пропускает: загрузчик мешует её целиком позже, уже с правкой.
-    fn remesh_section(&self, game: &Game, renderer: &mut Renderer, key: IVec3) {
-        if !renderer.has_column(IVec2::new(key.x, key.z)) {
+    fn remesh_section(&self, game: &Game, renderer: &mut Renderer, key: SectionPos) {
+        if !renderer.has_column(key.column()) {
             return;
         }
         let Some(data) = mesh_world_section(&game.world, &game.light, key, self.mesh_options)

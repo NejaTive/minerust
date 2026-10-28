@@ -1,7 +1,8 @@
-use glam::{IVec2, IVec3};
+use glam::IVec3;
 
 use crate::block::Block;
 use crate::column::Column;
+use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
 use crate::terrain::{Biome, Terrain, WATER_LEVEL};
 
@@ -113,14 +114,13 @@ fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<u32> {
 /// Ставит в колонку `key` её часть деревьев: и своих, и соседских, чьи кроны
 /// заходят в неё. Сначала все брёвна, потом листва только в воздух — так результат не
 /// зависит от порядка деревьев, а листва не затирает ни брёвна, ни землю.
-pub fn plant(terrain: &Terrain, key: IVec2, column: &mut Column) {
-    let origin = key * SECTION_SIZE;
+pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
+    let origin = key.origin();
     let range = |start: i32| start - CROWN_RADIUS..start + SECTION_SIZE + CROWN_RADIUS;
-    let trees: Vec<Tree> = range(origin.y)
+    let trees: Vec<Tree> = range(origin.z)
         .flat_map(|z| range(origin.x).map(move |x| (x, z)))
         .filter_map(|(x, z)| tree_at(terrain, x, z))
         .collect();
-    let origin = IVec3::new(origin.x, 0, origin.y);
     for log in trees.iter().flat_map(Tree::logs) {
         let local = log - origin;
         if Column::contains(local) {
@@ -161,6 +161,8 @@ pub fn border_tree(terrain: &Terrain) -> Tree {
 
 #[cfg(test)]
 mod tests {
+    use glam::IVec2;
+
     use std::collections::HashSet;
 
     use super::*;
@@ -261,10 +263,7 @@ mod tests {
     fn crowns_cross_columns_seamlessly() {
         let terrain = Terrain::new(1337);
         let tree = border_tree(&terrain);
-        let center = IVec2::new(
-            tree.base.x.div_euclid(SECTION_SIZE),
-            tree.base.z.div_euclid(SECTION_SIZE),
-        );
+        let center = ColumnPos::of_block(tree.base);
         let leaf_columns: HashSet<_> = tree
             .leaves()
             .map(|l| (l.x.div_euclid(SECTION_SIZE), l.z.div_euclid(SECTION_SIZE)))
@@ -274,7 +273,7 @@ mod tests {
         // «Окно» 3×3 колонок одним массивом: земля, затем деревья со стволами в окне
         // целиком, с записью за границы колонок.
         let size = 3 * SECTION_SIZE;
-        let min = (center - IVec2::ONE) * SECTION_SIZE;
+        let min = (center.0 - IVec2::ONE) * SECTION_SIZE;
         let index = |p: IVec3| ((p.x - min.x) + size * (p.z - min.y) + size * size * p.y) as usize;
         let inside = |p: IVec3| {
             (min.x..min.x + size).contains(&p.x)
@@ -290,7 +289,7 @@ mod tests {
                     for z in 0..SECTION_SIZE {
                         for x in 0..SECTION_SIZE {
                             let local = IVec3::new(x, y, z);
-                            let world = local + IVec3::new(key.x, 0, key.y) * SECTION_SIZE;
+                            let world = local + key.origin();
                             window[index(world)] = ground.get(local);
                         }
                     }
@@ -323,7 +322,7 @@ mod tests {
                     for z in 0..SECTION_SIZE {
                         for x in 0..SECTION_SIZE {
                             let local = IVec3::new(x, y, z);
-                            let world = local + IVec3::new(key.x, 0, key.y) * SECTION_SIZE;
+                            let world = local + key.origin();
                             let from_edge = [world.x - min.x, world.z - min.y]
                                 .map(|c| c.min(size - 1 - c))
                                 .into_iter()
@@ -345,13 +344,10 @@ mod tests {
     fn leaves_do_not_replace_logs_or_ground() {
         let terrain = Terrain::new(1337);
         let tree = border_tree(&terrain);
-        let key = IVec2::new(
-            tree.base.x.div_euclid(SECTION_SIZE),
-            tree.base.z.div_euclid(SECTION_SIZE),
-        );
+        let key = ColumnPos::of_block(tree.base);
         let ground = terrain.generate_carved(key);
         let column = terrain.generate_trees(key);
-        let origin = IVec3::new(key.x, 0, key.y) * SECTION_SIZE;
+        let origin = key.origin();
         for log in tree.logs() {
             assert_eq!(column.get(log - origin), Block::Log);
         }

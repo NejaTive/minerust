@@ -1,9 +1,9 @@
 use game::Game;
-use glam::IVec2;
 use render::Renderer;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 use world::block::Block;
+use world::pos::ColumnPos;
 use world::save::{FORMAT_VERSION, decode_column, encode_column};
 
 use crate::frame::frame_params;
@@ -95,7 +95,7 @@ impl Engine {
             .world
             .drain_dirty()
             .into_iter()
-            .flat_map(|key| key.to_array())
+            .flat_map(|key| [key.x(), key.z()])
             .collect()
     }
 
@@ -104,7 +104,7 @@ impl Engine {
     pub fn export_column(&self, x: i32, z: i32) -> Option<Vec<u8>> {
         self.game
             .world
-            .edited_column(IVec2::new(x, z))
+            .edited_column(ColumnPos::new(x, z))
             .map(encode_column)
     }
 
@@ -112,7 +112,7 @@ impl Engine {
     /// перестраиваются сразу, если они уже есть. Ошибка формата — `JsError`, мир не меняется.
     pub fn import_column(&mut self, x: i32, z: i32, bytes: &[u8]) -> Result<(), JsError> {
         let column = decode_column(bytes).map_err(|e| JsError::new(&e.to_string()))?;
-        let key = IVec2::new(x, z);
+        let key = ColumnPos::new(x, z);
         self.game.import_column(key, column);
         self.streamer
             .remesh_around(&self.game, &mut self.renderer, key);

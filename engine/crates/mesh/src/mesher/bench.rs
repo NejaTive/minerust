@@ -5,17 +5,17 @@ use super::*;
 use world::terrain::Terrain;
 
 /// Мир 14×14 колонок с светом и ключи внутренних 12×12 (у них все соседи загружены).
-fn setup() -> (World, LightMap, Vec<IVec2>) {
+fn setup() -> (World, LightMap, Vec<ColumnPos>) {
     let terrain = Terrain::new(1337);
     let mut world = World::new();
     for z in -7..7 {
         for x in -7..7 {
-            let key = IVec2::new(x, z);
+            let key = ColumnPos::new(x, z);
             world.insert(key, terrain.generate(key));
         }
     }
     let keys = (-6..6)
-        .flat_map(|z| (-6..6).map(move |x| IVec2::new(x, z)))
+        .flat_map(|z| (-6..6).map(move |x| ColumnPos::new(x, z)))
         .collect();
     let mut light = LightMap::new();
     for key in world.keys().collect::<Vec<_>>() {

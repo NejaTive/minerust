@@ -48,14 +48,15 @@ impl Fog {
 
 #[cfg(test)]
 mod tests {
-    use glam::{IVec2, Vec2, Vec3};
+    use glam::{Vec2, Vec3};
+    use world::pos::ColumnPos;
 
     use super::*;
 
     /// Расстояние от точки до квадрата колонки `key` по горизонтали.
-    fn distance_to_column(point: Vec2, key: IVec2) -> f32 {
+    fn distance_to_column(point: Vec2, key: ColumnPos) -> f32 {
         let size = SECTION_SIZE as f32;
-        let min = key.as_vec2() * size;
+        let min = key.0.as_vec2() * size;
         point.clamp(min, min + size).distance(point)
     }
 
@@ -71,8 +72,8 @@ mod tests {
             for corner in [Vec2::ZERO, Vec2::X, Vec2::Y, Vec2::ONE] {
                 for z in -reach..=reach {
                     for x in -reach..=reach {
-                        let key = IVec2::new(x, z);
-                        if key.length_squared() > radius * radius {
+                        let key = ColumnPos::new(x, z);
+                        if key.dist2(ColumnPos::ZERO) > radius * radius {
                             nearest = nearest.min(distance_to_column(corner * size, key));
                         }
                     }

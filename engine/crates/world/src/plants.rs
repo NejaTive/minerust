@@ -1,7 +1,6 @@
-use glam::IVec2;
-
 use crate::block::Block;
 use crate::column::{Column, WORLD_HEIGHT};
+use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
 use crate::terrain::{Biome, Terrain, WATER_LEVEL};
 use crate::trees::hash;
@@ -44,8 +43,8 @@ fn plant_at(terrain: &Terrain, x: i32, z: i32) -> Option<Block> {
 /// равнинах и лесу. Работает только внутри колонки: решение по клетке зависит от сида
 /// и мировых координат, так что шов с соседями не нужен. Пустыня, пляж (там песок) и
 /// дно озёр отпадают сами: растёт только на траве выше воды.
-pub fn plant(terrain: &Terrain, key: IVec2, column: &mut Column) {
-    let origin = key * SECTION_SIZE;
+pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
+    let origin = key.origin();
     for lz in 0..SECTION_SIZE {
         for lx in 0..SECTION_SIZE {
             let Some(top) = (0..WORLD_HEIGHT)
@@ -63,7 +62,7 @@ pub fn plant(terrain: &Terrain, key: IVec2, column: &mut Column) {
             {
                 continue;
             }
-            if let Some(block) = plant_at(terrain, origin.x + lx, origin.y + lz) {
+            if let Some(block) = plant_at(terrain, origin.x + lx, origin.z + lz) {
                 column.set(above, block);
             }
         }
@@ -75,10 +74,10 @@ mod tests {
     use super::*;
 
     /// Колонки с доминирующим в центре биомом `biome`, не больше `count`.
-    fn columns_of(terrain: &Terrain, biome: Biome, count: usize) -> Vec<IVec2> {
+    fn columns_of(terrain: &Terrain, biome: Biome, count: usize) -> Vec<ColumnPos> {
         (-40..40)
-            .flat_map(|z| (-40..40).map(move |x| IVec2::new(x, z)))
-            .filter(|k| terrain.biome_at(k.x * 16 + 8, k.y * 16 + 8) == biome)
+            .flat_map(|z| (-40..40).map(move |x| ColumnPos::new(x, z)))
+            .filter(|k| terrain.biome_at(k.origin().x + 8, k.origin().z + 8) == biome)
             .take(count)
             .collect()
     }
@@ -92,7 +91,7 @@ mod tests {
 
     #[test]
     fn same_seed_same_plants() {
-        let key = IVec2::new(3, -2);
+        let key = ColumnPos::new(3, -2);
         let a = Terrain::new(42).generate(key);
         let b = Terrain::new(42).generate(key);
         for y in 0..WORLD_HEIGHT {
@@ -143,7 +142,7 @@ mod tests {
                     let has_plant =
                         (0..WORLD_HEIGHT).any(|y| column.get([x, y, z].into()).needs_support());
                     // Край пустыни может зайти в равнину, но в самой пустыне пусто.
-                    let biome = terrain.biome_at(key.x * 16 + x, key.y * 16 + z);
+                    let biome = terrain.biome_at(key.origin().x + x, key.origin().z + z);
                     assert!(!has_plant || biome != Biome::Desert, "{key} {x},{z}");
                 }
             }

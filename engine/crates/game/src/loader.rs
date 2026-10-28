@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use glam::IVec2;
 
 use world::column::Column;
+use world::pos::ColumnPos;
 use world::world::World;
 
 /// Пределы дальности прорисовки, колонок. Фронт (`src/settings.ts`) держит те же числа.
@@ -27,9 +28,9 @@ pub const NEIGHBORS: [IVec2; 8] = [
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Progress {
     /// Колонка загружена (сгенерирована или взята из отложенных правок) и лежит в `World`.
-    Generated(IVec2),
+    Generated(ColumnPos),
     /// Колонке нужно построить меш. Загрузчик уже считает её мешированной.
-    Mesh(IVec2),
+    Mesh(ColumnPos),
     /// Всё в радиусе загружено и мешировано.
     Done,
 }
@@ -51,13 +52,13 @@ pub enum Progress {
 /// меши дальше `radius`, а данные дальше `radius + 2` (соседи ≤ radius + √2). Инвариант
 /// про соседей держится и тут — меши снимаются раньше данных в том же `update`.
 pub struct Loader {
-    center: IVec2,
+    center: ColumnPos,
     radius: i32,
     /// Радиус уменьшился, и следующий `update` обрезает круги без запаса.
     shrunk: bool,
     /// Смещения в круге `gen_radius`, ближние первыми.
     offsets: Vec<IVec2>,
-    meshed: HashSet<IVec2>,
+    meshed: HashSet<ColumnPos>,
     /// Индексы в `offsets`, до которых всё уже мешировано и загружено. Между вызовами
     /// `update` колонки только прибавляются, так что `advance` не просматривает
     /// готовое начало круга заново.
@@ -67,7 +68,7 @@ pub struct Loader {
 
 impl Loader {
     /// `center` — ключ колонки, в которой стоит игрок; дальность — [`DEFAULT_RADIUS`].
-    pub fn new(center: IVec2) -> Self {
+    pub fn new(center: ColumnPos) -> Self {
         let mut loader = Self {
             center,
             radius: DEFAULT_RADIUS,
@@ -114,9 +115,9 @@ impl Loader {
     pub fn warm_up(
         &mut self,
         world: &mut World,
-        mut generate: impl FnMut(IVec2) -> Column,
+        mut generate: impl FnMut(ColumnPos) -> Column,
         radius: i32,
-    ) -> Vec<IVec2> {
+    ) -> Vec<ColumnPos> {
         assert!(
             radius <= self.radius,
             "warm-up radius {radius} exceeds {}",
@@ -130,7 +131,7 @@ impl Loader {
                 load(world, key, &mut generate);
             }
         }
-        let mesh: Vec<IVec2> = self
+        let mesh: Vec<ColumnPos> = self
             .offsets
             .iter()
             .filter(in_circle(radius))
@@ -143,10 +144,10 @@ impl Loader {
 
     /// Раз в кадр: переносит центр, снимает меши и выгружает данные далёких колонок.
     /// Возвращает колонки, чьи меши пора удалить.
-    pub fn update(&mut self, center: IVec2, world: &mut World) -> Vec<IVec2> {
+    pub fn update(&mut self, center: ColumnPos, world: &mut World) -> Vec<ColumnPos> {
         self.center = center;
         self.reset_prefixes();
-        let dist2 = |key: IVec2| (key - center).length_squared();
+        let dist2 = |key: ColumnPos| (key - center).length_squared();
 
         // Меши снимаются раньше данных и с меньшим радиусом — на этом держится
         // инвариант про соседей мешированной колонки.
@@ -161,7 +162,7 @@ impl Loader {
             keep
         });
         let unload_radius = self.unload_radius() - i32::from(shrunk);
-        let far: Vec<IVec2> = world
+        let far: Vec<ColumnPos> = world
             .keys()
             .filter(|&key| dist2(key) > unload_radius * unload_radius)
             .collect();
@@ -179,7 +180,7 @@ impl Loader {
     pub fn advance(
         &mut self,
         world: &mut World,
-        generate: impl FnOnce(IVec2) -> Column,
+        generate: impl FnOnce(ColumnPos) -> Column,
     ) -> Progress {
         if let Some(key) = self.next_to_mesh(world) {
             self.meshed.insert(key);
@@ -200,7 +201,7 @@ impl Loader {
             .count()
     }
 
-    fn next_to_mesh(&mut self, world: &World) -> Option<IVec2> {
+    fn next_to_mesh(&mut self, world: &World) -> Option<ColumnPos> {
         let center = self.center;
         let circle = &self.offsets[..self.circle_len(self.radius)];
         while circle
@@ -209,7 +210,7 @@ impl Loader {
         {
             self.meshed_prefix += 1;
         }
-        let loaded = |key: IVec2| world.column(key).is_some();
+        let loaded = |key: ColumnPos| world.column(key).is_some();
         circle[self.meshed_prefix..]
             .iter()
             .map(|&o| center + o)
@@ -217,7 +218,7 @@ impl Loader {
             .find(|&key| loaded(key) && NEIGHBORS.iter().all(|&n| loaded(key + n)))
     }
 
-    fn next_to_generate(&mut self, world: &World) -> Option<IVec2> {
+    fn next_to_generate(&mut self, world: &World) -> Option<ColumnPos> {
         let center = self.center;
         let missing = self.offsets[self.loaded_prefix..]
             .iter()
@@ -247,7 +248,7 @@ impl Loader {
 }
 
 /// Кладёт колонку в мир: изменённую — из отложенных правок, иначе — новую от генератора.
-fn load(world: &mut World, key: IVec2, generate: impl FnOnce(IVec2) -> Column) {
+fn load(world: &mut World, key: ColumnPos, generate: impl FnOnce(ColumnPos) -> Column) {
     let column = world.take_edited(key).unwrap_or_else(|| generate(key));
     world.insert(key, column);
 }
@@ -268,7 +269,7 @@ fn circle_offsets(radius: i32) -> Vec<IVec2> {
 mod tests {
     use super::*;
 
-    fn air(_: IVec2) -> Column {
+    fn air(_: ColumnPos) -> Column {
         Column::new()
     }
 
@@ -276,7 +277,7 @@ mod tests {
         circle_offsets(r).len()
     }
 
-    fn dist2(a: IVec2, b: IVec2) -> i32 {
+    fn dist2(a: ColumnPos, b: ColumnPos) -> i32 {
         (a - b).length_squared()
     }
 
@@ -285,8 +286,8 @@ mod tests {
     fn frame(
         loader: &mut Loader,
         world: &mut World,
-        center: IVec2,
-        meshed: &mut HashSet<IVec2>,
+        center: ColumnPos,
+        meshed: &mut HashSet<ColumnPos>,
         steps: usize,
     ) -> Vec<Progress> {
         for key in loader.update(center, world) {
@@ -307,12 +308,17 @@ mod tests {
     }
 
     /// Гоняет загрузчик в `center`, пока он не закончит всю работу.
-    fn settle(loader: &mut Loader, world: &mut World, center: IVec2, meshed: &mut HashSet<IVec2>) {
+    fn settle(
+        loader: &mut Loader,
+        world: &mut World,
+        center: ColumnPos,
+        meshed: &mut HashSet<ColumnPos>,
+    ) {
         while !frame(loader, world, center, meshed, usize::MAX).is_empty() {}
     }
 
     /// Загружен ровно круг `radius + 2`, мешируется ровно круг `radius`.
-    fn assert_circles(world: &World, meshed: &HashSet<IVec2>, center: IVec2, radius: i32) {
+    fn assert_circles(world: &World, meshed: &HashSet<ColumnPos>, center: ColumnPos, radius: i32) {
         let r = radius + 2;
         for z in -r - 2..=r + 2 {
             for x in -r - 2..=r + 2 {
@@ -324,7 +330,7 @@ mod tests {
         }
     }
 
-    fn assert_neighbors_loaded(world: &World, meshed: &HashSet<IVec2>) {
+    fn assert_neighbors_loaded(world: &World, meshed: &HashSet<ColumnPos>) {
         for &key in meshed {
             assert!(world.column(key).is_some(), "meshed {key} unloaded");
             for n in NEIGHBORS {
@@ -338,7 +344,7 @@ mod tests {
 
     #[test]
     fn loads_and_meshes_circles() {
-        let center = IVec2::new(-5, 3);
+        let center = ColumnPos::new(-5, 3);
         let mut loader = Loader::new(center);
         let mut world = World::new();
         let mut meshed = HashSet::new();
@@ -349,25 +355,25 @@ mod tests {
 
     #[test]
     fn generates_nearest_first_and_meshes_when_neighbors_ready() {
-        let mut loader = Loader::new(IVec2::ZERO);
+        let mut loader = Loader::new(ColumnPos::ZERO);
         let mut world = World::new();
         let mut meshed = HashSet::new();
         // Центр и 8 соседей — квадрат 3×3, после них центр готов к мешу.
-        let first = frame(&mut loader, &mut world, IVec2::ZERO, &mut meshed, 10);
-        assert_eq!(first[0], Progress::Generated(IVec2::ZERO));
+        let first = frame(&mut loader, &mut world, ColumnPos::ZERO, &mut meshed, 10);
+        assert_eq!(first[0], Progress::Generated(ColumnPos::ZERO));
         assert!(first[..9].iter().all(|p| matches!(
             p,
-            Progress::Generated(key) if key.length_squared() <= 2
+            Progress::Generated(key) if key.dist2(ColumnPos::ZERO) <= 2
         )));
-        assert_eq!(first[9], Progress::Mesh(IVec2::ZERO));
+        assert_eq!(first[9], Progress::Mesh(ColumnPos::ZERO));
 
         let mut generated = Vec::new();
         while let progress @ [_, ..] =
-            &frame(&mut loader, &mut world, IVec2::ZERO, &mut meshed, 7)[..]
+            &frame(&mut loader, &mut world, ColumnPos::ZERO, &mut meshed, 7)[..]
         {
             assert!(progress.len() <= 7);
             generated.extend(progress.iter().filter_map(|p| match p {
-                Progress::Generated(key) => Some(key.length_squared()),
+                Progress::Generated(key) => Some(key.dist2(ColumnPos::ZERO)),
                 _ => None,
             }));
         }
@@ -379,32 +385,35 @@ mod tests {
     fn column_without_all_neighbors_is_not_meshed() {
         // Без одного соседа — по грани или по диагонали — колонка ждёт его загрузки.
         for missing in NEIGHBORS {
-            let mut loader = Loader::new(IVec2::ZERO);
+            let mut loader = Loader::new(ColumnPos::ZERO);
             let mut world = World::new();
-            world.insert(IVec2::ZERO, Column::new());
+            world.insert(ColumnPos::ZERO, Column::new());
             for n in NEIGHBORS.into_iter().filter(|&n| n != missing) {
-                world.insert(n, Column::new());
+                world.insert(ColumnPos(n), Column::new());
             }
-            loader.update(IVec2::ZERO, &mut world);
+            loader.update(ColumnPos::ZERO, &mut world);
             assert_eq!(
                 loader.advance(&mut world, air),
-                Progress::Generated(missing)
+                Progress::Generated(ColumnPos(missing))
             );
-            assert_eq!(loader.advance(&mut world, air), Progress::Mesh(IVec2::ZERO));
+            assert_eq!(
+                loader.advance(&mut world, air),
+                Progress::Mesh(ColumnPos::ZERO)
+            );
         }
     }
 
     #[test]
     fn unloads_only_beyond_margin() {
-        let mut loader = Loader::new(IVec2::ZERO);
+        let mut loader = Loader::new(ColumnPos::ZERO);
         let mut world = World::new();
         let mut meshed = HashSet::new();
-        settle(&mut loader, &mut world, IVec2::ZERO, &mut meshed);
-        let before: HashSet<IVec2> = world.keys().collect();
+        settle(&mut loader, &mut world, ColumnPos::ZERO, &mut meshed);
+        let before: HashSet<ColumnPos> = world.keys().collect();
 
         // Сдвиг на 2 колонки: старые данные дальше radius + 2 от нового центра,
         // но не дальше radius + 3, должны остаться.
-        let center = IVec2::new(2, 0);
+        let center = ColumnPos::new(2, 0);
         let unload = loader.unload_radius();
         for key in loader.update(center, &mut world) {
             assert!(dist2(key, center) > loader.unmesh_radius().pow(2));
@@ -421,18 +430,18 @@ mod tests {
         );
 
         // Далёкий прыжок: всё старое выгружается, загруженное ограничено кругом.
-        let far = IVec2::new(1000, -1000);
+        let far = ColumnPos::new(1000, -1000);
         settle(&mut loader, &mut world, far, &mut meshed);
         assert_circles(&world, &meshed, far, DEFAULT_RADIUS);
     }
 
     #[test]
     fn meshed_columns_keep_their_neighbors() {
-        let mut loader = Loader::new(IVec2::ZERO);
+        let mut loader = Loader::new(ColumnPos::ZERO);
         let mut world = World::new();
-        let mut meshed: HashSet<IVec2> = HashSet::new();
+        let mut meshed: HashSet<ColumnPos> = HashSet::new();
         // Петляющий путь с шагами разной длины, включая прыжки через несколько колонок.
-        let mut center = IVec2::ZERO;
+        let mut center = ColumnPos::ZERO;
         for i in 0..400 {
             let step = match i % 7 {
                 0 => IVec2::new(3, 1),
@@ -454,7 +463,7 @@ mod tests {
 
     #[test]
     fn set_radius_up_and_down_settles_to_new_circles() {
-        let center = IVec2::new(3, -2);
+        let center = ColumnPos::new(3, -2);
         let mut loader = Loader::new(center);
         let mut world = World::new();
         let mut meshed = HashSet::new();
@@ -470,7 +479,7 @@ mod tests {
 
     #[test]
     fn sharp_shrink_keeps_neighbors_of_meshed_columns() {
-        let mut center = IVec2::ZERO;
+        let mut center = ColumnPos::ZERO;
         let mut loader = Loader::new(center);
         let mut world = World::new();
         let mut meshed = HashSet::new();
@@ -480,7 +489,7 @@ mod tests {
         loader.set_radius(MIN_RADIUS);
         for i in 0..60 {
             if i % 3 == 0 {
-                center += IVec2::new(1, 1);
+                center += IVec2::ONE;
             }
             for key in loader.update(center, &mut world) {
                 assert!(meshed.remove(&key));
@@ -503,7 +512,7 @@ mod tests {
 
     #[test]
     fn radius_is_clamped() {
-        let mut loader = Loader::new(IVec2::ZERO);
+        let mut loader = Loader::new(ColumnPos::ZERO);
         assert_eq!(loader.radius(), DEFAULT_RADIUS);
         loader.set_radius(1);
         assert_eq!(loader.radius(), MIN_RADIUS);
@@ -513,7 +522,7 @@ mod tests {
 
     #[test]
     fn warm_up_meshes_small_circle() {
-        let center = IVec2::new(7, 7);
+        let center = ColumnPos::new(7, 7);
         let mut loader = Loader::new(center);
         let mut world = World::new();
         let mesh = loader.warm_up(&mut world, air, 2);
@@ -528,20 +537,20 @@ mod tests {
 
         use world::block::Block;
 
-        let mut loader = Loader::new(IVec2::ZERO);
+        let mut loader = Loader::new(ColumnPos::ZERO);
         let mut world = World::new();
         let mut meshed = HashSet::new();
-        settle(&mut loader, &mut world, IVec2::ZERO, &mut meshed);
+        settle(&mut loader, &mut world, ColumnPos::ZERO, &mut meshed);
         let pos = IVec3::new(3, 50, -5);
-        let key = IVec2::new(0, -1);
+        let key = ColumnPos::new(0, -1);
         assert!(world.set_block(pos, Block::Stone));
 
-        let far = IVec2::new(100, 0);
+        let far = ColumnPos::new(100, 0);
         settle(&mut loader, &mut world, far, &mut meshed);
         assert!(world.column(key).is_none());
 
         // Обратно: генератор не должен трогать изменённую колонку.
-        for key in loader.update(IVec2::ZERO, &mut world) {
+        for key in loader.update(ColumnPos::ZERO, &mut world) {
             meshed.remove(&key);
         }
         loop {
@@ -560,13 +569,13 @@ mod tests {
         // И после второй выгрузки правка снова сохраняется.
         settle(&mut loader, &mut world, far, &mut meshed);
         assert!(world.is_edited(key));
-        settle(&mut loader, &mut world, IVec2::ZERO, &mut meshed);
+        settle(&mut loader, &mut world, ColumnPos::ZERO, &mut meshed);
         assert_eq!(world.block(pos), Block::Stone);
     }
 
     #[test]
     fn import_into_unloaded_goes_to_loader() {
-        let key = IVec2::new(0, 1);
+        let key = ColumnPos::new(0, 1);
         let pos = glam::IVec3::new(5, 60, 20);
         let mut world = World::new();
         // Правка до импорта: импорт перекрывает и её признак «не сохранено».
@@ -580,8 +589,8 @@ mod tests {
         assert!(world.column(key).is_none());
         assert!(world.is_edited(key));
 
-        let mut loader = Loader::new(IVec2::ZERO);
-        loader.update(IVec2::ZERO, &mut world);
+        let mut loader = Loader::new(ColumnPos::ZERO);
+        loader.update(ColumnPos::ZERO, &mut world);
         while loader.advance(&mut world, |k| {
             assert_ne!(k, key, "imported column regenerated");
             Column::new()

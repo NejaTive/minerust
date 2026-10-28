@@ -1,9 +1,10 @@
 use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
-use glam::{IVec2, IVec3};
+use glam::IVec3;
 
 use crate::block::Block;
 use crate::caves::Caves;
 use crate::column::{Column, WORLD_HEIGHT};
+use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
 use crate::{plants, trees};
 
@@ -142,7 +143,7 @@ impl Terrain {
 
     /// Колонка по её координатам (мировые x, z / 16): земля, пещеры и деревья, в том
     /// числе кроны деревьев соседних колонок, нависающие над этой.
-    pub fn generate(&self, key: IVec2) -> Column {
+    pub fn generate(&self, key: ColumnPos) -> Column {
         let mut column = self.generate_trees(key);
         plants::plant(self, key, &mut column);
         column
@@ -150,7 +151,7 @@ impl Terrain {
 
     /// Колонка с пещерами и деревьями, без растений: тесты мешера и деревьев сверяют кубы.
     #[doc(hidden)]
-    pub fn generate_trees(&self, key: IVec2) -> Column {
+    pub fn generate_trees(&self, key: ColumnPos) -> Column {
         let mut column = self.generate_carved(key);
         trees::plant(self, key, &mut column);
         column
@@ -158,7 +159,7 @@ impl Terrain {
 
     /// Колонка без деревьев, но с пещерами.
     #[doc(hidden)]
-    pub fn generate_carved(&self, key: IVec2) -> Column {
+    pub fn generate_carved(&self, key: ColumnPos) -> Column {
         let mut column = self.generate_ground(key);
         self.caves.carve(
             key,
@@ -174,12 +175,12 @@ impl Terrain {
     /// ([`BEACH`]) вместо травы песок, глубже под водой — земля. Над поверхностью ниже
     /// [`WATER_LEVEL`] — вода до него включительно.
     #[doc(hidden)]
-    pub fn generate_ground(&self, key: IVec2) -> Column {
+    pub fn generate_ground(&self, key: ColumnPos) -> Column {
         let mut column = Column::new();
-        let origin = key * SECTION_SIZE;
+        let origin = key.origin();
         for z in 0..SECTION_SIZE {
             for x in 0..SECTION_SIZE {
-                let (wx, wz) = (origin.x + x, origin.y + z);
+                let (wx, wz) = (origin.x + x, origin.z + z);
                 let weights = self.biome_weights(wx, wz);
                 let surface = self.surface(wx, wz, weights);
                 let desert = weights.dominant() == Biome::Desert;
@@ -223,12 +224,12 @@ pub(crate) fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
 /// Колонка, у которой вода стоит и на западном краю, и за ним: для тестов стыков.
 /// Помощник тестов других крейтов (мешер): под `cfg(test)` он был бы им не виден.
 #[doc(hidden)]
-pub fn lake_key(terrain: &Terrain) -> IVec2 {
+pub fn lake_key(terrain: &Terrain) -> ColumnPos {
     let deep = |x, z| terrain.surface_height(x, z) < WATER_LEVEL - 2;
     (0..4096)
         .flat_map(|z| (-64..64).map(move |i| (i * SECTION_SIZE, z * 3)))
         .find(|&(x, z)| deep(x, z) && deep(x - 1, z))
-        .map(|(x, z)| IVec2::new(x / SECTION_SIZE, z.div_euclid(SECTION_SIZE)))
+        .map(|(x, z)| ColumnPos::new(x / SECTION_SIZE, z.div_euclid(SECTION_SIZE)))
         .expect("no lake on a column border")
 }
 
@@ -253,7 +254,7 @@ mod tests {
         for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
             assert_eq!(a.surface_height(x, z), b.surface_height(x, z));
         }
-        for key in [IVec2::new(-3, 7), lake_key(&a)] {
+        for key in [ColumnPos::new(-3, 7), lake_key(&a)] {
             assert!(same_columns(&a.generate(key), &b.generate(key)));
         }
     }
@@ -320,7 +321,7 @@ mod tests {
         let terrain = Terrain::new(1);
         let (x, z) = find_column(&terrain, |x, z, w| terrain.surface(x, z, w) == 55)
             .expect("no column with surface 55");
-        let column = terrain.generate(IVec2::new(x.div_euclid(16), z.div_euclid(16)));
+        let column = terrain.generate(ColumnPos::new(x.div_euclid(16), z.div_euclid(16)));
         let at = |y| column.get(IVec3::new(x.rem_euclid(16), y, z.rem_euclid(16)));
         assert!(at(55).is_solid());
         assert!((56..=WATER_LEVEL).all(|y| at(y) == Block::Water));
@@ -345,7 +346,7 @@ mod tests {
     /// Блоки земли столбца (x, z) сверху вниз до камня, без деревьев. Над землёй
     /// проверяет воду до `WATER_LEVEL` и воздух выше.
     fn ground_layers(terrain: &Terrain, x: i32, z: i32) -> (i32, Vec<Block>) {
-        let key = IVec2::new(x.div_euclid(16), z.div_euclid(16));
+        let key = ColumnPos::new(x.div_euclid(16), z.div_euclid(16));
         let column = terrain.generate_ground(key);
         let local = |y| IVec3::new(x.rem_euclid(16), y, z.rem_euclid(16));
         let top = terrain.surface_height(x, z);
@@ -476,8 +477,8 @@ mod bench {
     #[ignore]
     fn generate_timing() {
         let terrain = Terrain::new(1337);
-        let keys: Vec<IVec2> = (-8..8)
-            .flat_map(|z| (-8..8).map(move |x| IVec2::new(x, z)))
+        let keys: Vec<ColumnPos> = (-8..8)
+            .flat_map(|z| (-8..8).map(move |x| ColumnPos::new(x, z)))
             .collect();
         let start = std::time::Instant::now();
         for &key in &keys {

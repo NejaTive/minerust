@@ -4,14 +4,14 @@ use super::*;
 use crate::terrain::Terrain;
 
 /// Ключи квадрата колонок `center ± radius`.
-fn square(center: IVec2, radius: i32) -> Vec<IVec2> {
+fn square(center: ColumnPos, radius: i32) -> Vec<ColumnPos> {
     (-radius..=radius)
         .flat_map(|z| (-radius..=radius).map(move |x| center + IVec2::new(x, z)))
         .collect()
 }
 
 /// Мир из колонок `keys`, блок задаёт `block_at` по мировым координатам.
-fn world_of(keys: &[IVec2], block_at: impl Fn(IVec3) -> Block) -> World {
+fn world_of(keys: &[ColumnPos], block_at: impl Fn(IVec3) -> Block) -> World {
     let mut world = World::new();
     for &key in keys {
         let mut column = Column::new();
@@ -19,7 +19,7 @@ fn world_of(keys: &[IVec2], block_at: impl Fn(IVec3) -> Block) -> World {
             for z in 0..SECTION_SIZE {
                 for x in 0..SECTION_SIZE {
                     let local = IVec3::new(x, y, z);
-                    let pos = local + IVec3::new(key.x, 0, key.y) * SECTION_SIZE;
+                    let pos = local + key.origin();
                     column.set(local, block_at(pos));
                 }
             }
@@ -29,7 +29,7 @@ fn world_of(keys: &[IVec2], block_at: impl Fn(IVec3) -> Block) -> World {
     world
 }
 
-fn terrain_world(keys: &[IVec2]) -> World {
+fn terrain_world(keys: &[ColumnPos]) -> World {
     let terrain = Terrain::new(1337);
     let mut world = World::new();
     for &key in keys {
@@ -38,7 +38,7 @@ fn terrain_world(keys: &[IVec2]) -> World {
     world
 }
 
-fn lit(world: &World, order: &[IVec2]) -> LightMap {
+fn lit(world: &World, order: &[ColumnPos]) -> LightMap {
     let mut light = LightMap::new();
     for &key in order {
         light.add_column(world, key);
@@ -48,7 +48,7 @@ fn lit(world: &World, order: &[IVec2]) -> LightMap {
 
 /// Эталон: байты света ([`pack_light`]) всех колонок `keys` целиком; клетки без
 /// света в карту не входят.
-fn reference(world: &World, keys: &[IVec2]) -> HashMap<IVec3, u8> {
+fn reference(world: &World, keys: &[ColumnPos]) -> HashMap<IVec3, u8> {
     let mut packed = reference_channel(world, keys, Channel::Sky);
     for (pos, level) in reference_channel(world, keys, Channel::Block) {
         let sky = packed.get(&pos).copied().unwrap_or(0);
@@ -60,17 +60,17 @@ fn reference(world: &World, keys: &[IVec2]) -> HashMap<IVec3, u8> {
 /// Эталон одного канала, отдельной простой реализацией — очередь с повторной
 /// постановкой при улучшении, без затравки по столбцам и без окна. Незагруженное —
 /// стена, как и в [`LightMap`].
-fn reference_channel(world: &World, keys: &[IVec2], channel: Channel) -> HashMap<IVec3, u8> {
-    let loaded: HashSet<IVec2> = keys.iter().copied().collect();
+fn reference_channel(world: &World, keys: &[ColumnPos], channel: Channel) -> HashMap<IVec3, u8> {
+    let loaded: HashSet<ColumnPos> = keys.iter().copied().collect();
     let inside =
-        |p: IVec3| (0..WORLD_HEIGHT).contains(&p.y) && loaded.contains(&column_key(p.x, p.z));
+        |p: IVec3| (0..WORLD_HEIGHT).contains(&p.y) && loaded.contains(&ColumnPos::of_block(p));
     let mut light: HashMap<IVec3, u8> = HashMap::new();
     let mut queue = VecDeque::new();
     for &key in keys {
         for y in 0..WORLD_HEIGHT {
             for z in 0..SECTION_SIZE {
                 for x in 0..SECTION_SIZE {
-                    let pos = IVec3::new(key.x * SECTION_SIZE + x, y, key.y * SECTION_SIZE + z);
+                    let pos = key.origin() + IVec3::new(x, y, z);
                     let level = match channel {
                         Channel::Sky if y == WORLD_HEIGHT - 1 => {
                             channel.step(MAX_LIGHT, true, world.block(pos))
@@ -104,13 +104,13 @@ fn reference_channel(world: &World, keys: &[IVec2], channel: Channel) -> HashMap
 }
 
 /// Все клетки колонок `keys` совпадают с эталоном.
-fn assert_matches_reference(light: &LightMap, world: &World, keys: &[IVec2], context: &str) {
+fn assert_matches_reference(light: &LightMap, world: &World, keys: &[ColumnPos], context: &str) {
     let expected = reference(world, keys);
     for &key in keys {
         for y in 0..WORLD_HEIGHT {
             for z in 0..SECTION_SIZE {
                 for x in 0..SECTION_SIZE {
-                    let pos = IVec3::new(key.x * SECTION_SIZE + x, y, key.y * SECTION_SIZE + z);
+                    let pos = key.origin() + IVec3::new(x, y, z);
                     let want = expected.get(&pos).copied().unwrap_or(0);
                     assert_eq!(light.packed(pos), want, "{context}: {pos}");
                 }
@@ -125,12 +125,12 @@ fn floor(y: i32) -> impl Fn(IVec3) -> Block {
 
 #[test]
 fn open_sky_is_full_above_ground() {
-    let keys = square(IVec2::new(-1, 2), 1);
+    let keys = square(ColumnPos::new(-1, 2), 1);
     let world = world_of(&keys, floor(10));
     let light = lit(&world, &keys);
     for &key in &keys {
         for y in 0..WORLD_HEIGHT + 2 {
-            let pos = IVec3::new(key.x * 16 + 7, y, key.y * 16 + 15);
+            let pos = key.origin() + IVec3::new(7, y, 15);
             assert_eq!(light.sky(pos), if y > 10 { MAX_LIGHT } else { 0 }, "{pos}");
         }
     }
@@ -140,7 +140,7 @@ fn open_sky_is_full_above_ground() {
 
 #[test]
 fn light_under_canopy_fades_from_edge() {
-    let keys = square(IVec2::ZERO, 1);
+    let keys = square(ColumnPos::ZERO, 1);
     // Пол на y = 10, навес на y = 14 над x ≥ 0: под ним свет приходит сбоку от x = −1.
     let world = world_of(&keys, |p| {
         if p.y <= 10 || (p.y == 14 && p.x >= 0) {
@@ -162,7 +162,7 @@ fn light_under_canopy_fades_from_edge() {
 
 #[test]
 fn hole_in_box_lights_and_closing_darkens() {
-    let keys = square(IVec2::ZERO, 1);
+    let keys = square(ColumnPos::ZERO, 1);
     // Полая коробка 9×9×9 в центральной колонке, стенки толщиной 1.
     let shell = |p: IVec3| {
         let inner = p - IVec3::new(4, 40, 4);
@@ -180,7 +180,7 @@ fn hole_in_box_lights_and_closing_darkens() {
     let mut light = lit(&world, &keys);
     let inside = IVec3::new(8, 44, 8);
     assert_eq!(light.sky(inside), 0);
-    let closed: Vec<u8> = light.column(IVec2::ZERO).unwrap().0.to_vec();
+    let closed: Vec<u8> = light.column(ColumnPos::ZERO).unwrap().0.to_vec();
 
     let hole = IVec3::new(8, 48, 8);
     assert!(world.set_block(hole, Block::Air));
@@ -190,18 +190,18 @@ fn hole_in_box_lights_and_closing_darkens() {
     }
     assert_eq!(light.sky(IVec3::new(6, 41, 8)), 13);
     assert_eq!(light.sky(IVec3::new(5, 41, 5)), 9);
-    assert!(changed.contains(&IVec3::new(0, 2, 0)), "{changed:?}");
+    assert!(changed.contains(&SectionPos::new(0, 2, 0)), "{changed:?}");
     assert_matches_reference(&light, &world, &keys, "open");
 
     assert!(world.set_block(hole, Block::Stone));
     let changed = light.block_changed(&world, hole);
-    assert!(changed.contains(&IVec3::new(0, 2, 0)), "{changed:?}");
-    assert_eq!(light.column(IVec2::ZERO).unwrap().0.to_vec(), closed);
+    assert!(changed.contains(&SectionPos::new(0, 2, 0)), "{changed:?}");
+    assert_eq!(light.column(ColumnPos::ZERO).unwrap().0.to_vec(), closed);
 }
 
 #[test]
 fn water_dims_by_two_and_leaves_by_one() {
-    let keys = square(IVec2::ZERO, 1);
+    let keys = square(ColumnPos::ZERO, 1);
     let world = world_of(&keys, |p| match p.y {
         ..=50 => Block::Stone,
         51..=60 => Block::Water,
@@ -229,7 +229,7 @@ fn water_dims_by_two_and_leaves_by_one() {
 }
 
 /// Окно 3×3 с пещерами, водой и деревьями: колонки задевают их на стыках.
-const CENTERS: [IVec2; 2] = [IVec2::new(-1, 2), IVec2::new(-6, 6)];
+const CENTERS: [ColumnPos; 2] = [ColumnPos::new(-1, 2), ColumnPos::new(-6, 6)];
 
 #[test]
 fn order_of_columns_does_not_matter() {
@@ -268,7 +268,7 @@ fn remove_and_add_again_restores_light() {
     for removed in [center, center + IVec2::X, center + IVec2::ONE] {
         light.remove_column(&world, removed);
         assert!(light.column(removed).is_none());
-        let rest: Vec<IVec2> = keys.iter().copied().filter(|&k| k != removed).collect();
+        let rest: Vec<ColumnPos> = keys.iter().copied().filter(|&k| k != removed).collect();
         assert_matches_reference(&light, &world, &rest, "removed");
         light.add_column(&world, removed);
         let after: Vec<Vec<u8>> = keys
@@ -302,7 +302,7 @@ fn random_edits_match_full_recompute() {
         Block::Water,
         Block::Glowstone,
     ];
-    let origin = IVec3::new(center.x - 1, 0, center.y - 1) * SECTION_SIZE;
+    let origin = (center + IVec2::NEG_ONE).origin();
     for step in 0..40 {
         let (x, z) = (next(48), next(48));
         let surface = terrain.surface_height(origin.x + x, origin.z + z);
@@ -320,7 +320,7 @@ fn random_edits_match_full_recompute() {
             );
         }
         for key in changed {
-            assert!((0..8).contains(&key.y), "{key}");
+            assert!((0..8).contains(&key.y()), "{key}");
         }
     }
     assert_matches_reference(&light, &world, &keys, "end");
@@ -333,15 +333,15 @@ fn changed_sections_cover_every_changed_cell() {
     let terrain = Terrain::new(1337);
     let mut world = terrain_world(&keys);
     let mut light = lit(&world, &keys);
-    let x = center.x * 16 + 15;
-    let z = center.y * 16;
+    let x = center.origin().x + 15;
+    let z = center.origin().z;
     let top = terrain.surface_height(x, z);
     // Шахта вниз на краю колонки: свет уходит в соседей.
     for y in (top - 12..=top).rev() {
         let before = reference(&world, &keys);
         let pos = IVec3::new(x, y, z);
         world.set_block(pos, Block::Air);
-        let changed: HashSet<IVec3> = light.block_changed(&world, pos).into_iter().collect();
+        let changed: HashSet<SectionPos> = light.block_changed(&world, pos).into_iter().collect();
         for (cell, level) in reference(&world, &keys) {
             if before.get(&cell).copied().unwrap_or(0) != level {
                 for key in affected_sections(cell) {
@@ -353,8 +353,8 @@ fn changed_sections_cover_every_changed_cell() {
 }
 
 /// Закрытый зал 3×3 колонок: камень, внутри воздух от y=10 до y=40.
-fn dark_hall() -> (World, Vec<IVec2>) {
-    let keys = square(IVec2::ZERO, 1);
+fn dark_hall() -> (World, Vec<ColumnPos>) {
+    let keys = square(ColumnPos::ZERO, 1);
     let world = world_of(&keys, |p| {
         if (10..=40).contains(&p.y) && (-16..32).contains(&p.x) && (-16..32).contains(&p.z) {
             Block::Air
@@ -470,15 +470,15 @@ fn glowstone_light_does_not_depend_on_load_order() {
     ] {
         world.set_block(pos, Block::Glowstone);
     }
-    let reversed: Vec<IVec2> = keys.iter().rev().copied().collect();
+    let reversed: Vec<ColumnPos> = keys.iter().rev().copied().collect();
     let a = lit(&world, &keys);
     let b = lit(&world, &reversed);
     assert_matches_reference(&a, &world, &keys, "forward");
     assert_matches_reference(&b, &world, &keys, "reversed");
     // Вынули и вернули колонку, куда светили соседи.
     let mut c = lit(&world, &keys);
-    c.remove_column(&world, IVec2::new(1, 1));
-    c.add_column(&world, IVec2::new(1, 1));
+    c.remove_column(&world, ColumnPos::new(1, 1));
+    c.add_column(&world, ColumnPos::new(1, 1));
     assert_matches_reference(&c, &world, &keys, "reloaded");
 }
 

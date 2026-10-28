@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 
 use glam::IVec3;
@@ -6,9 +7,22 @@ use crate::block::Block;
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::section::SECTION_SIZE;
 
-/// Версия формата колонки. Её же фронт пишет в метаданные мира: сохранение другой
-/// версии не читается, а очищается.
+/// Версия формата колонки, которую пишет [`encode_column`]. Её же фронт пишет в
+/// метаданные мира. Колонки версий `1..=FORMAT_VERSION` читаются (старые мигрируют),
+/// остальные — [`SaveError::UnsupportedVersion`].
+///
+/// Как добавить версию: поднять `FORMAT_VERSION`, дописать в конец [`MIGRATIONS`]
+/// функцию «тело версии N → тело версии N+1» (заголовок она не видит), поменять
+/// кодирование и тест на прежние байты оставить как есть.
 pub const FORMAT_VERSION: u8 = 1;
+
+/// Шаг миграции: тело колонки (байты после заголовка) одной версии → тело следующей.
+type Migration = fn(&[u8]) -> Result<Vec<u8>, SaveError>;
+
+/// `MIGRATIONS[n - 1]` поднимает версию n до n + 1. Пока версия одна — шагов нет.
+const MIGRATIONS: &[Migration] = &[];
+
+const _: () = assert!(MIGRATIONS.len() + 1 == FORMAT_VERSION as usize);
 
 const MAGIC: &[u8; 3] = b"MRC";
 const COLUMN_VOLUME: usize = (SECTION_SIZE * SECTION_SIZE * WORLD_HEIGHT) as usize;
@@ -71,9 +85,8 @@ pub fn encode_column(column: &Column) -> Vec<u8> {
 pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     let body = bytes.strip_prefix(MAGIC).ok_or(SaveError::BadMagic)?;
     let (&version, body) = body.split_first().ok_or(SaveError::Truncated)?;
-    if version != FORMAT_VERSION {
-        return Err(SaveError::UnsupportedVersion(version));
-    }
+    let body = upgrade(version, body, MIGRATIONS)?;
+    let body = &*body;
     let mut column = Column::new();
     let mut index = 0;
     for run in body.chunks(RUN_SIZE) {
@@ -102,6 +115,24 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     Ok(column)
 }
 
+/// Тело колонки версии `version` → тело последней версии (`steps.len() + 1`). Тело
+/// текущей версии не копируется.
+fn upgrade<'a>(
+    version: u8,
+    body: &'a [u8],
+    steps: &[Migration],
+) -> Result<Cow<'a, [u8]>, SaveError> {
+    let first = usize::from(version);
+    if first == 0 || first > steps.len() + 1 {
+        return Err(SaveError::UnsupportedVersion(version));
+    }
+    let mut body = Cow::Borrowed(body);
+    for step in &steps[first - 1..] {
+        body = Cow::Owned(step(&body)?);
+    }
+    Ok(body)
+}
+
 /// Номер блока в порядке сериализации → локальные координаты колонки.
 fn position(i: usize) -> IVec3 {
     let i = i as i32;
@@ -115,9 +146,8 @@ fn position(i: usize) -> IVec3 {
 
 #[cfg(test)]
 mod tests {
-    use glam::IVec2;
-
     use super::*;
+    use crate::pos::ColumnPos;
     use crate::terrain::Terrain;
 
     const BLOCKS: [Block; 13] = [
@@ -178,7 +208,11 @@ mod tests {
     #[test]
     fn generated_column_is_small() {
         let terrain = Terrain::new(1337);
-        for key in [IVec2::ZERO, IVec2::new(-7, 12), IVec2::new(40, -3)] {
+        for key in [
+            ColumnPos::ZERO,
+            ColumnPos::new(-7, 12),
+            ColumnPos::new(40, -3),
+        ] {
             let bytes = round_trip(&terrain.generate(key));
             // Рельеф даёт ~4 серии на столб (камень, земля, трава, воздух): ~3 КБ из 32;
             // пещеры добавляют по паре серий в столбах, где проходят.
@@ -204,8 +238,9 @@ mod tests {
     fn reads_columns_saved_before_new_blocks() {
         // Колонка в байтах, как её писала версия с блоками 0–3: камень, земля, трава,
         // воздух в каждом столбе. Формат не менялся, новые номера просто стали допустимы.
+        // Версия записана литералом: тест должен читать именно v1 и после подъёма FORMAT_VERSION.
         let mut bytes = b"MRC".to_vec();
-        bytes.push(FORMAT_VERSION);
+        bytes.push(1);
         let columns = SECTION_SIZE * SECTION_SIZE;
         for _ in 0..columns {
             for (block, len) in [(3u8, 60u16), (2, 3), (1, 1), (0, 64)] {
@@ -235,7 +270,7 @@ mod tests {
         }
         round_trip(&column);
         let terrain = Terrain::new(1337);
-        round_trip(&terrain.generate(IVec2::new(3, -4)));
+        round_trip(&terrain.generate(ColumnPos::new(3, -4)));
         let lake = terrain.generate(crate::terrain::lake_key(&terrain));
         assert!((0..COLUMN_VOLUME).any(|i| lake.get(position(i)) == Block::Water));
         round_trip(&lake);
@@ -258,6 +293,50 @@ mod tests {
     }
 
     #[test]
+    fn rejects_version_zero() {
+        let mut bytes = encode_column(&Column::new());
+        bytes[3] = 0;
+        assert_eq!(
+            decode_column(&bytes).err(),
+            Some(SaveError::UnsupportedVersion(0))
+        );
+    }
+
+    #[test]
+    fn upgrade_applies_steps_from_the_saved_version() {
+        // Заглушка цепочки: каждая версия дописывает в тело свой номер. Так видно, какие
+        // шаги и в каком порядке прошли; первая настоящая миграция заменит эти функции.
+        fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
+            Ok([body, &[2]].concat())
+        }
+        fn v2_to_v3(body: &[u8]) -> Result<Vec<u8>, SaveError> {
+            Ok([body, &[3]].concat())
+        }
+        fn broken(_: &[u8]) -> Result<Vec<u8>, SaveError> {
+            Err(SaveError::Truncated)
+        }
+        let steps: [Migration; 2] = [v1_to_v2, v2_to_v3];
+        let upgraded = |version| upgrade(version, &[9], &steps).map(Cow::into_owned);
+        assert_eq!(upgraded(1), Ok(vec![9, 2, 3]));
+        assert_eq!(upgraded(2), Ok(vec![9, 3]));
+        assert_eq!(upgraded(3), Ok(vec![9]));
+        assert_eq!(upgraded(0), Err(SaveError::UnsupportedVersion(0)));
+        assert_eq!(upgraded(4), Err(SaveError::UnsupportedVersion(4)));
+        // Ошибка шага не теряется.
+        let steps: [Migration; 1] = [broken];
+        assert_eq!(upgrade(1, &[], &steps).err(), Some(SaveError::Truncated));
+    }
+
+    #[test]
+    fn current_version_body_is_not_copied() {
+        let body = [1, 2, 3];
+        assert!(matches!(
+            upgrade(FORMAT_VERSION, &body, MIGRATIONS),
+            Ok(Cow::Borrowed(_))
+        ));
+    }
+
+    #[test]
     fn rejects_unknown_block() {
         let mut bytes = encode_column(&filled(Block::Dirt));
         bytes[4] = 200;
@@ -269,7 +348,7 @@ mod tests {
 
     #[test]
     fn rejects_truncated() {
-        let bytes = round_trip(&Terrain::new(7).generate(IVec2::ZERO));
+        let bytes = round_trip(&Terrain::new(7).generate(ColumnPos::ZERO));
         // Посреди серии и ровно без последней серии.
         assert_eq!(
             decode_column(&bytes[..bytes.len() - 1]).err(),
