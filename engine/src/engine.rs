@@ -8,6 +8,7 @@ use wgpu::util::DeviceExt;
 use crate::block::Block;
 use crate::camera::Camera;
 use crate::column::{COLUMN_SECTIONS, WORLD_HEIGHT};
+use crate::daytime::{self, DayTime};
 use crate::double_tap::DoubleTap;
 use crate::fog::Fog;
 use crate::frustum::Frustum;
@@ -26,26 +27,16 @@ use crate::terrain::Terrain;
 use crate::texture::{self, LAYER_COUNT, MIP_LEVELS, TILE_SIZE};
 use crate::world::{World, affected_sections, column_key};
 
-/// Цвет неба в линейном пространстве: рендер идёт в sRGB-view, и при выводе он
-/// станет прежним sRGB (0.53, 0.81, 0.92).
-const SKY: wgpu::Color = wgpu::Color {
-    r: 0.24,
-    g: 0.62,
-    b: 0.83,
-    a: 1.0,
-};
-
 /// Туман и фон под водой: муть в пару десятков блоков, тёмно-синяя, в линейном цвете.
 const UNDERWATER_FOG: Fog = Fog {
     start: 0.0,
     end: 24.0,
 };
-const UNDERWATER_COLOR: wgpu::Color = wgpu::Color {
-    r: 0.02,
-    g: 0.07,
-    b: 0.2,
-    a: 1.0,
-};
+/// Дневной цвет; ночью его гасит `SkyState::underwater_scale`.
+const UNDERWATER_COLOR: [f32; 3] = [0.02, 0.07, 0.2];
+
+/// Во сколько раз время суток идёт быстрее при перемотке (отладочная клавиша T).
+const TIME_FAST_FACTOR: u32 = 60;
 
 /// Круг колонок, который `create` грузит и мешует синхронно, чтобы первый кадр не был пустым.
 const START_RADIUS: i32 = 2;
@@ -147,6 +138,12 @@ pub struct Engine {
     /// Ноги до последнего шага физики: камера интерполирует от них к `player.feet`.
     prev_feet: Vec3,
     clock: Clock,
+    /// Время суток; идёт по шагам физики, на паузе стоит.
+    day: DayTime,
+    /// Время суток заморожено (режим замера `?bench`).
+    time_frozen: bool,
+    /// Перемотка времени в [`TIME_FAST_FACTOR`] раз быстрее.
+    time_fast: bool,
     space_tap: DoubleTap,
     sprint_tap: DoubleTap,
     /// Множитель угла обзора от бега, 1..=`SPRINT_FOV_SCALE`; настройку в `camera` не меняет.
@@ -438,6 +435,9 @@ impl Engine {
             prev_feet: player.feet,
             player,
             clock: Clock::default(),
+            day: DayTime::default(),
+            time_frozen: false,
+            time_fast: false,
             space_tap: DoubleTap::new(DOUBLE_TAP_S),
             sprint_tap: DoubleTap::new(DOUBLE_TAP_S),
             fov_scale: 1.0,
@@ -697,6 +697,32 @@ impl Engine {
         }
     }
 
+    /// Время суток 0..1 (0 — начало дня, см. `daytime`).
+    pub fn time_of_day(&self) -> f32 {
+        self.day.fraction()
+    }
+
+    /// Ставит время суток; вне 0..1 берётся дробная часть, не число — утро. Меши не
+    /// перестраиваются: время меняет только uniform кадра.
+    pub fn set_time_of_day(&mut self, time: f32) {
+        self.day = DayTime::from_fraction(time);
+    }
+
+    /// Фаза суток: `day`, `dusk`, `night` или `dawn`.
+    pub fn day_phase(&self) -> String {
+        daytime::phase(self.day.fraction()).name().to_owned()
+    }
+
+    /// Замораживает время суток (режим замера).
+    pub fn set_time_frozen(&mut self, frozen: bool) {
+        self.time_frozen = frozen;
+    }
+
+    /// Отладочная перемотка времени суток.
+    pub fn set_time_fast(&mut self, fast: bool) {
+        self.time_fast = fast;
+    }
+
     pub fn paused(&self) -> bool {
         self.paused
     }
@@ -833,22 +859,25 @@ impl Engine {
         let underwater = self
             .player
             .eyes_in_water(|pos| self.world.block(pos).is_water());
+        let sky = daytime::sky_state(self.day.fraction());
         let (fog, background) = if underwater {
-            (UNDERWATER_FOG, UNDERWATER_COLOR)
+            (
+                UNDERWATER_FOG,
+                UNDERWATER_COLOR.map(|c| c * sky.underwater_scale),
+            )
         } else {
-            (fog, SKY)
+            (fog, sky.color)
         };
+        let [r, g, b] = background.map(f64::from);
+        let clear = wgpu::Color { r, g, b, a: 1.0 };
         let globals = Globals {
             view_proj,
             camera_pos: self.camera.position,
             fog_start: fog.start,
-            fog_color: Vec3::new(
-                background.r as f32,
-                background.g as f32,
-                background.b as f32,
-            ),
+            fog_color: Vec3::from(background),
             fog_end: fog.end,
             underwater: f32::from(u8::from(underwater)),
+            darkness: sky.darkness,
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
@@ -888,7 +917,7 @@ impl Engine {
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(background),
+                        load: wgpu::LoadOp::Clear(clear),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -1212,7 +1241,12 @@ impl Engine {
     /// Шаги физики за время кадра `dt` и камера в интерполированных глазах игрока.
     fn update_player(&mut self, dt: f32) {
         let input = self.input();
-        for _ in 0..self.clock.advance(dt) {
+        let ticks = self.clock.advance(dt);
+        if !self.time_frozen {
+            let factor = if self.time_fast { TIME_FAST_FACTOR } else { 1 };
+            self.day.advance(ticks * factor);
+        }
+        for _ in 0..ticks {
             if !self.body_loaded() {
                 // Под незагруженной колонкой `World::block` — воздух, и игрок провалился
                 // бы сквозь ещё не сгенерированную землю. Стоим, пока она не появится;

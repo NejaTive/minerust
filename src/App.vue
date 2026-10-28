@@ -3,6 +3,7 @@ import { computed, reactive, ref, useTemplateRef, watch } from 'vue'
 import GameCanvas, {
   type ApiInfo,
   type PlayerInfo,
+  type TimeInfo,
   type WorldStats,
 } from './components/GameCanvas.vue'
 import Hotbar from './components/Hotbar.vue'
@@ -32,6 +33,7 @@ if (BENCH) {
 const fps = ref(0)
 const api = ref<ApiInfo>()
 const stats = ref<WorldStats>()
+const time = ref<TimeInfo>()
 const notice = ref<string>()
 const slot = ref(loadHotbarSlot())
 const block = computed(() => HOTBAR[slot.value] ?? null)
@@ -94,6 +96,7 @@ async function newWorld() {
     :settings="settings"
     @fps="fps = $event"
     @stats="stats = $event"
+    @time="time = $event"
     @api="api = $event"
     @notice="showNotice"
     @render-distance="settings.renderDistance = $event"
@@ -106,6 +109,7 @@ async function newWorld() {
     :fps="fps"
     :api="api"
     :stats="stats"
+    :time="time"
     :block="block"
     :player="player"
     :notice="notice"

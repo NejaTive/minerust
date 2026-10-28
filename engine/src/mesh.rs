@@ -1,3 +1,7 @@
+use std::sync::LazyLock;
+
+use crate::light::{MAX_LIGHT, level_brightness};
+
 /// Шагов позиции на блок: позиция вершины — целое число шестнадцатых долей блока.
 /// Хватает и для воды (верх на 14/16 = 0.875), и для любой части блока в будущем.
 pub const POSITION_UNITS: i32 = 16;
@@ -13,8 +17,13 @@ pub const MAX_POSITION: u16 = 16 * POSITION_UNITS as u16;
 ///   есть 0..=16 блоков включительно), u 27..32 (5 бит, 0..=16 шестнадцатых тайла);
 /// - слово 1: v 0..5 (так же), слой текстуры 5..13 (8 бит), яркость 13..21
 ///   (8 бит, 0..=255 — `/255` в шейдере);
-/// - слово 1, биты 21..32 (11 бит) и никем не заняты: сюда может лечь отдельный канал
-///   солнца для смены дня и ночи (4 бита) и прочее.
+/// - слово 1: свет солнца 21..26 и свет блоков 26..31 — средний по вершине уровень в
+///   половинках уровня (5 бит, 0..=30, [`MAX_LIGHT_HALVES`]); бит 31 свободен.
+///
+/// Яркость от света шейдер считает сам из этих двух уровней и тьмы неба (`Globals`):
+/// ночью меняется только uniform, меши остаются теми же. Половинки уровня дают
+/// ошибку яркости не больше 0.8^0.25 ≈ 5.5%: «средний» уровень вершины — дробь со
+/// знаменателем 1..4, а бит на точность дороже, чем на неё хватает глазу.
 ///
 /// UV хранятся явно, а не выводятся из номера угла: у боковых граней воды под опущенным
 /// верхом v = 1 − y (обрезка тайла), и угла грани для этого мало.
@@ -26,19 +35,29 @@ pub struct Vertex([u32; 2]);
 
 const POSITION_MASK: u32 = 0x1FF;
 const UV_MASK: u32 = 0x1F;
+const LIGHT_MASK: u32 = 0x1F;
+
+/// Наибольшее значение поля света вершины: 15 уровней в половинках.
+pub const MAX_LIGHT_HALVES: u8 = 2 * MAX_LIGHT;
 
 impl Vertex {
     const ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Uint32x2];
 
     /// `position` — шаги 1/16 блока от угла секции (0..=[`MAX_POSITION`]), `uv` — шаги
-    /// 1/16 тайла (0..=16, v = 0 — верх тайла), `shade` — яркость 0..=255.
-    pub fn new(position: [u16; 3], uv: [u8; 2], shade: u8, layer: u8) -> Self {
+    /// 1/16 тайла (0..=16, v = 0 — верх тайла), `shade` — сторона × AO, 0..=255,
+    /// `light` — `[солнце, блоки]` в половинках уровня (0..=[`MAX_LIGHT_HALVES`]).
+    pub fn new(position: [u16; 3], uv: [u8; 2], shade: u8, layer: u8, light: [u8; 2]) -> Self {
+        debug_assert!(light.iter().all(|&l| l <= MAX_LIGHT_HALVES), "{light:?}");
         debug_assert!(position.iter().all(|&p| p <= MAX_POSITION), "{position:?}");
         debug_assert!(uv.iter().all(|&c| i32::from(c) <= POSITION_UNITS), "{uv:?}");
         let [x, y, z] = position.map(u32::from);
         Self([
             x | y << 9 | z << 18 | u32::from(uv[0]) << 27,
-            u32::from(uv[1]) | u32::from(layer) << 5 | u32::from(shade) << 13,
+            u32::from(uv[1])
+                | u32::from(layer) << 5
+                | u32::from(shade) << 13
+                | u32::from(light[0]) << 21
+                | u32::from(light[1]) << 26,
         ])
     }
 
@@ -63,6 +82,22 @@ impl Vertex {
         (self.0[1] >> 13) as u8
     }
 
+    /// Свет солнца в половинках уровня.
+    pub fn sun_halves(self) -> u8 {
+        (self.0[1] >> 21 & LIGHT_MASK) as u8
+    }
+
+    /// Свет блоков в половинках уровня.
+    pub fn block_halves(self) -> u8 {
+        (self.0[1] >> 26 & LIGHT_MASK) as u8
+    }
+
+    /// Итоговая яркость 0..=1 при тьме неба `darkness` (в уровнях): то же, что считает
+    /// шейдер. Нужна тестам и выбору диагонали квада.
+    pub fn brightness(self, darkness: f32) -> f32 {
+        self.shade() * light_brightness(self.sun_halves(), self.block_halves(), darkness)
+    }
+
     pub fn layer(self) -> u8 {
         (self.0[1] >> 5) as u8
     }
@@ -74,6 +109,23 @@ impl Vertex {
             attributes: &Self::ATTRIBUTES,
         }
     }
+}
+
+/// Яркость света вершины: `brightness(max(солнце − тьма, блоки))` по уровням, которые
+/// хранятся в половинках. Шейдер (`vertex_brightness`) считает так же.
+pub fn light_brightness(sun_halves: u8, block_halves: u8, darkness: f32) -> f32 {
+    let sun = f32::from(sun_halves) / 2.0 - darkness;
+    level_brightness(sun.max(f32::from(block_halves) / 2.0))
+}
+
+/// Дневная яркость вершины (тьма 0) в байте: `shade` × яркость большего из двух
+/// уровней. Мешер выбирает по ней диагональ квада — по тем же числам, что днём увидит
+/// шейдер. Яркости уровней в таблице: `powf` на каждую вершину заметно удорожал бы меш.
+pub fn day_shade(shade: u8, sun_halves: u8, block_halves: u8) -> u8 {
+    static TABLE: LazyLock<[f32; MAX_LIGHT_HALVES as usize + 1]> =
+        LazyLock::new(|| std::array::from_fn(|h| level_brightness(h as f32 / 2.0)));
+    let light = TABLE[usize::from(sun_halves.max(block_halves))];
+    quantize_shade(f32::from(shade) / 255.0 * light)
 }
 
 /// Яркость 0..=1 → байт вершины. Мешер сравнивает яркости уже по этим байтам, чтобы
@@ -152,7 +204,7 @@ mod tests {
 
     #[test]
     fn vertex_is_eight_bytes() {
-        let v = Vertex::new([1, 2, 3], [0, 16], 128, 7);
+        let v = Vertex::new([1, 2, 3], [0, 16], 128, 7, [0, 0]);
         let bytes = vertex_bytes(&[v, v]);
         assert_eq!(size_of::<Vertex>(), 8);
         assert_eq!(bytes.len(), 2 * 8);
@@ -163,39 +215,47 @@ mod tests {
     #[test]
     fn position_bounds_round_trip() {
         for p in [0, 1, 14, 16, 255, MAX_POSITION] {
-            let v = Vertex::new([p, MAX_POSITION - p, p], [0, 0], 0, 0);
+            let v = Vertex::new([p, MAX_POSITION - p, p], [0, 0], 0, 0, [0, 0]);
             let [x, y, z] = v.position();
             assert_eq!(x, f32::from(p) / 16.0);
             assert_eq!(y, f32::from(MAX_POSITION - p) / 16.0);
             assert_eq!(z, x);
         }
-        let max = Vertex::new([MAX_POSITION; 3], [16, 16], 255, 255);
+        let max = Vertex::new([MAX_POSITION; 3], [16, 16], 255, 255, [0, 0]);
         assert_eq!(max.position(), [16.0; 3]);
         assert_eq!(max.uv(), [1.0, 1.0]);
     }
 
     #[test]
     fn water_surface_is_exact() {
-        let v = Vertex::new([0, 14, 0], [0, 2], 0, 0);
+        let v = Vertex::new([0, 14, 0], [0, 2], 0, 0, [0, 0]);
         assert_eq!(v.position()[1], crate::block::WATER_SURFACE);
         assert_eq!(v.uv()[1], 1.0 - crate::block::WATER_SURFACE);
     }
 
     #[test]
     fn fields_do_not_overlap() {
-        let v = Vertex::new([MAX_POSITION; 3], [16, 16], 0, 255);
+        let v = Vertex::new([MAX_POSITION; 3], [16, 16], 0, 255, [0, 0]);
         assert_eq!((v.layer(), v.shade_byte()), (255, 0));
         assert_eq!((v.position(), v.uv()), ([16.0; 3], [1.0; 2]));
-        let v = Vertex::new([0; 3], [0; 2], 255, 0);
+        let v = Vertex::new([0; 3], [0; 2], 255, 0, [0, 0]);
         assert_eq!(
             (v.layer(), v.shade_byte(), v.position(), v.uv()),
             (0, 255, [0.0; 3], [0.0; 2])
         );
-        // Свободные биты слова 1 остаются нулевыми.
+        // Свет не залезает в соседние поля и наоборот; бит 31 остаётся нулевым.
+        let v = Vertex::new([MAX_POSITION; 3], [16, 16], 255, 255, [MAX_LIGHT_HALVES; 2]);
+        assert_eq!((v.sun_halves(), v.block_halves()), (30, 30));
+        assert_eq!((v.layer(), v.shade_byte()), (255, 255));
+        assert_eq!((v.position(), v.uv()), ([16.0; 3], [1.0; 2]));
+        assert_eq!(v.0[1] >> 31, 0);
+        let v = Vertex::new([0; 3], [0; 2], 0, 0, [MAX_LIGHT_HALVES, 0]);
         assert_eq!(
-            Vertex::new([MAX_POSITION; 3], [16, 16], 255, 255).0[1] >> 21,
-            0
+            (v.sun_halves(), v.block_halves(), v.0[0], v.0[1] & 0x1FFFFF),
+            (30, 0, 0, 0)
         );
+        let v = Vertex::new([0; 3], [0; 2], 0, 0, [0, MAX_LIGHT_HALVES]);
+        assert_eq!((v.sun_halves(), v.block_halves()), (0, 30));
     }
 
     #[test]
@@ -203,11 +263,11 @@ mod tests {
         assert_eq!(quantize_shade(0.0), 0);
         assert_eq!(quantize_shade(1.0), 255);
         assert_eq!(quantize_shade(1.5), 255);
-        assert_eq!(Vertex::new([0; 3], [0; 2], 0, 0).shade(), 0.0);
-        assert_eq!(Vertex::new([0; 3], [0; 2], 255, 0).shade(), 1.0);
+        assert_eq!(Vertex::new([0; 3], [0; 2], 0, 0, [0, 0]).shade(), 0.0);
+        assert_eq!(Vertex::new([0; 3], [0; 2], 255, 0, [0, 0]).shade(), 1.0);
         // Ошибка квантования не больше половины шага.
         for s in [0.05, 0.3, 0.5, 0.8, 0.999] {
-            let back = Vertex::new([0; 3], [0; 2], quantize_shade(s), 0).shade();
+            let back = Vertex::new([0; 3], [0; 2], quantize_shade(s), 0, [0, 0]).shade();
             assert!((back - s).abs() <= 0.5 / 255.0 + 1e-6, "{s} -> {back}");
         }
     }
@@ -223,7 +283,7 @@ mod tests {
     #[test]
     fn flipped_quad_keeps_triangles() {
         let quad: Vec<Vertex> = (0..4)
-            .map(|i| Vertex::new([i, 0, 0], [0, 0], 0, 0))
+            .map(|i| Vertex::new([i, 0, 0], [0, 0], 0, 0, [0, 0]))
             .collect();
         let straight = gpu_vertices(&quad, &[0, 1, 2, 0, 2, 3]);
         assert_eq!(straight, quad);
@@ -240,5 +300,84 @@ mod tests {
         assert_eq!(bytes.len(), MAX_QUADS * 6 * 2);
         let last = u16::from_le_bytes(bytes[bytes.len() - 2..].try_into().unwrap());
         assert_eq!(usize::from(last), MAX_QUADS * 4 - 1);
+    }
+
+    #[test]
+    fn light_halves_round_trip() {
+        for sun in [0, 1, 14, 15, 29, MAX_LIGHT_HALVES] {
+            for block in [0, 1, 15, 30] {
+                let v = Vertex::new([3; 3], [1, 2], 77, 9, [sun, block]);
+                assert_eq!((v.sun_halves(), v.block_halves()), (sun, block));
+                assert_eq!((v.shade_byte(), v.layer()), (77, 9));
+            }
+        }
+    }
+
+    /// Формула шейдера (`vertex_brightness` в shader.wgsl) повторена здесь по тексту:
+    /// `pow(0.8, 15 − level)` через `exp2`, минимум 0.05.
+    fn shader_brightness(sun_halves: u8, block_halves: u8, dark: f32) -> f32 {
+        let level = (f32::from(sun_halves) / 2.0 - dark).max(f32::from(block_halves) / 2.0);
+        (0.8f32.log2() * (15.0 - level)).exp2().max(0.05)
+    }
+
+    #[test]
+    fn shader_formula_matches_cpu() {
+        for sun in 0..=MAX_LIGHT_HALVES {
+            for block in [0, 7, 20, 30] {
+                for dark in [0.0, 0.5, 5.5, 11.0] {
+                    let (cpu, gpu) = (
+                        light_brightness(sun, block, dark),
+                        shader_brightness(sun, block, dark),
+                    );
+                    assert!(
+                        (cpu - gpu).abs() < 1e-5,
+                        "{sun} {block} {dark}: {cpu} {gpu}"
+                    );
+                }
+            }
+        }
+        // Целые уровни при тьме 0 — ровно прежняя `light::brightness`.
+        for level in 0..=MAX_LIGHT {
+            assert_eq!(
+                light_brightness(level * 2, 0, 0.0),
+                crate::light::brightness(level)
+            );
+        }
+    }
+
+    #[test]
+    fn shader_constants_match_cpu() {
+        let source = include_str!("shader.wgsl");
+        assert!(source.contains("const LIGHT_BASE: f32 = 0.8;"));
+        assert!(source.contains("const MIN_BRIGHTNESS: f32 = 0.05;"));
+        assert!(source.contains("const MAX_LIGHT: f32 = 15.0;"));
+        assert_eq!(MAX_LIGHT, 15);
+        assert_eq!(level_brightness(0.0), 0.8f32.powi(15).max(0.05));
+    }
+
+    #[test]
+    fn darkness_leaves_block_light() {
+        let v = Vertex::new([0; 3], [0; 2], 255, 0, [30, 20]);
+        assert_eq!(v.brightness(0.0), 1.0);
+        // Ночью солнце 15 − 11 = 4 слабее светокамня 10.
+        assert_eq!(v.brightness(11.0), level_brightness(10.0));
+        let sun_only = Vertex::new([0; 3], [0; 2], 255, 0, [30, 0]);
+        assert!(sun_only.brightness(11.0) > 0.05);
+        assert_eq!(sun_only.brightness(11.0), level_brightness(4.0));
+        assert_eq!(
+            Vertex::new([0; 3], [0; 2], 255, 0, [0, 0]).brightness(11.0),
+            0.05
+        );
+    }
+
+    #[test]
+    fn day_shade_matches_vertex() {
+        for (shade, sun, block) in [(255, 30, 0), (200, 12, 25), (128, 0, 0), (0, 30, 30)] {
+            let v = Vertex::new([0; 3], [0; 2], shade, 0, [sun, block]);
+            assert_eq!(
+                day_shade(shade, sun, block),
+                quantize_shade(v.brightness(0.0))
+            );
+        }
     }
 }

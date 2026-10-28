@@ -2,10 +2,8 @@ use glam::{IVec2, IVec3};
 
 use crate::block::{Block, Facing, WATER_SURFACE};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
-use crate::light::{
-    ColumnLight, LightMap, MAX_LIGHT, average_brightness, block_level, brightness, sky_level,
-};
-use crate::mesh::{POSITION_UNITS, Vertex, quantize_shade};
+use crate::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
+use crate::mesh::{POSITION_UNITS, Vertex, day_shade, quantize_shade};
 use crate::section::{SECTION_SIZE, Section};
 use crate::texture::{LAYER_COUNT, Tile};
 use crate::world::World;
@@ -337,8 +335,10 @@ pub fn mesh_section(
 /// трёх клеток рядом с ней у этого угла (тех же, что у AO), без непрозрачных: иначе
 /// стена тянула бы вершину к темноте, которой там нет. Угловую клетку не берём и
 /// тогда, когда обе боковые непрозрачные: она не видна из угла, и свет просочился
-/// бы сквозь стену. Итог: сторона × AO × [`average_brightness`]. У воды — яркость
-/// клетки перед гранью, одна на грань. Яркость квантуется в байт до выбора диагонали.
+/// бы сквозь стену. В вершину уходят раздельно `shade` (сторона × AO) и средние уровни
+/// солнца и блоков в половинках ([`half_average`]); яркость из них считает шейдер со
+/// тьмой неба. У воды — уровни клетки перед гранью, одни на грань. Диагональ квада
+/// выбирается по дневной яркости ([`day_shade`]).
 fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> SectionMeshes {
     let mut meshes = SectionMeshes::empty();
     let faces = FACES.each_ref().map(|face| {
@@ -369,9 +369,9 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
                     for (face, normal, _) in &faces {
                         if blocks.at(index, *normal) == Block::Air {
                             let (sky, block) = lights.at(index, *normal);
-                            let shade =
-                                quantize_shade(face.shade * brightness(sky.max(block) as u8));
-                            push_water_face(&mut meshes.water, face, base, top, shade);
+                            let shade = quantize_shade(face.shade);
+                            let light = [sky, block].map(|l| half_average(l, 1));
+                            push_water_face(&mut meshes.water, face, base, top, shade, light);
                         }
                     }
                     continue;
@@ -384,7 +384,7 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
                         continue;
                     };
                     let front = lights.at(index, *normal);
-                    let shades = corners.map(|[side1, side2, corner]| {
+                    let corner_data = corners.map(|[side1, side2, corner]| {
                         let open1 = !blocks.opaque(index, side1);
                         let open2 = !blocks.opaque(index, side2);
                         let open_corner = !blocks.opaque(index, corner);
@@ -406,22 +406,30 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
                                 count += 1;
                             }
                         }
-                        // Свет вершины — больший из двух средних: два источника не складываются,
-                        // а под открытым небом без светокамня картинка прежняя.
-                        quantize_shade(
-                            face.shade
-                                * AO_BRIGHTNESS[usize::from(ao)]
-                                * average_brightness(sky.max(block_sum), count),
+                        let shade = quantize_shade(face.shade * AO_BRIGHTNESS[usize::from(ao)]);
+                        (
+                            shade,
+                            [half_average(sky, count), half_average(block_sum, count)],
                         )
                     });
+                    // Свет вершины — больший из двух средних: два источника не складываются,
+                    // а под открытым небом без светокамня картинка прежняя.
+                    let days =
+                        corner_data.map(|(shade, [sun, block])| day_shade(shade, sun, block));
                     let layer = tile.layer() as u8;
-                    let vertices = face.corners.iter().zip(CORNER_UVS).zip(shades).map(
-                        |((&corner, uv), shade)| {
+                    let vertices = face.corners.iter().zip(CORNER_UVS).zip(corner_data).map(
+                        |((&corner, uv), (shade, light))| {
                             let p = base + IVec3::from(corner) * POSITION_UNITS;
-                            Vertex::new([p.x as u16, p.y as u16, p.z as u16], uv, shade, layer)
+                            Vertex::new(
+                                [p.x as u16, p.y as u16, p.z as u16],
+                                uv,
+                                shade,
+                                layer,
+                                light,
+                            )
                         },
                     );
-                    meshes.solid.push_quad(vertices, quad_indices(shades));
+                    meshes.solid.push_quad(vertices, quad_indices(days));
                 }
             }
         }
@@ -430,8 +438,15 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
 }
 
 /// Грань воды; `top` — высота верха блока над `base` в шагах позиции (16 или
-/// [`WATER_SURFACE_UNITS`]), `shade` — яркость всех её вершин.
-fn push_water_face(mesh: &mut MeshData, face: &Face, base: IVec3, top: i32, shade: u8) {
+/// [`WATER_SURFACE_UNITS`]), `shade` и `light` — одни на все её вершины.
+fn push_water_face(
+    mesh: &mut MeshData,
+    face: &Face,
+    base: IVec3,
+    top: i32,
+    shade: u8,
+    light: [u8; 2],
+) {
     let vertices = face
         .corners
         .iter()
@@ -451,6 +466,7 @@ fn push_water_face(mesh: &mut MeshData, face: &Face, base: IVec3, top: i32, shad
                 [u, v],
                 shade,
                 Tile::Water.layer() as u8,
+                light,
             )
         });
     mesh.push_quad(vertices, [0, 1, 2, 0, 2, 3]);
@@ -477,12 +493,18 @@ impl MeshData {
     }
 }
 
+/// Средний уровень `sum / count` (count 1..=4) в половинках уровня, с округлением.
+fn half_average(sum: u32, count: u32) -> u8 {
+    ((4 * sum + count) / (2 * count)) as u8
+}
+
 /// Индексы двух треугольников квада, против часовой стрелки, как и `Face::corners`.
 /// Яркость интерполируется по треугольникам, и тень от тёмной вершины на диагонали
 /// тянулась бы косой полосой через весь квад. Режем по диагонали, концы которой в
 /// сумме светлее (1–3, если пара 0–2 темнее): одиночная тёмная вершина тогда остаётся
 /// в одном треугольнике. Сравниваем итоговую яркость (те же байты, что уйдут в
-/// вершину), а не уровни AO: тень от света режется так же.
+/// вершину), а не уровни AO: тень от света режется так же. Ночью диагональ не
+/// пересчитывается — меши остаются прежними.
 fn quad_indices(shades: [u8; 4]) -> [u16; 6] {
     let sum = |a: usize, b: usize| u16::from(shades[a]) + u16::from(shades[b]);
     if sum(0, 2) < sum(1, 3) {
@@ -795,14 +817,15 @@ mod tests {
         (b - a).cross(c - b).normalize().round().as_ivec3()
     }
 
-    /// Яркость вершин квада, посчитанная по миру напрямую: блок за гранью, три блока
+    /// Поля света вершин квада, посчитанные по миру напрямую: блок за гранью, три блока
     /// перед каждой вершиной (AO) и свет клетки перед гранью и этих трёх клеток.
+    /// Возвращает на вершину `(сторона × AO, солнце, блоки)`; свет — в половинках уровня.
     fn world_shades(
         origin: IVec3,
         block_at: impl Fn(IVec3) -> Block,
         light_at: impl Fn(IVec3) -> u8,
         quad: &[Vertex],
-    ) -> [f32; 4] {
+    ) -> [(f32, u8, u8); 4] {
         let normal = quad_normal(quad);
         let world = |v: &Vertex| origin.as_vec3() + Vec3::from(v.position());
         let center = quad.iter().map(world).sum::<Vec3>() / 4.0;
@@ -829,13 +852,15 @@ mod tests {
                 }
             }
             let count = levels.len() as f32;
-            let mean = |channel: fn(u8) -> u8| {
-                levels.iter().map(|&l| f32::from(channel(l))).sum::<f32>() / count
+            let halves = |channel: fn(u8) -> u8| {
+                let mean = levels.iter().map(|&l| f32::from(channel(l))).sum::<f32>() / count;
+                (mean * 2.0 + 0.5).floor() as u8
             };
-            let level = mean(sky_level).max(mean(block_level));
-            face_shade(normal)
-                * AO_BRIGHTNESS[usize::from(ao)]
-                * average_brightness((level * count).round() as u32, count as u32)
+            (
+                face_shade(normal) * AO_BRIGHTNESS[usize::from(ao)],
+                halves(sky_level),
+                halves(block_level),
+            )
         })
     }
 
@@ -855,21 +880,22 @@ mod tests {
     ) -> usize {
         let mut shaded = 0;
         for (q, quad) in mesh.vertices.chunks(4).enumerate() {
-            let shades = world_shades(origin, &block_at, &light_at, quad);
+            let expected = world_shades(origin, &block_at, &light_at, quad);
             let side = face_shade(quad_normal(quad));
-            for (v, shade) in quad.iter().zip(shades) {
+            for (v, (shade, sun, block)) in quad.iter().zip(expected) {
                 assert_eq!(v.shade_byte(), quantize_shade(shade), "{v:?}");
-                if shade < side && pred(origin.as_vec3() + Vec3::from(v.position())) {
+                assert_eq!((v.sun_halves(), v.block_halves()), (sun, block), "{v:?}");
+                if v.brightness(0.0) < side - 1e-3
+                    && pred(origin.as_vec3() + Vec3::from(v.position()))
+                {
                     shaded += 1;
                 }
             }
+            let days =
+                expected.map(|(shade, sun, block)| day_shade(quantize_shade(shade), sun, block));
             let first = (q * 4) as u16;
             let indices = &mesh.indices[q * 6..q * 6 + 6];
-            assert_eq!(
-                indices,
-                quad_indices(shades.map(quantize_shade)).map(|i| first + i),
-                "quad {q}"
-            );
+            assert_eq!(indices, quad_indices(days).map(|i| first + i), "quad {q}");
         }
         shaded
     }
@@ -916,7 +942,7 @@ mod tests {
     }
 
     fn shades(quad: &[Vertex; 4]) -> [f32; 4] {
-        quad.map(|v| v.shade())
+        quad.map(|v| v.brightness(0.0))
     }
 
     /// Секция с двумя блоками рядом по x: `a` в (5, 5, 5), `b` в (6, 5, 5).
@@ -1620,7 +1646,7 @@ mod tests {
                 .filter(|v| {
                     v.position()[1] == 1.0 && v.position()[0] == x && v.position()[2] == 4.0
                 })
-                .map(|v| v.shade())
+                .map(|v| v.brightness(0.0))
                 .fold(0.0f32, f32::max)
         };
         assert!(top_of_floor(7.0) > top_of_floor(1.0));
@@ -1700,13 +1726,14 @@ mod tests {
                 })
                 .unwrap();
             assert!(
-                quad.iter().all(|v| v.shade() == quad[0].shade()),
+                quad.iter()
+                    .all(|v| v.brightness(0.0) == quad[0].brightness(0.0)),
                 "{quad:?}"
             );
-            quad[0].shade()
+            quad[0].brightness(0.0)
         };
         assert_eq!(top_shade(2), 1.0);
-        let covered = brightness(light.sky(IVec3::new(12, 2, 8)));
+        let covered = crate::light::brightness(light.sky(IVec3::new(12, 2, 8)));
         assert!((top_shade(12) - covered).abs() <= QUANT, "{covered}");
         assert!(top_shade(12) < 0.5);
     }

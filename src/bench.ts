@@ -16,6 +16,8 @@ export function benchApi(): GraphicsApi | undefined {
 
 /** Сид замера: мир в памяти, IndexedDB не читается и не пишется. Тот же сид — в `bench_points` (terrain.rs). */
 export const BENCH_SEED = 1337
+/** Полдень (`daytime::NOON`): замеры идут при одном и том же свете. */
+export const BENCH_TIME = 0.25
 export const BENCH_RENDER_DISTANCE = 12
 /** Сколько секунд стоять на точке после полной загрузки. */
 const STAND_MS = 10_000
@@ -109,6 +111,8 @@ export interface BenchResult {
 declare global {
   interface Window {
     __benchResult?: BenchResult
+    /** Движок режима `?bench`: для проверки из консоли (время суток, камера). */
+    __benchEngine?: Engine
   }
 }
 

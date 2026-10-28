@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { API_LABELS, BLOCK_LABELS, type BlockName } from '../settings'
-import type { ApiInfo, PlayerInfo, WorldStats } from './GameCanvas.vue'
+import type { ApiInfo, PlayerInfo, TimeInfo, WorldStats } from './GameCanvas.vue'
 
 defineProps<{
   fps: number
   api?: ApiInfo
   stats?: WorldStats
+  time?: TimeInfo
   /** Блок в выбранном слоте; `null` — слот пуст. */
   block: BlockName | null
   player?: PlayerInfo
@@ -13,6 +14,17 @@ defineProps<{
   showDebug: boolean
 }>()
 
+// 0 — начало дня (06:00): полдень (0.25) = 12:00, как `daytime`.
+const PHASES: Record<string, string> = {
+  day: 'день',
+  dusk: 'закат',
+  night: 'ночь',
+  dawn: 'рассвет',
+}
+const clock = (t: number) => {
+  const minutes = Math.floor(((t * 24 + 6) % 24) * 60)
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}
 const ms = (us: number) => (us / 1000).toFixed(2)
 const k = (n: number) => `${(n / 1000).toFixed(0)}k`
 </script>
@@ -46,6 +58,7 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
       Колонка: свет {{ ms(stats.lightUs) }} мс · загрузка мира
       <template v-if="stats.loadMs">{{ stats.loadMs }} мс</template><template v-else>идёт</template>
     </div>
+    <div v-if="showDebug && time">Время: {{ clock(time.time) }} · {{ PHASES[time.phase] ?? time.phase }}</div>
     <div v-if="player">
       <template v-if="player.mode === 'flying'">Режим: полёт</template>
       <template v-else-if="player.mode === 'noclip'">Режим: сквозь блоки</template>

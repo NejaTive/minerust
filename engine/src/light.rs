@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
-use std::sync::LazyLock;
 
 use glam::{IVec2, IVec3};
 
@@ -22,24 +21,10 @@ pub fn brightness(level: u8) -> f32 {
     level_brightness(f32::from(level))
 }
 
-fn level_brightness(level: f32) -> f32 {
+pub fn level_brightness(level: f32) -> f32 {
     0.8f32
         .powf(f32::from(MAX_LIGHT) - level)
         .max(MIN_BRIGHTNESS)
-}
-
-/// Яркость среднего уровня `sum / count` (count 1..=4, как у вершины при плавном
-/// освещении, sum ≤ 4·[`MAX_LIGHT`]). Хватает таблицы: `powf` на каждую вершину заметно
-/// удорожал бы меш, а таблица по паре (count, sum) обходит ещё и деление на каждую
-/// вершину.
-pub fn average_brightness(sum: u32, count: u32) -> f32 {
-    const SUMS: usize = 4 * MAX_LIGHT as usize + 1;
-    static TABLE: LazyLock<[[f32; SUMS]; 4]> = LazyLock::new(|| {
-        std::array::from_fn(|c| {
-            std::array::from_fn(|sum| level_brightness(sum as f32 / (c + 1) as f32))
-        })
-    });
-    TABLE[count as usize - 1][sum as usize]
 }
 
 /// Два канала света в одном байте: солнечный в младших 4 битах, свет блоков в старших.
@@ -1344,13 +1329,6 @@ mod tests {
         }
         assert!(brightness(MAX_LIGHT) > brightness(MAX_LIGHT - 1));
         assert!(brightness(2) > brightness(1));
-        for level in 0..=MAX_LIGHT {
-            assert_eq!(
-                average_brightness(u32::from(level) * 3, 3),
-                brightness(level)
-            );
-        }
-        assert!(average_brightness(29, 2) > brightness(14));
     }
 }
 
