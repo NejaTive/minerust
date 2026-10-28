@@ -1,7 +1,9 @@
 pub mod camera;
 pub mod daytime;
-pub mod double_tap;
+mod double_tap;
+mod game;
 pub mod loader;
 pub mod physics;
-pub mod raycast;
-pub mod repeat;
+mod raycast;
+mod repeat;
+pub use game::{BadCameraState, Edits, Game};

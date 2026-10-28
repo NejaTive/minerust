@@ -1,3 +1,4 @@
+use wgpu::util::DeviceExt;
 use world::tile::{LAYER_COUNT, TILE_SIZE, Tile, tile_pixels};
 
 /// Мип-уровней на слой: 16 → 8 → 4 → 2 → 1.
@@ -98,6 +99,36 @@ fn linear_to_srgb(c: f32) -> u8 {
         1.055 * c.powf(1.0 / 2.4) - 0.055
     };
     (c * 255.0).round() as u8
+}
+
+/// Массив текстур блоков: по слою на тайл, с готовыми мип-уровнями.
+pub(crate) fn create_block_textures(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> wgpu::TextureView {
+    let texture = device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("blocks"),
+            size: wgpu::Extent3d {
+                width: TILE_SIZE,
+                height: TILE_SIZE,
+                depth_or_array_layers: LAYER_COUNT,
+            },
+            mip_level_count: MIP_LEVELS,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        &generate(),
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]

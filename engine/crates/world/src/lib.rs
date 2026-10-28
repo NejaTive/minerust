@@ -1,8 +1,8 @@
 pub mod block;
-pub mod caves;
+mod caves;
 pub mod column;
 pub mod light;
-pub mod plants;
+mod plants;
 pub mod save;
 pub mod section;
 pub mod terrain;
