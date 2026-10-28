@@ -17,6 +17,7 @@ function geometry(s: WorldStats) {
     drawnSections: s.drawnSections,
     meshedSections: s.meshedSections,
     gpuMiB: round(s.gpuKib / 1024),
+    gpuUsedMiB: round(s.gpuUsedKib / 1024),
   }
 }
 
@@ -89,10 +90,13 @@ export async function runBench(
         loading: {
           frame: loading,
           cpuUs: { stream: loaded.streamUs, build: loaded.buildUs, submit: loaded.submitUs },
+          gpuFrameUs: loaded.gpuTimer ? loaded.gpuFrameUs : null,
         },
         steady: {
           frame: frameSummary(recorder),
           cpuUs: { stream: steady.streamUs, build: steady.buildUs, submit: steady.submitUs },
+          // null — адаптер без timestamp-query; 0 при gpuTimer — замеров ещё нет.
+          gpuFrameUs: steady.gpuTimer ? steady.gpuFrameUs : null,
           ...geometry(steady),
         },
         perColumnUs: { generate: loaded.generateUs, light: loaded.lightUs, mesh: loaded.meshUs },
