@@ -65,43 +65,11 @@ pub const LAYER_COUNT: u32 = {
     }
 };
 
-// Базовые цвета в sRGB: текстура `Rgba8UnormSrgb`, в линейный цвет переводит GPU.
-const GRASS: [f32; 3] = [108.0, 168.0, 52.0];
-const DIRT: [f32; 3] = [134.0, 94.0, 60.0];
-const STONE: [f32; 3] = [128.0, 128.0, 128.0];
-const SAND: [f32; 3] = [219.0, 205.0, 160.0];
-const BARK: [f32; 3] = [92.0, 68.0, 40.0];
-/// Годовые кольца на торце бревна: светлые и тёмные через одно.
-const RINGS_LIGHT: [f32; 3] = [182.0, 148.0, 94.0];
-const RINGS_DARK: [f32; 3] = [150.0, 118.0, 72.0];
-const LEAVES: [f32; 3] = [52.0, 100.0, 30.0];
-const WATER: [f32; 3] = [52.0, 98.0, 196.0];
-/// Светокамень: тёплый жёлтый фон, светлые прожилки и тёмные впадины крупными
-/// пятнами 2×2 — на мипах 4×4 и 2×2 рисунок ещё читается.
-const GLOW_BASE: [f32; 3] = [226.0, 170.0, 72.0];
-const GLOW_BRIGHT: [f32; 3] = [255.0, 236.0, 150.0];
-const GLOW_DARK: [f32; 3] = [170.0, 108.0, 40.0];
-/// Непрозрачность воды: дно на глубине пары блоков ещё видно, а поверхность читается.
-/// Высокая трава: тёмный зелёный у корня и светлый желтоватый на кончиках (как в
-/// Minecraft). Светлее земной травы вверху, чтобы пучок отличался от луга, и темнее
-/// внизу, чтобы стоял на земле, а не парил.
-const TALL_GRASS_ROOT: [f32; 3] = [84.0, 124.0, 44.0];
-const TALL_GRASS_TIP: [f32; 3] = [150.0, 196.0, 80.0];
-const STEM: [f32; 3] = [60.0, 130.0, 40.0];
-const POPPY_PETAL: [f32; 3] = [214.0, 40.0, 36.0];
-const POPPY_CORE: [f32; 3] = [40.0, 24.0, 24.0];
-const DANDELION_PETAL: [f32; 3] = [250.0, 214.0, 40.0];
-/// Древко факела и огонёк на его верхних двух пикселях.
-const TORCH_STICK: [f32; 3] = [120.0, 84.0, 48.0];
-const TORCH_FLAME: [f32; 3] = [255.0, 200.0, 70.0];
 /// Столбик факела в тайле: столбцы 7..9, строки 6..16 (10 из 16, как 2×10×2 в мешере).
+/// Договорённость с `torch.png`: мешер строит по ней коробку и верх, картинка обязана
+/// быть непрозрачной именно здесь (проверяет тест).
 pub const TORCH_PIXELS: (u32, u32) = (7, 9);
 pub const TORCH_TOP_ROW: u32 = 6;
-const WATER_ALPHA: u8 = 180;
-/// Доля дырок в листве: примерно как в Minecraft, крона ещё читается как масса.
-const LEAF_HOLES: f32 = 0.3;
-/// Глубина зелёной каймы на боку травы, пикселей сверху.
-const GRASS_FRINGE: u32 = 3;
 
 /// Мип-уровней на слой: 16 → 8 → 4 → 2 → 1.
 pub const MIP_LEVELS: u32 = TILE_SIZE.ilog2() + 1;
@@ -128,22 +96,72 @@ pub fn generate() -> Vec<u8> {
     data
 }
 
-/// Пиксели тайла 16×16 RGBA (sRGB, строки сверху вниз) — те же, что базовый уровень на GPU.
-pub fn tile_pixels(tile: Tile) -> Vec<u8> {
-    let mut pixels = Vec::with_capacity((TILE_SIZE * TILE_SIZE * 4) as usize);
-    for y in 0..TILE_SIZE {
-        for x in 0..TILE_SIZE {
-            pixels.extend(pixel(tile, x, y).map(|c| c.round() as u8));
-            // У дырок цвет тот же, что у листвы, а не чёрный: на смешении мип-уровней
-            // он попадает в результат, и чёрный дал бы тёмную кайму.
-            pixels.push(match tile {
-                Tile::Water => WATER_ALPHA,
-                _ if is_hole(tile, x, y) => 0,
-                _ => 255,
-            });
+impl Tile {
+    /// Имя файла в `engine/assets/textures/`.
+    fn file_name(self) -> String {
+        let name = format!("{self:?}");
+        let mut out = String::new();
+        for (i, c) in name.chars().enumerate() {
+            if c.is_uppercase() && i > 0 {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+        }
+        out
+    }
+
+    /// PNG тайла, вшитый в бинарник. Файлы лежат в `engine/assets/textures/<имя_в_snake_case>.png`;
+    /// новый тайл — это PNG 16×16 плюс вариант в `Tile` и в `ALL`.
+    pub fn png(self) -> &'static [u8] {
+        macro_rules! files {
+            ($($tile:ident => $file:literal),* $(,)?) => {
+                match self {
+                    $(Tile::$tile => include_bytes!(concat!(
+                        env!("CARGO_MANIFEST_DIR"), "/assets/textures/", $file, ".png"
+                    )),)*
+                }
+            };
+        }
+        files! {
+            GrassTop => "grass_top", GrassSide => "grass_side", Dirt => "dirt",
+            Stone => "stone", Sand => "sand", LogSide => "log_side", LogTop => "log_top",
+            Leaves => "leaves", Water => "water", Glowstone => "glowstone",
+            TallGrass => "tall_grass", Poppy => "poppy", Dandelion => "dandelion",
+            Torch => "torch",
         }
     }
-    pixels
+}
+
+/// Пиксели тайла 16×16 RGBA (sRGB, строки сверху вниз) — те же, что базовый уровень на GPU.
+/// Байты PNG берутся как есть, цветовые чанки (gAMA, sRGB, iCCP) игнорируются.
+pub fn tile_pixels(tile: Tile) -> Vec<u8> {
+    let name = tile.file_name();
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(tile.png()));
+    // Палитра, grayscale и 16 бит, которые сохраняют редакторы, приводятся к RGBA8.
+    decoder.set_transformations(
+        png::Transformations::ALPHA | png::Transformations::EXPAND | png::Transformations::STRIP_16,
+    );
+    let mut reader = decoder
+        .read_info()
+        .unwrap_or_else(|e| panic!("{name}.png: {e}"));
+    let mut buf = vec![0; reader.output_buffer_size().expect("png size overflow")];
+    let info = reader
+        .next_frame(&mut buf)
+        .unwrap_or_else(|e| panic!("{name}.png: {e}"));
+    assert!(
+        info.width == TILE_SIZE && info.height == TILE_SIZE,
+        "{name}.png: expected {TILE_SIZE}x{TILE_SIZE}, got {}x{}",
+        info.width,
+        info.height
+    );
+    assert!(
+        info.color_type == png::ColorType::Rgba && info.bit_depth == png::BitDepth::Eight,
+        "{name}.png: unexpected output format {:?}/{:?}",
+        info.color_type,
+        info.bit_depth
+    );
+    buf.truncate(info.buffer_size());
+    buf
 }
 
 /// Уровень вдвое меньше: каждый квадрат 2×2 → один пиксель. Цвет усредняется в
@@ -221,122 +239,12 @@ fn linear_to_srgb(c: f32) -> u8 {
     (c * 255.0).round() as u8
 }
 
-fn pixel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
-    let base = match tile {
-        Tile::GrassTop => GRASS,
-        Tile::Dirt => DIRT,
-        Tile::Stone => STONE,
-        Tile::Sand => SAND,
-        Tile::Leaves => LEAVES,
-        Tile::Water => WATER,
-        Tile::TallGrass | Tile::Poppy | Tile::Dandelion | Tile::Torch => {
-            plant_pixel(tile, x, y).unwrap_or(STEM)
-        }
-        Tile::Glowstone => match noise(tile, x / 2, y / 2) {
-            n if n > 0.7 => GLOW_BRIGHT,
-            n if n < 0.3 => GLOW_DARK,
-            _ => GLOW_BASE,
-        },
-        // Продольные полосы коры: яркость по столбцу пикселей, заметнее пиксельного шума,
-        // иначе вблизи кора неотличима от земли.
-        Tile::LogSide => BARK.map(|c| c * (0.65 + 0.55 * noise(tile, x, TILE_SIZE))),
-        Tile::LogTop => {
-            // Квадратные кольца от центра; крайний ряд — кора.
-            let ring = [x, y]
-                .map(|c| (c as f32 - (TILE_SIZE - 1) as f32 / 2.0).abs())
-                .into_iter()
-                .fold(0.0, f32::max) as u32;
-            if ring == TILE_SIZE / 2 - 1 {
-                BARK
-            } else if ring.is_multiple_of(2) {
-                RINGS_LIGHT
-            } else {
-                RINGS_DARK
-            }
-        }
-        Tile::GrassSide => {
-            // Неровный край: в каждом столбце кайма на пиксель длиннее с вероятностью 1/2.
-            let fringe = GRASS_FRINGE + u32::from(noise(tile, x, TILE_SIZE) > 0.5);
-            if y < fringe { GRASS } else { DIRT }
-        }
-    };
-    // ±18% яркости по пикселям — пока вместо нарисованной текстуры.
-    let brightness = 0.82 + 0.36 * noise(tile, x, y);
-    base.map(|c| (c * brightness).min(255.0))
-}
-
-/// Цвет пикселя растения или факела; `None` — дырка.
-fn plant_pixel(tile: Tile, x: u32, y: u32) -> Option<[f32; 3]> {
-    let in_rect =
-        |x0: u32, x1: u32, y0: u32, y1: u32| (x0..x1).contains(&x) && (y0..y1).contains(&y);
-    match tile {
-        Tile::TallGrass => {
-            // Пучок травинок: часть столбцов пуста, высота остальных разная.
-            let present = noise(tile, x, TILE_SIZE + 1) > 0.2;
-            let height = 6 + (10.0 * noise(tile, x, TILE_SIZE)) as u32;
-            let tip = y as f32 / (TILE_SIZE - 1) as f32;
-            // y растёт вниз: у корня (tip = 1) цвет тёмный.
-            let color = std::array::from_fn(|i| {
-                TALL_GRASS_TIP[i] + (TALL_GRASS_ROOT[i] - TALL_GRASS_TIP[i]) * tip
-            });
-            (present && y >= TILE_SIZE - height).then_some(color)
-        }
-        Tile::Poppy | Tile::Dandelion => {
-            let (petal, core, head) = if tile == Tile::Poppy {
-                (POPPY_PETAL, POPPY_CORE, (5, 11, 2, 7))
-            } else {
-                (DANDELION_PETAL, DANDELION_PETAL, (6, 10, 3, 7))
-            };
-            if in_rect(7, 9, 7, 16) || [(5, 11), (6, 10), (9, 10), (10, 11)].contains(&(x, y)) {
-                Some(STEM)
-            } else if in_rect(7, 9, 4, 6) && tile == Tile::Poppy {
-                Some(core)
-            } else if in_rect(head.0, head.1, head.2, head.3) {
-                Some(petal)
-            } else {
-                None
-            }
-        }
-        Tile::Torch => {
-            let (x0, x1) = TORCH_PIXELS;
-            if in_rect(x0, x1, TORCH_TOP_ROW, TORCH_TOP_ROW + 2) {
-                Some(TORCH_FLAME)
-            } else if in_rect(x0, x1, TORCH_TOP_ROW + 2, TILE_SIZE) {
-                Some(TORCH_STICK)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Прозрачный ли пиксель: дырки есть у листвы, растений и факела.
-fn is_hole(tile: Tile, x: u32, y: u32) -> bool {
-    match tile {
-        // Другой участок хеша, чем у яркости, чтобы дырки не совпадали с тёмными пикселями.
-        Tile::Leaves => noise(tile, x + TILE_SIZE, y) < LEAF_HOLES,
-        Tile::TallGrass | Tile::Poppy | Tile::Dandelion | Tile::Torch => {
-            plant_pixel(tile, x, y).is_none()
-        }
-        _ => false,
-    }
-}
-
-/// Детерминированный «шум» 0..=1 по пикселю: целочисленный хеш, без зависимостей.
-fn noise(tile: Tile, x: u32, y: u32) -> f32 {
-    let mut h = x.wrapping_mul(0x8da6_b343)
-        ^ y.wrapping_mul(0xd816_3841)
-        ^ tile.layer().wrapping_mul(0xcb1a_b31f);
-    h ^= h >> 13;
-    h = h.wrapping_mul(0x5bd1_e995);
-    h ^= h >> 15;
-    (h & 0xffff) as f32 / 65535.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Альфа во всех пикселях `water.png`: дно на глубине пары блоков ещё видно.
+    const WATER_ALPHA: u8 = 180;
 
     fn layer_bytes() -> usize {
         (0..MIP_LEVELS)
@@ -448,15 +356,21 @@ mod tests {
     }
 
     #[test]
-    fn leaves_mips_stay_leaf_colored() {
-        // Диапазон яркости базового уровня; среднее в линейном пространстве из него не выходит.
+    fn leaves_mips_stay_within_base_color_range() {
+        // Среднее в линейном пространстве по непрозрачным пикселям не выходит за диапазон
+        // непрозрачных пикселей базового уровня.
         let data = generate();
-        for level in 1..MIP_LEVELS {
-            for p in mip(&data, Tile::Leaves, level).chunks(4) {
-                for (c, base) in p[..3].iter().zip(LEAVES) {
-                    let c = f32::from(*c);
+        let base: Vec<&[u8]> = mip(&data, Tile::Leaves, 0)
+            .chunks(4)
+            .filter(|p| p[3] == 255)
+            .collect();
+        for channel in 0..3 {
+            let lo = base.iter().map(|p| p[channel]).min().unwrap();
+            let hi = base.iter().map(|p| p[channel]).max().unwrap();
+            for level in 1..MIP_LEVELS {
+                for p in mip(&data, Tile::Leaves, level).chunks(4) {
                     assert!(
-                        (base * 0.82 - 1.0..=base * 1.18 + 1.0).contains(&c),
+                        (lo.saturating_sub(1)..=hi.saturating_add(1)).contains(&p[channel]),
                         "level {level}: {p:?}"
                     );
                 }
@@ -517,13 +431,68 @@ mod tests {
     }
 
     #[test]
-    fn torch_flame_is_on_top_of_stick() {
+    fn torch_png_is_opaque_exactly_in_torch_geometry() {
         let px = tile_pixels(Tile::Torch);
-        let at = |x: u32, y: u32| &px[((y * TILE_SIZE + x) * 4) as usize..][..4];
-        assert_eq!(at(7, TORCH_TOP_ROW)[3], 255);
-        assert_eq!(at(8, 15)[3], 255);
-        assert_eq!(at(6, 10)[3], 0);
-        assert_eq!(at(7, TORCH_TOP_ROW - 1)[3], 0);
-        assert!(at(7, TORCH_TOP_ROW)[0] > at(7, 12)[0], "flame is brighter");
+        for y in 0..TILE_SIZE {
+            for x in 0..TILE_SIZE {
+                let alpha = px[((y * TILE_SIZE + x) * 4 + 3) as usize];
+                let inside = (TORCH_PIXELS.0..TORCH_PIXELS.1).contains(&x) && y >= TORCH_TOP_ROW;
+                assert_eq!(alpha == 255, inside, "({x}, {y}) alpha {alpha}");
+                assert!(alpha == 0 || alpha == 255);
+            }
+        }
+    }
+
+    #[test]
+    fn every_tile_has_a_16x16_png_and_no_extra_files() {
+        // tile_pixels паникует с именем файла, если размер или формат не подходят.
+        for tile in Tile::ALL {
+            assert_eq!(
+                tile_pixels(tile).len(),
+                (TILE_SIZE * TILE_SIZE * 4) as usize
+            );
+        }
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/textures");
+        let mut files: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        files.sort();
+        let mut expected: Vec<String> = Tile::ALL
+            .iter()
+            .map(|t| format!("{}.png", t.file_name()))
+            .collect();
+        expected.sort();
+        assert_eq!(files, expected);
+        assert_eq!(files.len(), Tile::ALL.len());
+    }
+
+    #[test]
+    fn cutout_tiles_have_holes_and_opaque_pixels() {
+        for tile in Tile::ALL {
+            let px = tile_pixels(tile);
+            let opaque = px.chunks(4).filter(|p| p[3] == 255).count();
+            let clear = px.chunks(4).filter(|p| p[3] == 0).count();
+            if tile.is_cutout() {
+                assert!(
+                    opaque > 0 && clear > 0,
+                    "{tile:?}: opaque {opaque}, clear {clear}"
+                );
+            } else if tile == Tile::Water {
+                assert!(px.chunks(4).all(|p| p[3] == WATER_ALPHA), "{tile:?}");
+            } else {
+                assert!(px.chunks(4).all(|p| p[3] == 255), "{tile:?}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn generate_timing() {
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            std::hint::black_box(generate());
+        }
+        println!("generate: {:?} per call", start.elapsed() / 100);
     }
 }
