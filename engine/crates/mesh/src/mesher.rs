@@ -1,12 +1,12 @@
 use glam::{IVec2, IVec3};
 
-use crate::block::{Block, Facing, Shape, WATER_SURFACE};
-use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
-use crate::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
 use crate::mesh::{POSITION_UNITS, Vertex, day_shade, quantize_shade};
-use crate::section::{SECTION_SIZE, Section};
-use crate::texture::{LAYER_COUNT, TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile};
-use crate::world::World;
+use world::block::{Block, Facing, Shape, WATER_SURFACE};
+use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
+use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
+use world::section::{SECTION_SIZE, Section};
+use world::tile::{LAYER_COUNT, TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile};
+use world::world::World;
 
 // Слой хранится в вершине одним байтом.
 const _: () = assert!(LAYER_COUNT <= 256);
@@ -138,7 +138,7 @@ impl Neighborhood {
     }
 }
 
-/// Байты света секции и соседей ([`crate::light::pack_light`]), как [`Neighborhood`]
+/// Байты света секции и соседей ([`world::light::pack_light`]), как [`Neighborhood`]
 /// для блоков.
 struct Lights([u8; (PADDED * PADDED * PADDED) as usize]);
 
@@ -693,7 +693,7 @@ pub fn mesh_world_section(
 mod tests {
     use glam::Vec3;
 
-    use crate::light::MAX_LIGHT;
+    use world::light::MAX_LIGHT;
 
     use super::*;
 
@@ -1195,7 +1195,7 @@ mod tests {
 
     #[test]
     fn no_ao_keeps_plain_side_shading() {
-        use crate::terrain::Terrain;
+        use world::terrain::Terrain;
 
         let column = Terrain::new(7).generate_trees(IVec2::new(3, -2));
         let with = mesh_column(&column, air, full, AO);
@@ -1230,7 +1230,7 @@ mod tests {
     /// деления на колонки и секции: у воды — к воздуху, у остальных блоков — к не
     /// непрозрачному соседу.
     fn world_face_count(world: &World, key: IVec2) -> (usize, usize) {
-        use crate::column::WORLD_HEIGHT;
+        use world::column::WORLD_HEIGHT;
 
         let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
         let (mut solid, mut water) = (0, 0);
@@ -1265,7 +1265,7 @@ mod tests {
 
     #[test]
     fn no_seams_between_columns() {
-        use crate::terrain::Terrain;
+        use world::terrain::Terrain;
 
         // Центр с отрицательными координатами, чтобы задеть и div_euclid на стыках.
         let center = IVec2::new(-1, 2);
@@ -1327,8 +1327,8 @@ mod tests {
 
     #[test]
     fn tree_on_column_border_matches_whole_world() {
-        use crate::terrain::Terrain;
-        use crate::trees::border_tree;
+        use world::terrain::Terrain;
+        use world::trees::border_tree;
 
         let terrain = Terrain::new(1337);
         let tree = border_tree(&terrain);
@@ -1393,8 +1393,8 @@ mod tests {
 
     #[test]
     fn edits_on_seams_remesh_exactly_affected_sections() {
-        use crate::terrain::Terrain;
-        use crate::world::affected_sections;
+        use world::terrain::Terrain;
+        use world::world::affected_sections;
 
         let terrain = Terrain::new(1337);
         let mut world = World::new();
@@ -1664,7 +1664,7 @@ mod tests {
 
     #[test]
     fn lake_on_column_seams_matches_whole_world() {
-        use crate::terrain::{Terrain, lake_key};
+        use world::terrain::{Terrain, lake_key};
 
         let terrain = Terrain::new(1337);
         let center = lake_key(&terrain);
@@ -1693,7 +1693,7 @@ mod tests {
         // Вода на западном краю колонки, и сосед за краем — тоже вода: грани между
         // ними нет ни в одной из двух колонок.
         let seam_water = (0..SECTION_SIZE).any(|z| {
-            let p = origin + IVec3::new(0, crate::terrain::WATER_LEVEL, z);
+            let p = origin + IVec3::new(0, world::terrain::WATER_LEVEL, z);
             world.block(p).is_water() && world.block(p - IVec3::X).is_water()
         });
         assert!(seam_water, "lake does not cross the seam");
@@ -1703,7 +1703,7 @@ mod tests {
     /// у границ мира сверху и снизу и рядом с незагруженными колонками.
     #[test]
     fn world_cache_matches_closure_cache() {
-        use crate::terrain::Terrain;
+        use world::terrain::Terrain;
 
         let terrain = Terrain::new(1337);
         let mut world = World::new();
@@ -1761,7 +1761,7 @@ mod tests {
     /// (в том же порядке обхода), в том числе у квадов с перевёрнутой диагональю.
     #[test]
     fn gpu_vertex_order_reproduces_mesher_triangles() {
-        use crate::terrain::Terrain;
+        use world::terrain::Terrain;
 
         let column = Terrain::new(7).generate(IVec2::new(3, -2));
         let mut flipped = 0;
@@ -1783,7 +1783,7 @@ mod tests {
 
     /// Мир 3×3 колонок вокруг (0, 0) из `block_at` и его свет.
     fn small_world(block_at: impl Fn(IVec3) -> Block) -> (World, LightMap) {
-        use crate::column::WORLD_HEIGHT;
+        use world::column::WORLD_HEIGHT;
 
         let mut world = World::new();
         for z in -1..=1 {
@@ -1917,7 +1917,7 @@ mod tests {
             quad[0].brightness(0.0)
         };
         assert_eq!(top_shade(2), 1.0);
-        let covered = crate::light::brightness(light.sky(IVec3::new(12, 2, 8)));
+        let covered = world::light::brightness(light.sky(IVec3::new(12, 2, 8)));
         assert!((top_shade(12) - covered).abs() <= QUANT, "{covered}");
         assert!(top_shade(12) < 0.5);
     }
@@ -1948,7 +1948,7 @@ mod bench {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::terrain::Terrain;
+    use world::terrain::Terrain;
 
     /// Мир 14×14 колонок с светом и ключи внутренних 12×12 (у них все соседи загружены).
     fn setup() -> (World, LightMap, Vec<IVec2>) {

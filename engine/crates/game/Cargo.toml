@@ -1,0 +1,9 @@
+[package]
+name = "game"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+glam.workspace = true
+world.workspace = true

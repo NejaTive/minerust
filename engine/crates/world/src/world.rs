@@ -447,35 +447,6 @@ mod tests {
         assert!(world.edited_column(key).is_some());
     }
 
-    #[test]
-    fn import_into_unloaded_goes_to_loader() {
-        use crate::loader::{Loader, Progress};
-
-        let key = IVec2::new(0, 1);
-        let pos = IVec3::new(5, 60, 20);
-        let mut world = World::new();
-        // Правка до импорта: импорт перекрывает и её признак «не сохранено».
-        world.insert(key, Column::new());
-        world.set_block(pos, Block::Dirt);
-        world.remove(key);
-        let mut saved = Column::new();
-        saved.set(IVec3::new(5, 60, 4), Block::Stone);
-        world.import(key, saved);
-        assert!(world.drain_dirty().is_empty());
-        assert!(world.column(key).is_none());
-        assert!(world.is_edited(key));
-
-        let mut loader = Loader::new(IVec2::ZERO);
-        loader.update(IVec2::ZERO, &mut world);
-        while loader.advance(&mut world, |k| {
-            assert_ne!(k, key, "imported column regenerated");
-            Column::new()
-        }) != Progress::Done
-        {}
-        assert_eq!(world.block(pos), Block::Stone);
-        assert!(world.drain_dirty().is_empty());
-    }
-
     fn sorted(mut keys: Vec<IVec3>) -> Vec<IVec3> {
         keys.sort_by_key(|k| k.to_array());
         keys

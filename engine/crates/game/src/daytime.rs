@@ -29,7 +29,7 @@ const NIGHT_UNDERWATER: f32 = 0.12;
 
 /// Линейные цвета неба и тумана. День — насыщенный синий (sRGB ≈ 107, 190, 252) по образцу, а не бледный прежний `SKY` (0.53, 0.81, 0.92).
 const DAY_SKY: [f32; 3] = [0.15, 0.52, 0.97];
-const DUSK_SKY: [f32; 3] = [0.78, 0.32, 0.14];
+pub const DUSK_SKY: [f32; 3] = [0.78, 0.32, 0.14];
 const NIGHT_SKY: [f32; 3] = [0.012, 0.02, 0.07];
 
 /// Линейный цвет неба в зените: темнее и насыщеннее, чем у горизонта (он равен цвету
@@ -344,17 +344,6 @@ mod tests {
         assert!(sky_state((DAY_END + DUSK_END) / 2.0).warm > 0.9);
         assert_eq!(sky_state(NOON).night, 0.0);
         assert_eq!(sky_state(0.75).night, 1.0);
-    }
-
-    #[test]
-    fn sky_shader_constants_match_cpu() {
-        // Закатный цвет в шейдере неба дублирует `DUSK_SKY`: тёплое пятно должно быть
-        // того же оттенка, что и тонировка неба.
-        let source = include_str!("sky.wgsl");
-        let [r, g, b] = DUSK_SKY;
-        assert!(source.contains(&format!(
-            "const DUSK_COLOR: vec3<f32> = vec3<f32>({r}, {g}, {b});"
-        )));
     }
 
     #[test]

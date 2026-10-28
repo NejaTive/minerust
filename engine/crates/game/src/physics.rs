@@ -1,6 +1,6 @@
 use glam::{IVec3, Vec2, Vec3};
 
-use crate::block::WATER_SURFACE;
+use world::block::WATER_SURFACE;
 
 pub const PLAYER_WIDTH: f32 = 0.6;
 pub const PLAYER_HEIGHT: f32 = 1.8;

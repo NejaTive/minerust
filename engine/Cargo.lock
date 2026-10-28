@@ -129,13 +129,15 @@ name = "engine"
 version = "0.20.0"
 dependencies = [
  "console_error_panic_hook",
- "fastnoise-lite",
+ "game",
  "glam",
- "png",
+ "mesh",
+ "render",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
+ "world",
 ]
 
 [[package]]
@@ -201,6 +203,14 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "game"
+version = "0.20.0"
+dependencies = [
+ "glam",
+ "world",
 ]
 
 [[package]]
@@ -293,6 +303,14 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "mesh"
+version = "0.20.0"
+dependencies = [
+ "glam",
+ "world",
+]
 
 [[package]]
 name = "miniz_oxide"
@@ -461,6 +479,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "render"
+version = "0.20.0"
+dependencies = [
+ "glam",
+ "mesh",
+ "wgpu",
+ "world",
 ]
 
 [[package]]
@@ -821,6 +849,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "world"
+version = "0.20.0"
+dependencies = [
+ "fastnoise-lite",
+ "glam",
+ "png",
 ]
 
 [[package]]

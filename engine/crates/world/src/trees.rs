@@ -150,8 +150,9 @@ fn splitmix64(mut v: u64) -> u64 {
 }
 
 /// Дерево в лесу, крона которого заходит в соседнюю колонку по x: для тестов стыков.
-#[cfg(test)]
-pub(crate) fn border_tree(terrain: &Terrain) -> Tree {
+/// Помощник тестов других крейтов (мешер), см. `terrain::lake_key`.
+#[doc(hidden)]
+pub fn border_tree(terrain: &Terrain) -> Tree {
     (0..4096)
         .flat_map(|z| (0..64).map(move |i| (i * SECTION_SIZE + i % 2 * 15, z)))
         .find_map(|(x, z)| tree_at(terrain, x, z))

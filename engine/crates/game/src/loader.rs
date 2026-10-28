@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use glam::IVec2;
 
-use crate::column::Column;
-use crate::world::World;
+use world::column::Column;
+use world::world::World;
 
 /// Пределы дальности прорисовки, колонок. Фронт (`src/settings.ts`) держит те же числа.
 pub const MIN_RADIUS: i32 = 4;
@@ -526,7 +526,7 @@ mod tests {
     fn edited_column_comes_back_without_generator() {
         use glam::IVec3;
 
-        use crate::block::Block;
+        use world::block::Block;
 
         let mut loader = Loader::new(IVec2::ZERO);
         let mut world = World::new();
@@ -562,5 +562,32 @@ mod tests {
         assert!(world.is_edited(key));
         settle(&mut loader, &mut world, IVec2::ZERO, &mut meshed);
         assert_eq!(world.block(pos), Block::Stone);
+    }
+
+    #[test]
+    fn import_into_unloaded_goes_to_loader() {
+        let key = IVec2::new(0, 1);
+        let pos = glam::IVec3::new(5, 60, 20);
+        let mut world = World::new();
+        // Правка до импорта: импорт перекрывает и её признак «не сохранено».
+        world.insert(key, Column::new());
+        world.set_block(pos, world::block::Block::Dirt);
+        world.remove(key);
+        let mut saved = Column::new();
+        saved.set(glam::IVec3::new(5, 60, 4), world::block::Block::Stone);
+        world.import(key, saved);
+        assert!(world.drain_dirty().is_empty());
+        assert!(world.column(key).is_none());
+        assert!(world.is_edited(key));
+
+        let mut loader = Loader::new(IVec2::ZERO);
+        loader.update(IVec2::ZERO, &mut world);
+        while loader.advance(&mut world, |k| {
+            assert_ne!(k, key, "imported column regenerated");
+            Column::new()
+        }) != Progress::Done
+        {}
+        assert_eq!(world.block(pos), world::block::Block::Stone);
+        assert!(world.drain_dirty().is_empty());
     }
 }

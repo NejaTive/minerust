@@ -23,7 +23,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // Результат `wasm-pack build engine --target web`
+      // Результат `wasm-pack build engine/crates/web --target web --out-dir ../../pkg`
       '@engine': fileURLToPath(new URL('./engine/pkg', import.meta.url)),
     },
   },

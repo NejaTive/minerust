@@ -149,14 +149,16 @@ impl Terrain {
     }
 
     /// Колонка с пещерами и деревьями, без растений: тесты мешера и деревьев сверяют кубы.
-    pub(crate) fn generate_trees(&self, key: IVec2) -> Column {
+    #[doc(hidden)]
+    pub fn generate_trees(&self, key: IVec2) -> Column {
         let mut column = self.generate_carved(key);
         trees::plant(self, key, &mut column);
         column
     }
 
     /// Колонка без деревьев, но с пещерами.
-    pub(crate) fn generate_carved(&self, key: IVec2) -> Column {
+    #[doc(hidden)]
+    pub fn generate_carved(&self, key: IVec2) -> Column {
         let mut column = self.generate_ground(key);
         self.caves.carve(
             key,
@@ -171,7 +173,8 @@ impl Terrain {
     /// пустыни), в остальных биомах трава и 3 слоя земли; ниже камень. У кромки воды
     /// ([`BEACH`]) вместо травы песок, глубже под водой — земля. Над поверхностью ниже
     /// [`WATER_LEVEL`] — вода до него включительно.
-    pub(crate) fn generate_ground(&self, key: IVec2) -> Column {
+    #[doc(hidden)]
+    pub fn generate_ground(&self, key: IVec2) -> Column {
         let mut column = Column::new();
         let origin = key * SECTION_SIZE;
         for z in 0..SECTION_SIZE {
@@ -218,8 +221,9 @@ pub(crate) fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
 }
 
 /// Колонка, у которой вода стоит и на западном краю, и за ним: для тестов стыков.
-#[cfg(test)]
-pub(crate) fn lake_key(terrain: &Terrain) -> IVec2 {
+/// Помощник тестов других крейтов (мешер): под `cfg(test)` он был бы им не виден.
+#[doc(hidden)]
+pub fn lake_key(terrain: &Terrain) -> IVec2 {
     let deep = |x, z| terrain.surface_height(x, z) < WATER_LEVEL - 2;
     (0..4096)
         .flat_map(|z| (-64..64).map(move |i| (i * SECTION_SIZE, z * 3)))

@@ -24,7 +24,7 @@ function setVersion(version) {
   lock.packages[''].version = version
   writeJson('package-lock.json', lock)
 
-  // Первая `version =` в файле — пакет движка, зависимости идут ниже.
+  // Версия всех крейтов — `[workspace.package] version`, первая `version =` в корневом файле.
   const cargo = readFileSync('engine/Cargo.toml', 'utf8').replace(/^version = ".*"$/m, `version = "${version}"`)
   writeFileSync('engine/Cargo.toml', cargo)
   execFileSync('cargo', ['update', '-p', 'engine', '--offline'], { cwd: 'engine', stdio: 'ignore' })
