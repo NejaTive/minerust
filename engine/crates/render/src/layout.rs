@@ -9,9 +9,9 @@ pub fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
     }
 }
 
-/// Буфер с мировым углом секции (3 × f32, 16 байт с выравниванием) на один экземпляр:
-/// шаг `Instance` и `draw_indexed(.., 0..1)` не требуют ни `base_vertex`, ни
-/// push-констант; динамический uniform-сдвиг потребовал бы bind group на каждую секцию.
+/// Мировой угол секции (3 × f32, 16 байт с выравниванием) на один экземпляр: слот секции
+/// в общем буфере — `first_instance` отрисовки. Так буфер ставится раз на проход, без
+/// push-констант и bind group на секцию.
 pub fn origin_layout() -> wgpu::VertexBufferLayout<'static> {
     wgpu::VertexBufferLayout {
         array_stride: ORIGIN_BYTES as wgpu::BufferAddress,

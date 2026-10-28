@@ -20,6 +20,7 @@ world ← game ← render ← web
 | `web`    | пакет `engine` (cdylib → `engine/pkg`): фасад `Engine`, `Streamer`, `Profiler`, `api.rs` | wasm-bindgen  |
 
 - **`Game`** — вся симуляция, без графики; тестируется на хосте.
+- **Меши на GPU:** вершины всех секций лежат в одном буфере-арене (`render/arena.rs`, аллокатор диапазонов с best fit и слиянием соседей, рост на 25% с копией), углы секций — в одном буфере экземпляров (`slots.rs`, слот секции = `first_instance`). Буферы ставятся раз на проход, `base_vertex` сдвигает общие u16-индексы. Время GPU кадра — `timestamp-query` на единственном проходе (`gpu_timer.rs`, чтение через кольцо буферов без ожидания), только при включённом профилировании.
 - **`Renderer`** не знает про `game`: получает всё через `FrameParams`, которые собирает `web/frame.rs`.
 - **`Streamer`** (`web`) связывает их: подгрузка и меширование колонок в бюджете времени, свет, очереди перестройки.
 - Единственная граница с JS — `web/src/engine.rs` (методы `Engine`) и `web/src/api.rs` (типы без GPU: `WorldStats`, `blocks()`, `EngineSettings`, `settings_limits()`, `default_settings()`). Типы TypeScript генерирует wasm-bindgen в `engine/pkg/engine.d.ts`.

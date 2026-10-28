@@ -10,7 +10,8 @@ use world::section::SECTION_SIZE;
 
 use crate::frustum::Frustum;
 use crate::globals::{Globals, view_dir_matrix};
-use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SectionMesh, upload_section};
+use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_section};
+use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::pipelines::{
     BlockPass, create_block_pipeline, create_depth_view, create_outline_pipeline,
@@ -61,6 +62,8 @@ pub struct FrameCounts {
 pub struct PendingFrame {
     frame: wgpu::SurfaceTexture,
     encoder: wgpu::CommandEncoder,
+    /// Буфер чтения GPU-таймера, если кадр с замером.
+    timer_slot: Option<usize>,
 }
 
 /// Устройство, surface, пайплайны и GPU-меши колонок; рисует кадры.
@@ -87,6 +90,14 @@ pub struct Renderer {
     globals_bind_group: wgpu::BindGroup,
     /// Меши колонок по ключу колонки, по секции снизу вверх; `None` — пустая секция.
     column_meshes: HashMap<ColumnPos, ColumnMeshes>,
+    /// Арена вершин и буфер углов всех секций.
+    buffers: SceneBuffers,
+    /// Меши, которые не поместились в буферы (предел `max_buffer_size`): их нет на экране.
+    failed_uploads: u32,
+    /// `None`, если адаптер не даёт `TIMESTAMP_QUERY`.
+    gpu_timer: Option<GpuTimer>,
+    /// Метки времени ставятся только при включённом профилировании.
+    gpu_timing: bool,
     depth_view: wgpu::TextureView,
     /// Сколько секций прошло отсечение по пирамиде видимости в последнем кадре.
     drawn_sections: u32,
@@ -107,6 +118,7 @@ impl Renderer {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("device"),
+                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
                 required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
                 ..Default::default()
             })
@@ -249,6 +261,12 @@ impl Renderer {
             BlockPass::Water,
         );
 
+        let gpu_timer = device
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY)
+            .then(|| GpuTimer::new(&device, &queue));
+        let buffers = SceneBuffers::new(&device);
+
         Ok(Renderer {
             surface,
             device,
@@ -265,6 +283,10 @@ impl Renderer {
             globals_buffer,
             globals_bind_group,
             column_meshes: HashMap::new(),
+            buffers,
+            failed_uploads: 0,
+            gpu_timer,
+            gpu_timing: false,
             depth_view,
             drawn_sections: 0,
             frame_counts: FrameCounts::default(),
@@ -287,12 +309,14 @@ impl Renderer {
     }
 
     /// Загружает меши колонки на GPU (секции снизу вверх), заменяя прежние. Пустые
-    /// секции буферов не занимают.
+    /// секции места не занимают. Секция, не поместившаяся в буферы, не рисуется и
+    /// считается в [`Renderer::failed_uploads`].
     pub fn upload_column(&mut self, key: ColumnPos, data: &[SectionMeshes]) {
+        self.remove_column(key);
         let origin = key.origin();
         let meshes = std::array::from_fn(|sy| {
             let min = (origin + IVec3::Y * sy as i32 * SECTION_SIZE).as_vec3();
-            upload_section(&self.device, &data[sy], min)
+            self.upload(&data[sy], min)
         });
         self.column_meshes.insert(key, meshes);
     }
@@ -300,16 +324,45 @@ impl Renderer {
     /// Заменяет меш одной секции. Колонку без
     /// меша пропускает: её загрузят целиком позже.
     pub fn upload_section(&mut self, key: SectionPos, data: &SectionMeshes) {
-        let Some(meshes) = self.column_meshes.get_mut(&key.column()) else {
+        let column = key.column();
+        if !self.column_meshes.contains_key(&column) {
             return;
-        };
+        }
         let min = key.origin().as_vec3();
-        meshes[key.y() as usize] = upload_section(&self.device, data, min);
+        // Новый меш пишется до освобождения старого: короткая двойная занятость
+        // дешевле, чем окно, в котором секция не нарисована.
+        let new = self.upload(data, min);
+        let old = self
+            .column_meshes
+            .get_mut(&column)
+            .map(|meshes| std::mem::replace(&mut meshes[key.y() as usize], new));
+        if let Some(old) = old.flatten() {
+            old.release(&mut self.buffers);
+        }
     }
 
-    /// Освобождает буферы колонки.
+    fn upload(&mut self, data: &SectionMeshes, min: Vec3) -> Option<SectionMesh> {
+        match upload_section(&self.device, &self.queue, &mut self.buffers, data, min) {
+            Ok(mesh) => mesh,
+            Err(_) => {
+                self.failed_uploads += 1;
+                None
+            }
+        }
+    }
+
+    /// Освобождает диапазоны и слоты колонки.
     pub fn remove_column(&mut self, key: ColumnPos) {
-        self.column_meshes.remove(&key);
+        if let Some(meshes) = self.column_meshes.remove(&key) {
+            for mesh in meshes.into_iter().flatten() {
+                mesh.release(&mut self.buffers);
+            }
+        }
+    }
+
+    /// Секций, которые не удалось загрузить из-за предела размера буфера; 0 в норме.
+    pub fn failed_uploads(&self) -> u32 {
+        self.failed_uploads
     }
 
     pub fn has_column(&self, key: ColumnPos) -> bool {
@@ -329,15 +382,29 @@ impl Renderer {
         self.column_meshes.values().flatten().flatten().count()
     }
 
-    /// Память мешей и общих индексов на GPU, байт.
+    /// Память мешей на GPU, байт: арена вершин и буфер углов целиком (с запасом) и общие индексы.
     pub fn gpu_bytes(&self) -> u64 {
-        self.column_meshes
-            .values()
-            .flatten()
-            .flatten()
-            .map(SectionMesh::bytes)
-            .sum::<u64>()
-            + self.quad_index_buffer.size()
+        self.buffers.bytes() + self.quad_index_buffer.size()
+    }
+
+    /// Из [`Renderer::gpu_bytes`] занято мешами и углами, байт.
+    pub fn gpu_used_bytes(&self) -> u64 {
+        self.buffers.used_bytes() + self.quad_index_buffer.size()
+    }
+
+    /// GPU-таймер доступен (адаптер дал `timestamp-query`).
+    pub fn has_gpu_timer(&self) -> bool {
+        self.gpu_timer.is_some()
+    }
+
+    /// Включает метки времени render pass; без таймера ничего не делает.
+    pub fn set_gpu_timing(&mut self, enabled: bool) {
+        self.gpu_timing = enabled;
+    }
+
+    /// Сумма времени GPU проходов (мс) и их число с прошлого вызова.
+    pub fn take_gpu_samples(&self) -> Option<(f64, u32)> {
+        self.gpu_timer.as_ref()?.take_samples()
     }
 
     /// Секций, прошедших отсечение в последнем кадре.
@@ -415,6 +482,10 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        let timer_slot = match &mut self.gpu_timer {
+            Some(timer) if self.gpu_timing => timer.acquire(),
+            _ => None,
+        };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
@@ -435,11 +506,16 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
+                timestamp_writes: timer_slot
+                    .and(self.gpu_timer.as_ref())
+                    .map(GpuTimer::pass_writes),
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.buffers.arena.buffer().slice(..));
+            pass.set_vertex_buffer(1, self.buffers.origins.buffer().slice(..));
             let visible: Vec<&SectionMesh> = self
                 .column_meshes
                 .values()
@@ -452,7 +528,7 @@ impl Renderer {
                 .iter()
                 .filter_map(|section| Some((*section, section.solid.as_ref()?)))
             {
-                mesh.draw(&mut pass, &section.origin);
+                mesh.draw(&mut pass, section.slot);
                 counts.solid_vertices += mesh.vertex_count;
                 counts.solid_indices += mesh.index_count;
                 counts.draw_calls += 1;
@@ -491,8 +567,11 @@ impl Renderer {
             if !water.is_empty() {
                 water.sort_by(|a, b| b.0.total_cmp(&a.0));
                 pass.set_pipeline(&self.water_pipeline);
+                // Рамка заняла слот 0: арену ставим обратно.
+                pass.set_vertex_buffer(0, self.buffers.arena.buffer().slice(..));
+                pass.set_vertex_buffer(1, self.buffers.origins.buffer().slice(..));
                 for (_, section, mesh) in water {
-                    mesh.draw(&mut pass, &section.origin);
+                    mesh.draw(&mut pass, section.slot);
                     counts.water_vertices += mesh.vertex_count;
                     counts.water_indices += mesh.index_count;
                     counts.draw_calls += 1;
@@ -500,12 +579,22 @@ impl Renderer {
             }
             self.frame_counts = counts;
         }
-        Ok(Some(PendingFrame { frame, encoder }))
+        if let (Some(timer), Some(slot)) = (&self.gpu_timer, timer_slot) {
+            timer.resolve(&mut encoder, slot);
+        }
+        Ok(Some(PendingFrame {
+            frame,
+            encoder,
+            timer_slot,
+        }))
     }
 
     /// Отправляет записанный кадр и показывает его.
     pub fn submit(&mut self, pending: PendingFrame) {
         self.queue.submit([pending.encoder.finish()]);
+        if let (Some(timer), Some(slot)) = (&self.gpu_timer, pending.timer_slot) {
+            timer.read_back(slot);
+        }
         self.queue.present(pending.frame);
     }
 }
