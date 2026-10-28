@@ -82,7 +82,7 @@ pub struct Engine {
     /// диагональ выбирается порядком вершин, так что своих индексов у секции нет.
     quad_index_buffer: wgpu::Buffer,
     /// Блок, чья рамка сейчас лежит в `outline_buffer`.
-    outline_block: Option<IVec3>,
+    outline_block: Option<(IVec3, Block)>,
     /// Блок под прицелом в последнем кадре; рамка рисуется вокруг него.
     target: Option<IVec3>,
     breaking: Repeat,
@@ -843,12 +843,17 @@ impl Engine {
         if !self.paused {
             self.interact(time);
         }
-        if self.target != self.outline_block {
-            if let Some(block) = self.target {
-                self.queue
-                    .write_buffer(&self.outline_buffer, 0, &outline_bytes(block));
+        // Блок в ключе: на месте цветка мог появиться камень, и рамка стала бы другой.
+        let outline = self.target.map(|pos| (pos, self.world.block(pos)));
+        if outline != self.outline_block {
+            if let Some((pos, block)) = outline {
+                self.queue.write_buffer(
+                    &self.outline_buffer,
+                    0,
+                    &outline_bytes(pos, block.bounds()),
+                );
             }
-            self.outline_block = self.target;
+            self.outline_block = outline;
         }
 
         self.fov_scale = next_fov_scale(self.fov_scale, self.player.sprinting, dt);
@@ -1186,7 +1191,7 @@ impl Engine {
     /// Блок под прицелом: луч из камеры вдоль взгляда не дальше [`REACH`].
     fn pick(&self) -> Option<Hit> {
         raycast(self.camera.position, self.camera.forward(), REACH, |pos| {
-            self.world.block(pos).is_solid()
+            self.world.block(pos).is_targetable()
         })
     }
 
@@ -1205,10 +1210,10 @@ impl Engine {
             // Ниже y = 0 — дно мира: `World::block` считает его камнем, и луч в него
             // попадает, но ломать его нельзя.
             && hit.block.y >= 0
-            && self.world.set_block(hit.block, Block::Air)
+            && let changed = self.world.set_block_supported(hit.block, Block::Air)
+            && !changed.is_empty()
         {
-            dirty.extend(affected_sections(hit.block));
-            lit.extend(self.light.block_changed(&self.world, hit.block));
+            self.apply_edit(&changed, &mut dirty, &mut lit);
             target = self.pick();
         }
         if self.placing.fire(time)
@@ -1217,13 +1222,12 @@ impl Engine {
         {
             let pos = hit.block + hit.normal;
             // `set_block` сам отказывает вне высоты мира и в незагруженной колонке.
-            if !self.world.block(pos).is_solid()
-                && !self.player.overlaps_block(pos)
-                && self.world.set_block(pos, block)
-            {
-                dirty.extend(affected_sections(pos));
-                lit.extend(self.light.block_changed(&self.world, pos));
-                target = self.pick();
+            if self.world.can_place(pos, block) && !self.player.overlaps_block(pos) {
+                let changed = self.world.set_block_supported(pos, block);
+                if !changed.is_empty() {
+                    self.apply_edit(&changed, &mut dirty, &mut lit);
+                    target = self.pick();
+                }
             }
         }
         if dirty.is_empty() {
@@ -1240,6 +1244,14 @@ impl Engine {
             self.edit_time.record(p.now() - start);
         }
         self.target = target.map(|hit| hit.block);
+    }
+
+    /// Собирает секции и свет по клеткам правки (`World::set_block_supported`).
+    fn apply_edit(&mut self, changed: &[IVec3], dirty: &mut HashSet<IVec3>, lit: &mut Vec<IVec3>) {
+        for &pos in changed {
+            dirty.extend(affected_sections(pos));
+            lit.extend(self.light.block_changed(&self.world, pos));
+        }
     }
 
     /// Перестраивает меш секции `(x колонки, номер секции, z колонки)` по текущему миру.

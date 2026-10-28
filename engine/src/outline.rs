@@ -9,16 +9,17 @@ pub const OUTLINE_VERTICES: usize = 24;
 /// Вершина рамки — только позиция, `Float32x3`.
 pub const OUTLINE_VERTEX_SIZE: usize = 12;
 
-/// Рёбра рамки вокруг блока в мировых координатах, парами концов.
-pub fn outline_vertices(block: IVec3) -> [Vec3; OUTLINE_VERTICES] {
-    let min = block.as_vec3() - INFLATE;
-    let size = 1.0 + 2.0 * INFLATE;
+/// Рёбра рамки вокруг бокса `bounds` (min, max в долях клетки) блока `block`, в
+/// мировых координатах, парами концов.
+pub fn outline_vertices(block: IVec3, bounds: (Vec3, Vec3)) -> [Vec3; OUTLINE_VERTICES] {
+    let min = block.as_vec3() + bounds.0 - INFLATE;
+    let size = bounds.1 - bounds.0 + 2.0 * INFLATE;
     // Угол куба по номеру 0..8: бит 0 — x, бит 1 — y, бит 2 — z.
     let corner = |i: usize| {
         min + Vec3::new(
-            (i & 1) as f32 * size,
-            (i >> 1 & 1) as f32 * size,
-            (i >> 2 & 1) as f32 * size,
+            (i & 1) as f32 * size.x,
+            (i >> 1 & 1) as f32 * size.y,
+            (i >> 2 & 1) as f32 * size.z,
         )
     };
     let mut vertices = [Vec3::ZERO; OUTLINE_VERTICES];
@@ -34,8 +35,8 @@ pub fn outline_vertices(block: IVec3) -> [Vec3; OUTLINE_VERTICES] {
     vertices
 }
 
-pub fn outline_bytes(block: IVec3) -> Vec<u8> {
-    outline_vertices(block)
+pub fn outline_bytes(block: IVec3, bounds: (Vec3, Vec3)) -> Vec<u8> {
+    outline_vertices(block, bounds)
         .iter()
         .flat_map(|v| v.to_array())
         .flat_map(f32::to_le_bytes)
@@ -49,7 +50,7 @@ mod tests {
     #[test]
     fn twelve_axis_aligned_edges_around_block() {
         let block = IVec3::new(-3, 70, 5);
-        let vertices = outline_vertices(block);
+        let vertices = outline_vertices(block, (Vec3::ZERO, Vec3::ONE));
         let mut axes = [0; 3];
         let mut edges: Vec<[i32; 6]> = Vec::new();
         for pair in vertices.chunks(2) {
@@ -76,8 +77,20 @@ mod tests {
         edges.dedup();
         assert_eq!(edges.len(), 12);
         assert_eq!(
-            outline_bytes(block).len(),
+            outline_bytes(block, (Vec3::ZERO, Vec3::ONE)).len(),
             OUTLINE_VERTICES * OUTLINE_VERTEX_SIZE
         );
+    }
+
+    #[test]
+    fn box_outline_follows_bounds() {
+        let block = IVec3::new(2, 5, -4);
+        let bounds = (Vec3::new(0.25, 0.0, 0.25), Vec3::new(0.5, 0.625, 0.5));
+        let vertices = outline_vertices(block, bounds);
+        let min = vertices.iter().fold(Vec3::MAX, |a, &v| a.min(v));
+        let max = vertices.iter().fold(Vec3::MIN, |a, &v| a.max(v));
+        let origin = block.as_vec3();
+        assert!((min - (origin + bounds.0 - INFLATE)).abs().max_element() < 1e-5);
+        assert!((max - (origin + bounds.1 + INFLATE)).abs().max_element() < 1e-5);
     }
 }
