@@ -2,8 +2,8 @@
 //! Константы меняются только при намеренной смене генерации, света или формата меша.
 use glam::IVec3;
 
-use crate::mesh::{gpu_vertices, vertex_bytes};
-use crate::mesher::{MeshOptions, mesh_world_column};
+use mesh::mesh::{gpu_vertices, vertex_bytes};
+use mesh::mesher::{MeshOptions, mesh_world_column};
 use world::column::WORLD_HEIGHT;
 use world::light::LightMap;
 use world::pos::ColumnPos;
