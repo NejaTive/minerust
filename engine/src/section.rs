@@ -10,6 +10,9 @@ pub const SECTION_VOLUME: usize = 4096;
 pub struct Section {
     // В куче: на шаге 4 секций будут тысячи, и их перемещают по значению.
     blocks: Box<[Block; SECTION_VOLUME]>,
+    /// Сколько блоков излучает свет: обход 4096 блоков на каждую подгрузку колонки
+    /// заметно дороже счётчика, а светящихся блоков почти нет.
+    emitters: u16,
 }
 
 impl Section {
@@ -17,6 +20,7 @@ impl Section {
     pub fn new() -> Self {
         Self {
             blocks: Box::new([Block::Air; SECTION_VOLUME]),
+            emitters: 0,
         }
     }
 
@@ -30,9 +34,35 @@ impl Section {
         self.blocks[Self::index(local)]
     }
 
+    /// Есть ли в секции излучающий свет блок.
+    pub fn emits_light(&self) -> bool {
+        self.emitters > 0
+    }
+
+    /// Блок по индексу `x + 16·z + 256·y` (0..SECTION_VOLUME): для горячих циклов,
+    /// где индекс уже посчитан; за пределами — panic.
+    pub fn get_index(&self, index: usize) -> Block {
+        self.blocks[index]
+    }
+
+    /// Блоки строки по x при заданных y и z (0..16): 16 подряд идущих блоков, чтобы
+    /// кэш мешера копировал их срезом, а не по одному.
+    pub fn row(&self, y: i32, z: i32) -> &[Block] {
+        let start = (SECTION_SIZE * z + SECTION_SIZE * SECTION_SIZE * y) as usize;
+        &self.blocks[start..start + SECTION_SIZE as usize]
+    }
+
+    /// Нет ли в секции ничего, кроме воздуха.
+    pub fn is_air(&self) -> bool {
+        self.blocks.iter().all(|&b| b == Block::Air)
+    }
+
     /// Ставит блок по локальным координатам; за пределами 0..16 — panic.
     pub fn set(&mut self, local: IVec3, block: Block) {
-        self.blocks[Self::index(local)] = block;
+        let slot = &mut self.blocks[Self::index(local)];
+        self.emitters -= u16::from(slot.emission() > 0);
+        self.emitters += u16::from(block.emission() > 0);
+        *slot = block;
     }
 
     fn index(local: IVec3) -> usize {

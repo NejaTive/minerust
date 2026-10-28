@@ -9,10 +9,27 @@ pub enum Tile {
     GrassSide,
     Dirt,
     Stone,
+    Sand,
+    LogSide,
+    LogTop,
+    Leaves,
+    Water,
+    Glowstone,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 4] = [Tile::GrassTop, Tile::GrassSide, Tile::Dirt, Tile::Stone];
+    pub const ALL: [Tile; 10] = [
+        Tile::GrassTop,
+        Tile::GrassSide,
+        Tile::Dirt,
+        Tile::Stone,
+        Tile::Sand,
+        Tile::LogSide,
+        Tile::LogTop,
+        Tile::Leaves,
+        Tile::Water,
+        Tile::Glowstone,
+    ];
 
     pub fn layer(self) -> u32 {
         self as u32
@@ -36,6 +53,22 @@ pub const LAYER_COUNT: u32 = {
 const GRASS: [f32; 3] = [93.0, 155.0, 58.0];
 const DIRT: [f32; 3] = [134.0, 94.0, 60.0];
 const STONE: [f32; 3] = [128.0, 128.0, 128.0];
+const SAND: [f32; 3] = [219.0, 205.0, 160.0];
+const BARK: [f32; 3] = [92.0, 68.0, 40.0];
+/// Годовые кольца на торце бревна: светлые и тёмные через одно.
+const RINGS_LIGHT: [f32; 3] = [182.0, 148.0, 94.0];
+const RINGS_DARK: [f32; 3] = [150.0, 118.0, 72.0];
+const LEAVES: [f32; 3] = [58.0, 118.0, 38.0];
+const WATER: [f32; 3] = [52.0, 98.0, 196.0];
+/// Светокамень: тёплый жёлтый фон, светлые прожилки и тёмные впадины крупными
+/// пятнами 2×2 — на мипах 4×4 и 2×2 рисунок ещё читается.
+const GLOW_BASE: [f32; 3] = [226.0, 170.0, 72.0];
+const GLOW_BRIGHT: [f32; 3] = [255.0, 236.0, 150.0];
+const GLOW_DARK: [f32; 3] = [170.0, 108.0, 40.0];
+/// Непрозрачность воды: дно на глубине пары блоков ещё видно, а поверхность читается.
+const WATER_ALPHA: u8 = 180;
+/// Доля дырок в листве: примерно как в Minecraft, крона ещё читается как масса.
+const LEAF_HOLES: f32 = 0.3;
 /// Глубина зелёной каймы на боку травы, пикселей сверху.
 const GRASS_FRINGE: u32 = 3;
 
@@ -49,13 +82,14 @@ pub fn generate() -> Vec<u8> {
     let mut data = Vec::new();
     for layer in 0..LAYER_COUNT {
         let mut level = match Tile::ALL.get(layer as usize) {
-            Some(&tile) => base_level(tile),
+            Some(&tile) => tile_pixels(tile),
             None => vec![0; (TILE_SIZE * TILE_SIZE * 4) as usize],
         };
         let mut size = TILE_SIZE;
         data.extend_from_slice(&level);
+        let cutout = Tile::ALL.get(layer as usize) == Some(&Tile::Leaves);
         while size > 1 {
-            level = downsample(&level, size);
+            level = downsample(&level, size, cutout);
             size /= 2;
             data.extend_from_slice(&level);
         }
@@ -63,35 +97,75 @@ pub fn generate() -> Vec<u8> {
     data
 }
 
-fn base_level(tile: Tile) -> Vec<u8> {
+/// Пиксели тайла 16×16 RGBA (sRGB, строки сверху вниз) — те же, что базовый уровень на GPU.
+pub fn tile_pixels(tile: Tile) -> Vec<u8> {
     let mut pixels = Vec::with_capacity((TILE_SIZE * TILE_SIZE * 4) as usize);
     for y in 0..TILE_SIZE {
         for x in 0..TILE_SIZE {
             pixels.extend(pixel(tile, x, y).map(|c| c.round() as u8));
-            pixels.push(255);
+            // У дырок цвет тот же, что у листвы, а не чёрный: на смешении мип-уровней
+            // он попадает в результат, и чёрный дал бы тёмную кайму.
+            pixels.push(match tile {
+                Tile::Water => WATER_ALPHA,
+                _ if is_hole(tile, x, y) => 0,
+                _ => 255,
+            });
         }
     }
     pixels
 }
 
-/// Уровень вдвое меньше: среднее каждого квадрата 2×2. Цвет усредняется в линейном
-/// пространстве — среднее sRGB-байтов темнее настоящего, и вдали тайлы бы темнели.
-fn downsample(level: &[u8], size: u32) -> Vec<u8> {
+/// Уровень вдвое меньше: каждый квадрат 2×2 → один пиксель. Цвет усредняется в
+/// линейном пространстве — среднее sRGB-байтов темнее настоящего, и вдали тайлы бы
+/// темнели.
+///
+/// Без `cutout` (вода) альфа — простое среднее: она и так полупрозрачная и
+/// смешивается пайплайном, порога нет.
+///
+/// С `cutout` (листва) цвет берётся только по непрозрачным пикселям, чтобы цвет дырок
+/// не просачивался, а альфа остаётся двоичной: 255, если непрозрачны хотя бы 2 из 4. Шейдер отбрасывает
+/// пиксели с альфой < 0.5, и при простом среднем покрытие таяло бы с каждым уровнем —
+/// кроны вдали «растворялись» бы. Большинство при 70% непрозрачных даёт ~92% на
+/// следующем уровне: вдали листва плотнее, а не прозрачнее. Масштабирование альфы под
+/// покрытие (как для травы с мягкой альфой) здесь лишнее: на уровнях 2×2 и 1×1 долю
+/// 70% всё равно не выразить, а двоичная альфа не зависит от того, где GPU смешает уровни.
+fn downsample(level: &[u8], size: u32, cutout: bool) -> Vec<u8> {
     let half = size / 2;
     let mut out = Vec::with_capacity((half * half * 4) as usize);
     for y in 0..half {
         for x in 0..half {
             let texels = [(0, 0), (1, 0), (0, 1), (1, 1)]
                 .map(|(dx, dy)| (((2 * y + dy) * size + 2 * x + dx) * 4) as usize);
+            if !cutout {
+                for channel in 0..3 {
+                    let sum: f32 = texels
+                        .iter()
+                        .map(|&i| srgb_to_linear(level[i + channel]))
+                        .sum();
+                    out.push(linear_to_srgb(sum / 4.0));
+                }
+                let alpha: u32 = texels.iter().map(|&i| u32::from(level[i + 3])).sum();
+                out.push(((alpha + 2) / 4) as u8);
+                continue;
+            }
+            let opaque: Vec<usize> = texels
+                .iter()
+                .copied()
+                .filter(|&i| level[i + 3] >= 128)
+                .collect();
+            let colored = if opaque.is_empty() {
+                &texels[..]
+            } else {
+                &opaque[..]
+            };
             for channel in 0..3 {
-                let sum: f32 = texels
+                let sum: f32 = colored
                     .iter()
                     .map(|&i| srgb_to_linear(level[i + channel]))
                     .sum();
-                out.push(linear_to_srgb(sum / 4.0));
+                out.push(linear_to_srgb(sum / colored.len() as f32));
             }
-            let alpha: u32 = texels.iter().map(|&i| u32::from(level[i + 3])).sum();
-            out.push(((alpha + 2) / 4) as u8);
+            out.push(if opaque.len() >= 2 { 255 } else { 0 });
         }
     }
     out
@@ -121,6 +195,31 @@ fn pixel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
         Tile::GrassTop => GRASS,
         Tile::Dirt => DIRT,
         Tile::Stone => STONE,
+        Tile::Sand => SAND,
+        Tile::Leaves => LEAVES,
+        Tile::Water => WATER,
+        Tile::Glowstone => match noise(tile, x / 2, y / 2) {
+            n if n > 0.7 => GLOW_BRIGHT,
+            n if n < 0.3 => GLOW_DARK,
+            _ => GLOW_BASE,
+        },
+        // Продольные полосы коры: яркость по столбцу пикселей, заметнее пиксельного шума,
+        // иначе вблизи кора неотличима от земли.
+        Tile::LogSide => BARK.map(|c| c * (0.65 + 0.55 * noise(tile, x, TILE_SIZE))),
+        Tile::LogTop => {
+            // Квадратные кольца от центра; крайний ряд — кора.
+            let ring = [x, y]
+                .map(|c| (c as f32 - (TILE_SIZE - 1) as f32 / 2.0).abs())
+                .into_iter()
+                .fold(0.0, f32::max) as u32;
+            if ring == TILE_SIZE / 2 - 1 {
+                BARK
+            } else if ring.is_multiple_of(2) {
+                RINGS_LIGHT
+            } else {
+                RINGS_DARK
+            }
+        }
         Tile::GrassSide => {
             // Неровный край: в каждом столбце кайма на пиксель длиннее с вероятностью 1/2.
             let fringe = GRASS_FRINGE + u32::from(noise(tile, x, TILE_SIZE) > 0.5);
@@ -130,6 +229,12 @@ fn pixel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
     // ±18% яркости по пикселям — пока вместо нарисованной текстуры.
     let brightness = 0.82 + 0.36 * noise(tile, x, y);
     base.map(|c| (c * brightness).min(255.0))
+}
+
+/// Прозрачный ли пиксель: дырки есть только у листвы.
+fn is_hole(tile: Tile, x: u32, y: u32) -> bool {
+    // Другой участок хеша, чем у яркости, чтобы дырки не совпадали с тёмными пикселями.
+    tile == Tile::Leaves && noise(tile, x + TILE_SIZE, y) < LEAF_HOLES
 }
 
 /// Детерминированный «шум» 0..=1 по пикселю: целочисленный хеш, без зависимостей.
@@ -158,6 +263,20 @@ mod tests {
         [data[i], data[i + 1], data[i + 2]]
     }
 
+    /// Мип-уровень `level` тайла: RGBA-пиксели стороной `TILE_SIZE >> level`.
+    fn mip(data: &[u8], tile: Tile, level: u32) -> &[u8] {
+        let start = tile.layer() as usize * layer_bytes()
+            + (0..level)
+                .map(|l| ((TILE_SIZE >> l).pow(2) * 4) as usize)
+                .sum::<usize>();
+        &data[start..start + ((TILE_SIZE >> level).pow(2) * 4) as usize]
+    }
+
+    fn coverage(pixels: &[u8]) -> f32 {
+        let opaque = pixels.chunks(4).filter(|p| p[3] == 255).count();
+        opaque as f32 / (pixels.len() / 4) as f32
+    }
+
     #[test]
     fn generates_every_layer_with_all_mips() {
         let data = generate();
@@ -165,9 +284,35 @@ mod tests {
         // 16² + 8² + 4² + 2² + 1² = 341 пиксель на слой.
         assert_eq!(layer_bytes(), 341 * 4);
         assert_eq!(data.len(), LAYER_COUNT as usize * layer_bytes());
-        let used = &data[..Tile::ALL.len() * layer_bytes()];
-        assert!(used.chunks(4).all(|p| p[3] == 255));
+        for tile in Tile::ALL {
+            let layer = &data[tile.layer() as usize * layer_bytes()..][..layer_bytes()];
+            if tile == Tile::Water {
+                assert!(layer.chunks(4).all(|p| p[3] == WATER_ALPHA), "{tile:?}");
+                continue;
+            }
+            assert!(
+                layer.chunks(4).all(|p| p[3] == 0 || p[3] == 255),
+                "{tile:?}"
+            );
+            if tile != Tile::Leaves {
+                assert!(layer.chunks(4).all(|p| p[3] == 255), "{tile:?}");
+            }
+        }
         assert_eq!(generate(), data, "generation must be deterministic");
+    }
+
+    #[test]
+    fn tile_pixels_match_gpu_base_level() {
+        let data = generate();
+        for tile in Tile::ALL {
+            let pixels = tile_pixels(tile);
+            assert_eq!(
+                pixels.len(),
+                (TILE_SIZE * TILE_SIZE * 4) as usize,
+                "{tile:?}"
+            );
+            assert_eq!(pixels, mip(&data, tile, 0), "{tile:?}");
+        }
     }
 
     #[test]
@@ -176,7 +321,7 @@ mod tests {
         let mut level = color.repeat((TILE_SIZE * TILE_SIZE) as usize);
         let mut size = TILE_SIZE;
         while size > 1 {
-            level = downsample(&level, size);
+            level = downsample(&level, size, true);
             size /= 2;
         }
         assert_eq!(level, color);
@@ -189,7 +334,7 @@ mod tests {
         let black = [0, 0, 0, 255];
         let white = [255, 255, 255, 255];
         let level = [white, black, black, white].concat();
-        let out = downsample(&level, 2);
+        let out = downsample(&level, 2, true);
         assert!((187..=188).contains(&out[0]), "got {}", out[0]);
         assert_eq!(out[3], 255);
     }
@@ -203,5 +348,59 @@ mod tests {
             let [r, g, _] = rgb(&pixels, Tile::GrassSide, x, TILE_SIZE - 1);
             assert!(r > g, "bottom row should be dirt at x = {x}");
         }
+    }
+
+    #[test]
+    fn leaves_keep_coverage_in_mips() {
+        let data = generate();
+        let base = coverage(mip(&data, Tile::Leaves, 0));
+        assert!((0.55..0.85).contains(&base), "base coverage {base}");
+        for level in 1..MIP_LEVELS {
+            let c = coverage(mip(&data, Tile::Leaves, level));
+            assert!(c >= base, "level {level}: {c} < {base}");
+        }
+    }
+
+    #[test]
+    fn leaves_mips_stay_leaf_colored() {
+        // Диапазон яркости базового уровня; среднее в линейном пространстве из него не выходит.
+        let data = generate();
+        for level in 1..MIP_LEVELS {
+            for p in mip(&data, Tile::Leaves, level).chunks(4) {
+                for (c, base) in p[..3].iter().zip(LEAVES) {
+                    let c = f32::from(*c);
+                    assert!(
+                        (base * 0.82 - 1.0..=base * 1.18 + 1.0).contains(&c),
+                        "level {level}: {p:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn downsample_ignores_color_of_holes() {
+        // Две зелёные непрозрачные и две чёрные дырки: цвет зелёный, без потемнения.
+        let green = [58, 118, 38, 255];
+        let hole = [0, 0, 0, 0];
+        let level = [green, hole, hole, green].concat();
+        assert_eq!(downsample(&level, 2, true), green);
+        // Одна непрозрачная из четырёх — дырка.
+        let level = [green, hole, hole, hole].concat();
+        assert_eq!(downsample(&level, 2, true)[3], 0);
+    }
+
+    #[test]
+    fn translucent_downsample_averages_alpha() {
+        let level = [[52, 98, 196, 180], [52, 98, 196, 100]].repeat(2).concat();
+        assert_eq!(downsample(&level, 2, false), [52, 98, 196, 140]);
+        // Листва с той же альфой стала бы непрозрачной.
+        assert_eq!(downsample(&level, 2, true)[3], 255);
+    }
+
+    #[test]
+    fn layer_count_avoids_gl_guessing() {
+        assert!(LAYER_COUNT != 1 && !LAYER_COUNT.is_multiple_of(6));
+        assert!(LAYER_COUNT as usize >= Tile::ALL.len());
     }
 }

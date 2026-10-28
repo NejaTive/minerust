@@ -1,25 +1,32 @@
-use std::collections::HashSet;
-
 use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
 
-const FOV_Y: f32 = 70.0 * std::f32::consts::PI / 180.0;
+/// Вертикальный угол обзора по умолчанию, градусы.
+const DEFAULT_FOV: f32 = 70.0;
+/// Пределы угла обзора, градусы: ниже 60 картинка «туннельная», выше 110 края сильно растянуты.
+pub const MIN_FOV: f32 = 60.0;
+pub const MAX_FOV: f32 = 110.0;
 const NEAR: f32 = 0.1;
-/// Скорость полёта, блоков в секунду.
-const SPEED: f32 = 8.0;
-/// Поворот камеры, радиан на пиксель движения мыши.
-const SENSITIVITY: f32 = 0.002;
+/// Поворот камеры при множителе 1, радиан на пиксель движения мыши.
+const BASE_SENSITIVITY: f32 = 0.002;
+/// Пределы множителя чувствительности; дублируются в `src/settings.ts`.
+pub const MIN_SENSITIVITY: f32 = 0.25;
+pub const MAX_SENSITIVITY: f32 = 3.0;
 const MAX_PITCH: f32 = 89.0 * std::f32::consts::PI / 180.0;
 /// Наклон на спауне: −15°, горизонт в верхней части экрана.
 const SPAWN_PITCH: f32 = -15.0 * std::f32::consts::PI / 180.0;
 
-/// Свободная камера как в креативе: yaw/pitch в радианах, Y — вверх.
+/// Камера от первого лица: yaw/pitch в радианах, Y — вверх. Позицию задаёт игрок.
 pub struct Camera {
     pub position: Vec3,
     /// Поворот вокруг Y; при yaw = 0 камера смотрит вдоль +X, при -PI/2 — вдоль -Z.
     pub yaw: f32,
     /// Наклон вверх/вниз, ограничен ±89°.
     pub pitch: f32,
+    /// Множитель к [`BASE_SENSITIVITY`], в [`MIN_SENSITIVITY`]..=[`MAX_SENSITIVITY`].
+    sensitivity: f32,
+    /// Вертикальный угол обзора в градусах, в [`MIN_FOV`]..=[`MAX_FOV`].
+    fov: f32,
 }
 
 impl Camera {
@@ -29,16 +36,13 @@ impl Camera {
             position,
             yaw: 0.0,
             pitch: SPAWN_PITCH,
+            sensitivity: 1.0,
+            fov: DEFAULT_FOV,
         }
     }
 
-    /// `[x, y, z, yaw, pitch]` — плоский вид для передачи через JS.
-    pub fn state(&self) -> [f32; 5] {
-        let p = self.position;
-        [p.x, p.y, p.z, self.yaw, self.pitch]
-    }
-
-    /// Обратное к [`Camera::state`]; `None`, если длина не 5 или есть не-числа.
+    /// Камера из `[x, y, z, yaw, pitch]` (начало `Engine::camera_state`); `None`, если
+    /// длина не 5 или есть не-числа.
     pub fn from_state(state: &[f32]) -> Option<Self> {
         let &[x, y, z, yaw, pitch] = state else {
             return None;
@@ -50,6 +54,8 @@ impl Camera {
             position: Vec3::new(x, y, z),
             yaw,
             pitch: pitch.clamp(-MAX_PITCH, MAX_PITCH),
+            sensitivity: 1.0,
+            fov: DEFAULT_FOV,
         })
     }
 
@@ -60,49 +66,109 @@ impl Camera {
         Vec3::new(cy * cp, sp, sy * cp)
     }
 
-    /// Мышь вправо — поворот вправо, вниз — взгляд вниз.
-    pub fn rotate(&mut self, dx: f32, dy: f32) {
-        self.yaw = (self.yaw + dx * SENSITIVITY) % std::f32::consts::TAU;
-        self.pitch = (self.pitch - dy * SENSITIVITY).clamp(-MAX_PITCH, MAX_PITCH);
+    /// Множитель чувствительности мыши; значение вне пределов зажимается, NaN игнорируется.
+    pub fn set_sensitivity(&mut self, factor: f32) {
+        if !factor.is_nan() {
+            self.sensitivity = factor.clamp(MIN_SENSITIVITY, MAX_SENSITIVITY);
+        }
     }
 
-    /// Двигает камеру по нажатым клавишам (коды `KeyboardEvent.code`) за время `dt`.
-    pub fn update(&mut self, keys: &HashSet<String>, dt: f32) {
-        let pressed = |code: &str| keys.contains(code);
-        // WASD — в горизонтальной плоскости, pitch не учитывается.
-        let (sy, cy) = self.yaw.sin_cos();
-        let forward = Vec3::new(cy, 0.0, sy);
-        let right = Vec3::new(-sy, 0.0, cy);
+    pub fn sensitivity(&self) -> f32 {
+        self.sensitivity
+    }
 
-        let mut dir = Vec3::ZERO;
-        if pressed("KeyW") {
-            dir += forward;
+    /// Вертикальный угол обзора в градусах; значение вне пределов зажимается, NaN игнорируется.
+    pub fn set_fov(&mut self, degrees: f32) {
+        if !degrees.is_nan() {
+            self.fov = degrees.clamp(MIN_FOV, MAX_FOV);
         }
-        if pressed("KeyS") {
-            dir -= forward;
-        }
-        if pressed("KeyD") {
-            dir += right;
-        }
-        if pressed("KeyA") {
-            dir -= right;
-        }
-        if pressed("Space") {
-            dir += Vec3::Y;
-        }
-        if pressed("ShiftLeft") || pressed("ShiftRight") {
-            dir -= Vec3::Y;
-        }
-        // Нормализуем, чтобы по диагонали не лететь быстрее.
-        self.position += dir.normalize_or_zero() * SPEED * dt;
+    }
+
+    pub fn fov(&self) -> f32 {
+        self.fov
+    }
+
+    /// Мышь вправо — поворот вправо, вниз — взгляд вниз.
+    pub fn rotate(&mut self, dx: f32, dy: f32) {
+        let step = BASE_SENSITIVITY * self.sensitivity;
+        self.yaw = (self.yaw + dx * step) % std::f32::consts::TAU;
+        self.pitch = (self.pitch - dy * step).clamp(-MAX_PITCH, MAX_PITCH);
     }
 
     /// Матрица view-projection; `far` — дальняя плоскость в блоках, см. `Fog::far_plane`.
+    /// `fov_scale` множит угол обзора на кадр (бег), не меняя настройку `fov`.
     /// В glam 0.34 бывший `Mat4::perspective_rh` — это `rh::proj::directx`:
     /// NDC с глубиной 0..1 и Y вверх, как ожидает wgpu.
-    pub fn view_proj(&self, aspect: f32, far: f32) -> Mat4 {
-        let proj = directx::perspective(FOV_Y, aspect, NEAR, far);
+    pub fn view_proj(&self, aspect: f32, far: f32, fov_scale: f32) -> Mat4 {
+        let fov = (self.fov * fov_scale).to_radians();
+        let proj = directx::perspective(fov, aspect, NEAR, far);
         let view = view::look_to_mat4(self.position, self.forward(), Vec3::Y);
         proj * view
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn camera() -> Camera {
+        Camera::spawn(Vec3::ZERO)
+    }
+
+    #[test]
+    fn defaults() {
+        let c = camera();
+        assert_eq!(c.sensitivity(), 1.0);
+        assert_eq!(c.fov(), 70.0);
+    }
+
+    #[test]
+    fn sensitivity_is_clamped() {
+        let mut c = camera();
+        c.set_sensitivity(10.0);
+        assert_eq!(c.sensitivity(), MAX_SENSITIVITY);
+        c.set_sensitivity(0.0);
+        assert_eq!(c.sensitivity(), MIN_SENSITIVITY);
+        c.set_sensitivity(1.5);
+        assert_eq!(c.sensitivity(), 1.5);
+        c.set_sensitivity(f32::NAN);
+        assert_eq!(c.sensitivity(), 1.5);
+    }
+
+    #[test]
+    fn fov_is_clamped() {
+        let mut c = camera();
+        c.set_fov(200.0);
+        assert_eq!(c.fov(), MAX_FOV);
+        c.set_fov(-5.0);
+        assert_eq!(c.fov(), MIN_FOV);
+        c.set_fov(90.0);
+        assert_eq!(c.fov(), 90.0);
+        c.set_fov(f32::NAN);
+        assert_eq!(c.fov(), 90.0);
+    }
+
+    #[test]
+    fn sensitivity_scales_rotation() {
+        let mut slow = camera();
+        slow.yaw = 0.0;
+        slow.set_sensitivity(0.5);
+        slow.rotate(100.0, 0.0);
+        let mut fast = camera();
+        fast.yaw = 0.0;
+        fast.set_sensitivity(2.0);
+        fast.rotate(100.0, 0.0);
+        assert!((fast.yaw / slow.yaw - 4.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn fov_changes_projection() {
+        let mut c = camera();
+        c.set_fov(60.0);
+        let narrow = c.view_proj(1.0, 100.0, 1.0);
+        c.set_fov(110.0);
+        let wide = c.view_proj(1.0, 100.0, 1.0);
+        // Больше угол — меньше масштаб по X/Y.
+        assert!(wide.x_axis.x < narrow.x_axis.x);
     }
 }

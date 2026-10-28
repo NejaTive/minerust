@@ -10,8 +10,18 @@ pub const MIN_RADIUS: i32 = 4;
 pub const MAX_RADIUS: i32 = 16;
 pub const DEFAULT_RADIUS: i32 = 8;
 
-/// Соседи по граням: мешеру нужны только они, диагональные колонки он не трогает.
-const NEIGHBORS: [IVec2; 4] = [IVec2::X, IVec2::NEG_X, IVec2::Y, IVec2::NEG_Y];
+/// Соседи колонки по граням и диагоналям: мешер смотрит в них на стыках, а AO — и
+/// через угол колонки.
+pub const NEIGHBORS: [IVec2; 8] = [
+    IVec2::new(1, 0),
+    IVec2::new(-1, 0),
+    IVec2::new(0, 1),
+    IVec2::new(0, -1),
+    IVec2::new(1, 1),
+    IVec2::new(-1, 1),
+    IVec2::new(1, -1),
+    IVec2::new(-1, -1),
+];
 
 /// Результат одного [`Loader::advance`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -28,16 +38,18 @@ pub enum Progress {
 /// Без GPU и без часов: данные колонок лежат в [`World`], меши — у вызывающего,
 /// и сколько шагов [`Loader::advance`] делать за кадр, решает он же.
 ///
-/// Расстояние везде евклидово между ключами колонок. От дальности прорисовки
-/// `radius` зависят остальные радиусы:
-/// - данные грузим до `radius + 1`: колонке на краю нужны соседи для меша;
-/// - меш удаляем дальше `radius + 1`, данные — дальше `radius + 2`: на границе колонки
+/// Расстояние везде евклидово между ключами колонок. Меш колонки строится, только когда
+/// загружены все 8 её соседей ([`NEIGHBORS`]), диагональный — на расстоянии √2. От
+/// дальности прорисовки `radius` зависят остальные радиусы:
+/// - данные грузим до `radius + 2`: диагональный сосед колонки на краю круга лежит
+///   не дальше `radius + √2`;
+/// - меш удаляем дальше `radius + 1`, данные — дальше `radius + 3`: на границе колонки
 ///   не мигают туда-обратно при шаге игрока, и у колонки с мешем (≤ radius + 1) соседи
-///   (≤ radius + 2 по неравенству треугольника) никогда не выгружаются.
+///   (≤ radius + 1 + √2 < radius + 3 по неравенству треугольника) никогда не выгружаются.
 ///
 /// После уменьшения радиуса запас на гистерезис не нужен: первый `update` снимает
-/// меши дальше `radius`, а данные дальше `radius + 1`. Инвариант про соседей держится
-/// и тут — меши снимаются раньше данных в том же `update`.
+/// меши дальше `radius`, а данные дальше `radius + 2` (соседи ≤ radius + √2). Инвариант
+/// про соседей держится и тут — меши снимаются раньше данных в том же `update`.
 pub struct Loader {
     center: IVec2,
     radius: i32,
@@ -86,7 +98,7 @@ impl Loader {
     }
 
     fn gen_radius(&self) -> i32 {
-        self.radius + 1
+        self.radius + 2
     }
 
     fn unmesh_radius(&self) -> i32 {
@@ -94,10 +106,10 @@ impl Loader {
     }
 
     fn unload_radius(&self) -> i32 {
-        self.radius + 2
+        self.radius + 3
     }
 
-    /// Синхронно грузит круг `radius` (и кольцо соседей за ним) и возвращает все
+    /// Синхронно грузит круг `radius` (и соседей за ним до `radius + 2`) и возвращает все
     /// колонки круга для меширования — чтобы первый кадр не был пустым.
     pub fn warm_up(
         &mut self,
@@ -112,7 +124,7 @@ impl Loader {
         );
         let center = self.center;
         let in_circle = |r: i32| move |o: &&IVec2| o.length_squared() <= r * r;
-        for &o in self.offsets.iter().filter(in_circle(radius + 1)) {
+        for &o in self.offsets.iter().filter(in_circle(radius + 2)) {
             let key = center + o;
             if world.column(key).is_none() {
                 load(world, key, &mut generate);
@@ -299,9 +311,9 @@ mod tests {
         while !frame(loader, world, center, meshed, usize::MAX).is_empty() {}
     }
 
-    /// Загружен ровно круг `radius + 1`, мешируется ровно круг `radius`.
+    /// Загружен ровно круг `radius + 2`, мешируется ровно круг `radius`.
     fn assert_circles(world: &World, meshed: &HashSet<IVec2>, center: IVec2, radius: i32) {
-        let r = radius + 1;
+        let r = radius + 2;
         for z in -r - 2..=r + 2 {
             for x in -r - 2..=r + 2 {
                 let key = center + IVec2::new(x, z);
@@ -340,14 +352,14 @@ mod tests {
         let mut loader = Loader::new(IVec2::ZERO);
         let mut world = World::new();
         let mut meshed = HashSet::new();
-        // Центр и 4 соседа — ровно круг радиуса 1, после них центр готов к мешу.
-        let first = frame(&mut loader, &mut world, IVec2::ZERO, &mut meshed, 6);
+        // Центр и 8 соседей — квадрат 3×3, после них центр готов к мешу.
+        let first = frame(&mut loader, &mut world, IVec2::ZERO, &mut meshed, 10);
         assert_eq!(first[0], Progress::Generated(IVec2::ZERO));
-        assert!(first[..5].iter().all(|p| matches!(
+        assert!(first[..9].iter().all(|p| matches!(
             p,
-            Progress::Generated(key) if key.length_squared() <= 1
+            Progress::Generated(key) if key.length_squared() <= 2
         )));
-        assert_eq!(first[5], Progress::Mesh(IVec2::ZERO));
+        assert_eq!(first[9], Progress::Mesh(IVec2::ZERO));
 
         let mut generated = Vec::new();
         while let progress @ [_, ..] =
@@ -365,17 +377,21 @@ mod tests {
 
     #[test]
     fn column_without_all_neighbors_is_not_meshed() {
-        let mut loader = Loader::new(IVec2::ZERO);
-        let mut world = World::new();
-        for key in [IVec2::ZERO, IVec2::X, IVec2::NEG_X, IVec2::Y] {
-            world.insert(key, Column::new());
+        // Без одного соседа — по грани или по диагонали — колонка ждёт его загрузки.
+        for missing in NEIGHBORS {
+            let mut loader = Loader::new(IVec2::ZERO);
+            let mut world = World::new();
+            world.insert(IVec2::ZERO, Column::new());
+            for n in NEIGHBORS.into_iter().filter(|&n| n != missing) {
+                world.insert(n, Column::new());
+            }
+            loader.update(IVec2::ZERO, &mut world);
+            assert_eq!(
+                loader.advance(&mut world, air),
+                Progress::Generated(missing)
+            );
+            assert_eq!(loader.advance(&mut world, air), Progress::Mesh(IVec2::ZERO));
         }
-        loader.update(IVec2::ZERO, &mut world);
-        assert_eq!(
-            loader.advance(&mut world, air),
-            Progress::Generated(IVec2::NEG_Y)
-        );
-        assert_eq!(loader.advance(&mut world, air), Progress::Mesh(IVec2::ZERO));
     }
 
     #[test]
@@ -386,8 +402,8 @@ mod tests {
         settle(&mut loader, &mut world, IVec2::ZERO, &mut meshed);
         let before: HashSet<IVec2> = world.keys().collect();
 
-        // Сдвиг на 2 колонки: старые данные дальше radius + 1 от нового центра,
-        // но не дальше radius + 2, должны остаться.
+        // Сдвиг на 2 колонки: старые данные дальше radius + 2 от нового центра,
+        // но не дальше radius + 3, должны остаться.
         let center = IVec2::new(2, 0);
         let unload = loader.unload_radius();
         for key in loader.update(center, &mut world) {
@@ -482,7 +498,7 @@ mod tests {
         assert_eq!(loader.pending(), 0);
         let r = MIN_RADIUS;
         assert!(meshed.iter().all(|&k| dist2(k, center) <= (r + 1).pow(2)));
-        assert!(world.keys().all(|k| dist2(k, center) <= (r + 2).pow(2)));
+        assert!(world.keys().all(|k| dist2(k, center) <= (r + 3).pow(2)));
     }
 
     #[test]
@@ -502,7 +518,7 @@ mod tests {
         let mut world = World::new();
         let mesh = loader.warm_up(&mut world, air, 2);
         assert_eq!(mesh.len(), circle_points(2));
-        assert_eq!(world.len(), circle_points(3));
+        assert_eq!(world.len(), circle_points(4));
         assert!(mesh.iter().all(|&k| dist2(k, center) <= 4));
     }
 

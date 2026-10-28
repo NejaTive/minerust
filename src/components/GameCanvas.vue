@@ -1,25 +1,37 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import init, { Engine } from '@engine'
 import {
-  type BlockName,
+  HOTBAR,
   type GraphicsApi,
+  MAX_RENDER_DISTANCE,
+  MIN_RENDER_DISTANCE,
+  type Settings,
   loadGraphicsApi,
-  loadRenderDistance,
   saveGraphicsApi,
-  saveRenderDistance,
 } from '../settings'
+import {
+  BENCH,
+  BENCH_POINTS,
+  BENCH_SEED,
+  BENCH_TIME,
+  FrameRecorder,
+  benchApi,
+  runBench,
+} from '../bench'
+import { type WorldStats, parseStats } from '../stats'
+import { type SavedColumn, type WorldMeta, type WorldStorage, openStorage } from '../storage'
 
-/** Порядок полей — как в `Engine.stats()`; время — в микросекундах. */
-export interface WorldStats {
-  columns: number
-  meshedColumns: number
-  meshedSections: number
-  queued: number
-  generateUs: number
-  meshUs: number
-  /** Секций, прошедших отсечение по пирамиде видимости, в последнем кадре. */
-  drawnSections: number
+export type { WorldStats }
+
+export interface TimeInfo {
+  time: number
+  phase: string
+}
+
+export interface PlayerInfo {
+  mode: 'walking' | 'flying' | 'noclip'
+  onGround: boolean
 }
 
 export interface ApiInfo {
@@ -28,14 +40,25 @@ export interface ApiInfo {
   fallback: boolean
 }
 
+const props = defineProps<{ settings: Settings; slot: number }>()
+
 const emit = defineEmits<{
   fps: [value: number]
   stats: [value: WorldStats]
   api: [info: ApiInfo]
   notice: [text: string]
   'render-distance': [columns: number]
-  block: [name: BlockName]
-  'toggle-controls': []
+  /** Игрок выбрал слот хотбара (клавиша, колесо): v-model:slot. */
+  'update:slot': [slot: number]
+  player: [info: PlayerInfo]
+  /** Время суток 0..1 и фаза (`day`, `dusk`, `night`, `dawn`), раз в секунду. */
+  time: [info: TimeInfo]
+  /** Курсор захвачен (игра идёт) или отпущен (пауза, меню). */
+  lock: [locked: boolean]
+  /** Движок грузится или пересоздаётся, мир менять нельзя. */
+  busy: [busy: boolean]
+  /** Нажата N: подтверждение «Новый мир» показывает меню. */
+  'ask-new-world': []
 }>()
 
 const canvas = ref<HTMLCanvasElement>()
@@ -46,11 +69,15 @@ const canvasKey = ref(0)
 const engine = shallowRef<Engine>()
 const error = ref<string>()
 const locked = ref(false)
-// Выбор блока живёт здесь, а не в движке: движок пересоздаётся при смене API.
-const selectedBlock = ref<BlockName>('grass')
 
-let preferred = loadGraphicsApi()
-let switching = false
+let preferred = (BENCH && benchApi()) || loadGraphicsApi()
+const benchFrames = new FrameRecorder()
+// Блокирует G и N, пока движок пересоздаётся; до конца загрузки true.
+let switching = true
+function setSwitching(value: boolean) {
+  switching = value
+  emit('busy', value)
+}
 let disposed = false
 let rafId = 0
 let resizeObserver: ResizeObserver | undefined
@@ -66,16 +93,55 @@ function resize() {
 // Клавиши, для которых гасим действие браузера по умолчанию (скролл страницы и т.п.).
 const GAME_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
 
-function requestLock() {
-  // В новых браузерах requestPointerLock возвращает Promise, который может реджектиться.
-  const result = canvas.value?.requestPointerLock() as Promise<void> | undefined
-  result?.catch(() => {})
+/**
+ * Захватывает курсор; вызывать из обработчика действия пользователя (клик по кнопке меню).
+ * Возвращает, удалось ли: Chrome около секунды после выхода по Esc отказывает.
+ */
+async function requestLock(): Promise<boolean> {
+  const el = canvas.value
+  if (!el) return false
+  try {
+    // Старые браузеры возвращают undefined, новые — Promise, который может реджектиться.
+    await (el.requestPointerLock() as Promise<void> | undefined)
+  } catch {
+    return false
+  }
+  return true
 }
 
+function releaseCursor() {
+  if (document.pointerLockElement) document.exitPointerLock()
+}
+
+// Пауза следует за курсором: Esc браузер забирает себе и до страницы не доводит, так что
+// единственный надёжный сигнал выхода — это событие.
 function onLockChange() {
   locked.value = document.pointerLockElement === canvas.value
-  if (!locked.value) engine.value?.release_all_keys()
+  engine.value?.set_paused(!locked.value)
+  if (!locked.value) {
+    engine.value?.release_all_keys()
+    void save()
+  }
+  emit('lock', locked.value)
 }
+
+/** Настройки из меню — в движок. Идемпотентно: вызывается и после каждого `Engine.create`. */
+function applySettings(target: Engine) {
+  const s = props.settings
+  target.set_render_distance(s.renderDistance)
+  target.set_ambient_occlusion(s.ambientOcclusion)
+  target.set_mouse_sensitivity(s.mouseSensitivity)
+  target.set_fov(s.fov)
+  // Замеры кадра нужны только отладочному HUD и режиму замера.
+  target.set_profiling(s.showDebug)
+}
+
+watch(
+  () => ({ ...props.settings }),
+  () => {
+    if (engine.value) applySettings(engine.value)
+  },
+)
 
 function onMouseMove(e: MouseEvent) {
   if (locked.value) engine.value?.mouse_move(e.movementX, e.movementY)
@@ -91,31 +157,211 @@ function onMouseUp(e: MouseEvent) {
   engine.value?.mouse_button(e.button, false)
 }
 
-const BLOCK_KEYS: Record<string, BlockName> = {
-  Digit1: 'grass',
-  Digit2: 'dirt',
-  Digit3: 'stone',
+/** Выбранный слот — в движок. Слот живёт в App, а не в движке: движок пересоздаётся при смене API. */
+function applySlot(target: Engine) {
+  // Пустая строка — пустая рука: ПКМ ничего не ставит.
+  target.select_block(HOTBAR[props.slot] ?? '')
 }
 
-function selectBlock(name: BlockName) {
-  selectedBlock.value = name
-  engine.value?.select_block(name)
-  emit('block', name)
+watch(
+  () => props.slot,
+  () => {
+    if (engine.value) applySlot(engine.value)
+  },
+)
+
+/** Порог прокрутки, пикселей, на один слот. Колесо мыши шлёт за щелчок 100–120, тачпад — десятки
+ * мелких событий за жест: накопление не даёт одному жесту пролистать хотбар. */
+const WHEEL_STEP = 100
+const WHEEL_LINE_PX = 40
+const WHEEL_PAGE_PX = 800
+let wheelAccum = 0
+
+function onWheel(e: WheelEvent) {
+  if (!locked.value) return
+  // Колесо при захваченном курсоре не должно масштабировать или листать страницу.
+  e.preventDefault()
+  const unit = e.deltaMode === 1 ? WHEEL_LINE_PX : e.deltaMode === 2 ? WHEEL_PAGE_PX : 1
+  const delta = e.deltaY * unit
+  // Смена направления сбрасывает остаток, иначе первый шаг назад съедался бы им.
+  if (Math.sign(delta) !== Math.sign(wheelAccum)) wheelAccum = 0
+  wheelAccum += delta
+  if (Math.abs(wheelAccum) < WHEEL_STEP) return
+  // Вниз — следующий слот, по кругу; за одно событие — не больше одного слота.
+  const step = Math.sign(wheelAccum)
+  wheelAccum = 0
+  emit('update:slot', (props.slot + step + HOTBAR.length) % HOTBAR.length)
 }
 
-const HOTKEYS = new Set(['KeyG', 'KeyH', 'BracketLeft', 'BracketRight'])
+/** Сид мира, пока нет сохранения: первый запуск даёт привычный рельеф. */
+const DEFAULT_SEED = 1337
+const AUTOSAVE_MS = 5000
+
+// `null` — IndexedDB недоступен, игра идёт без сохранений.
+let storage: WorldStorage | null = null
+let formatVersion = 0
+// Последние байты каждой изменённой колонки текущего мира. Из этой копии, а не из базы,
+// новый движок получает правки при смене API: так G не теряет их и без IndexedDB.
+const worldColumns = new Map<string, SavedColumn>()
+// Колонки, снятые с движка, но ещё не записанные. При ошибке записи остаются здесь
+// и уходят со следующим сохранением: `drain_dirty` второй раз их не отдаст.
+const unsaved = new Map<string, SavedColumn>()
+// Последнее начатое сохранение; IndexedDB выполняет их по очереди, так что его
+// завершение означает, что записаны и все предыдущие.
+let saving = Promise.resolve()
+let saveFailed = false
+let autosaveId = 0
+
+function columnKey(column: SavedColumn): string {
+  return `${column.x},${column.z}`
+}
+
+/** Снимает с движка несохранённые колонки в `worldColumns` и `unsaved`. */
+function collectColumns(current: Engine) {
+  const keys = current.drain_dirty()
+  for (let i = 0; i < keys.length; i += 2) {
+    const x = keys[i]
+    const z = keys[i + 1]
+    const bytes = current.export_column(x, z)
+    if (!bytes) continue
+    const column = { x, z, bytes }
+    worldColumns.set(columnKey(column), column)
+    unsaved.set(columnKey(column), column)
+  }
+}
+
+/**
+ * Сохраняет несохранённые колонки и игрока (позицию — каждый раз, даже без правок).
+ * Состояние снимается синхронно, запись идёт в фоне; ошибки не пробрасываются.
+ */
+function save(): Promise<void> {
+  const current = engine.value
+  const store = storage
+  if (!current || !store) return saving
+  collectColumns(current)
+  const meta: WorldMeta = {
+    version: formatVersion,
+    seed: current.seed(),
+    player: Array.from(current.camera_state()),
+    time: current.time_of_day(),
+  }
+  const columns = [...unsaved.values()]
+  saving = store.save(meta, columns).then(
+    () => {
+      saveFailed = false
+      // Сравнение по ссылке: пока шла запись, колонку могли снять с движка заново.
+      for (const column of columns) {
+        if (unsaved.get(columnKey(column)) === column) unsaved.delete(columnKey(column))
+      }
+    },
+    (e: unknown) => {
+      console.warn('world save failed', e)
+      if (!saveFailed) emit('notice', 'Не удалось сохранить мир')
+      saveFailed = true
+    },
+  )
+  return saving
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') void save()
+}
+
+// Уход со страницы: запись «как получится», ждать её браузер не станет.
+function onPageHide() {
+  void save()
+}
+
+function isCompatible(meta: WorldMeta): boolean {
+  return (
+    meta.version === formatVersion &&
+    Number.isInteger(meta.seed) &&
+    Array.isArray(meta.player) &&
+    meta.player.length === 6 &&
+    meta.player.every(Number.isFinite)
+  )
+}
+
+function randomSeed(): number {
+  return crypto.getRandomValues(new Int32Array(1))[0]
+}
+
+/**
+ * Очищает базу. Если не вышло, сохранения выключаются: иначе старые колонки
+ * подмешались бы к новому миру при следующей загрузке.
+ */
+async function clearStorage() {
+  try {
+    await storage?.clear()
+  } catch (e) {
+    console.warn('world clear failed', e)
+    storage = null
+  }
+}
+
+interface WorldStart {
+  seed: number
+  player?: number[]
+  time?: number
+}
+
+/** Открывает хранилище и читает сохранённый мир в `worldColumns`. */
+async function loadWorld(): Promise<WorldStart> {
+  storage = await openStorage()
+  if (!storage) {
+    emit('notice', 'Сохранения недоступны — мир не сохранится')
+    return { seed: DEFAULT_SEED }
+  }
+  let saved
+  try {
+    saved = await storage.load()
+  } catch (e) {
+    // Не прочитали — не пишем поверх: в базе мог остаться чужой мир.
+    console.warn('world load failed', e)
+    storage = null
+    emit('notice', 'Сохранение не читается — мир не сохранится')
+    return { seed: DEFAULT_SEED }
+  }
+  if (!saved) return { seed: DEFAULT_SEED }
+  if (!isCompatible(saved.meta)) {
+    await clearStorage()
+    emit('notice', 'Сохранение несовместимо — начат новый мир')
+    return { seed: randomSeed() }
+  }
+  for (const column of saved.columns) worldColumns.set(columnKey(column), column)
+  return saved.meta
+}
+
+/** Правки из `worldColumns` — в только что созданный движок, до первого кадра. */
+function importColumns(created: Engine) {
+  let broken = 0
+  for (const [key, column] of worldColumns) {
+    try {
+      if (!Number.isInteger(column.x) || !Number.isInteger(column.z)) throw new Error('bad key')
+      if (!(column.bytes instanceof Uint8Array)) throw new Error('bad bytes')
+      created.import_column(column.x, column.z, column.bytes)
+    } catch (e) {
+      console.warn(`saved column ${key} skipped`, e)
+      worldColumns.delete(key)
+      broken++
+    }
+  }
+  if (broken > 0) emit('notice', `Повреждённые колонки пропущены: ${broken}`)
+}
+
+const HOTKEYS = new Set(['KeyG', 'KeyN', 'BracketLeft', 'BracketRight'])
 
 /** Хоткеи интерфейса: работают без pointer lock и в движок не попадают. */
 function onHotkey(e: KeyboardEvent): boolean {
   if (!HOTKEYS.has(e.code)) return false
   // Cmd+H / Ctrl+G и т.п. — системные сочетания, их не перехватываем.
   if (e.ctrlKey || e.metaKey || e.altKey) return false
-  // Дальность при удержании листается автоповтором; G и H — по одному нажатию.
+  // Дальность при удержании листается автоповтором; G и N — по одному нажатию.
   if (e.code === 'BracketLeft') changeRenderDistance(-1)
   else if (e.code === 'BracketRight') changeRenderDistance(1)
   else if (!e.repeat) {
     if (e.code === 'KeyG') void switchApi()
-    else emit('toggle-controls')
+    else if (!switching) emit('ask-new-world')
   }
   return true
 }
@@ -129,12 +375,12 @@ function columnsWord(n: number): string {
 }
 
 function changeRenderDistance(delta: number) {
-  const current = engine.value
-  if (!current) return
-  // Движок сам зажимает значение в допустимые пределы.
-  current.set_render_distance(current.render_distance() + delta)
-  const columns = current.render_distance()
-  saveRenderDistance(columns)
+  const columns = Math.min(
+    MAX_RENDER_DISTANCE,
+    Math.max(MIN_RENDER_DISTANCE, props.settings.renderDistance + delta),
+  )
+  if (columns === props.settings.renderDistance) return
+  // Значение лежит в настройках у App; в движок оно попадёт через watch.
   emit('render-distance', columns)
   emit('notice', `Дальность: ${columns} ${columnsWord(columns)}`)
 }
@@ -144,42 +390,56 @@ function onKeyDown(e: KeyboardEvent) {
   if (!locked.value) return
   if (GAME_KEYS.has(e.code)) e.preventDefault()
   if (e.repeat) return
-  // Цифры выбирают блок и в движок как клавиши полёта не попадают.
-  const block = BLOCK_KEYS[e.code]
-  if (block) {
-    if (!e.ctrlKey && !e.metaKey && !e.altKey) selectBlock(block)
+  // Полёт сквозь блоки — отладочный: только при включённой отладке в настройках.
+  if (e.code === 'KeyV' && props.settings.showDebug && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    engine.value?.toggle_noclip()
+    return
+  }
+  // Перемотка времени суток (×60) — отладочная, пока T зажата.
+  if (e.code === 'KeyT' && props.settings.showDebug && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    engine.value?.set_time_fast(true)
+    return
+  }
+  // Цифры выбирают слот и в движок как клавиши не попадают.
+  const digit = /^Digit([1-9])$/.exec(e.code)
+  if (digit) {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) emit('update:slot', Number(digit[1]) - 1)
     return
   }
   engine.value?.set_key(e.code, true)
 }
 
 function onKeyUp(e: KeyboardEvent) {
+  if (e.code === 'KeyT') engine.value?.set_time_fast(false)
   engine.value?.set_key(e.code, false)
 }
 
 function onBlur() {
+  engine.value?.set_time_fast(false)
   engine.value?.release_all_keys()
 }
 
 function startLoop() {
   let frames = 0
   let lastFpsTime = performance.now()
+  let player: PlayerInfo | undefined
   const frame = (now: number) => {
-    engine.value!.render(now / 1000)
+    const current = engine.value!
+    const renderStart = BENCH ? performance.now() : 0
+    current.render(now / 1000)
+    if (BENCH) benchFrames.push(now, performance.now() - renderStart)
     frames++
+    // Читаем каждый кадр, чтобы HUD не отставал, но эмитим только изменения.
+    const mode = current.player_mode() as PlayerInfo['mode']
+    const onGround = current.on_ground()
+    if (player?.mode !== mode || player.onGround !== onGround) {
+      player = { mode, onGround }
+      emit('player', player)
+    }
     if (now - lastFpsTime >= 1000) {
       emit('fps', frames)
-      const [columns, meshedColumns, meshedSections, queued, generateUs, meshUs, drawnSections] =
-        engine.value!.stats()
-      emit('stats', {
-        columns,
-        meshedColumns,
-        meshedSections,
-        queued,
-        generateUs,
-        meshUs,
-        drawnSections,
-      })
+      emit('stats', parseStats(engine.value!.stats()))
+      emit('time', { time: engine.value!.time_of_day(), phase: engine.value!.day_phase() })
       frames = 0
       lastFpsTime = now
     }
@@ -188,17 +448,27 @@ function startLoop() {
   rafId = requestAnimationFrame(frame)
 }
 
-async function start(camera?: Float32Array) {
+/** `player` — `camera_state()`; без него игрок на спауне. Правки берутся из `worldColumns`. */
+async function start(seed: number, player?: ArrayLike<number>, time?: number) {
   resize()
-  const created = await Engine.create(canvas.value!, preferred, camera)
+  const camera = player ? Float32Array.from(player) : undefined
+  const created = await Engine.create(canvas.value!, preferred, camera, seed)
   if (disposed) {
     created.free()
     return
   }
-  created.set_render_distance(loadRenderDistance())
-  emit('render-distance', created.render_distance())
-  created.select_block(selectedBlock.value)
-  emit('block', selectedBlock.value)
+  importColumns(created)
+  if (BENCH) {
+    created.set_time_of_day(BENCH_TIME)
+    created.set_time_frozen(true)
+    window.__benchEngine = created
+  } else if (time !== undefined && Number.isFinite(time)) {
+    created.set_time_of_day(time)
+  }
+  applySettings(created)
+  // Меню открыто (курсор не захвачен) — новый движок тоже начинает с паузы.
+  created.set_paused(BENCH ? false : !locked.value)
+  applySlot(created)
   engine.value = created
   const backend = created.backend() as GraphicsApi
   emit('api', { backend, fallback: preferred === 'webgpu' && backend === 'webgl2' })
@@ -218,11 +488,14 @@ function stop() {
   engine.value = undefined
 }
 
-async function switchApi() {
+/** Переключает графический API; без аргумента — на другой, как клавиша G. */
+async function switchApi(requested?: GraphicsApi) {
   const current = engine.value
   if (switching || !current) return
-  const target: GraphicsApi = current.backend() === 'webgpu' ? 'webgl2' : 'webgpu'
-  switching = true
+  const target: GraphicsApi =
+    requested ?? (current.backend() === 'webgpu' ? 'webgl2' : 'webgpu')
+  if (target === current.backend()) return
+  setSwitching(true)
   try {
     // Проверяем заранее, чтобы не пересоздавать canvas ради того же WebGL2.
     if (target === 'webgpu' && !(await Engine.webgpu_supported())) {
@@ -230,16 +503,46 @@ async function switchApi() {
       return
     }
     const camera = current.camera_state()
+    const seed = current.seed()
+    const time = current.time_of_day()
+    // Кроме записи в базу, `save` снимает правки в `worldColumns`: оттуда их получит новый движок.
+    await save()
     stop()
     preferred = target
     saveGraphicsApi(target)
     canvasKey.value++
     await nextTick()
-    await start(camera)
+    await start(seed, camera, time)
   } catch (e) {
     error.value = String(e)
   } finally {
-    switching = false
+    setSwitching(false)
+  }
+}
+
+/** Подтверждение спрашивает меню; здесь мир заменяется сразу. */
+async function newWorld() {
+  const current = engine.value
+  if (switching || !current) return
+  setSwitching(true)
+  try {
+    // Движок останавливаем до очистки, чтобы автосохранение не записало старый мир
+    // поверх пустой базы; начатая запись должна закончиться до `clear`.
+    stop()
+    await saving
+    worldColumns.clear()
+    unsaved.clear()
+    await clearStorage()
+    canvasKey.value++
+    await nextTick()
+    await start(randomSeed())
+    // Сразу, а не через AUTOSAVE_MS: иначе перезагрузка вернула бы мир с сидом по умолчанию.
+    void save()
+    emit('notice', 'Новый мир')
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    setSwitching(false)
   }
 }
 
@@ -248,32 +551,50 @@ onMounted(async () => {
   document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('mousedown', onMouseDown)
   document.addEventListener('mouseup', onMouseUp)
+  document.addEventListener('wheel', onWheel, { passive: false })
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', onBlur)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('pagehide', onPageHide)
 
-  switching = true
   try {
     await init()
-    await start()
+    formatVersion = Engine.format_version()
+    if (BENCH) {
+      // Мир в памяти: без хранилища `save` ничего не делает, автосохранения нет.
+      await start(BENCH_SEED, BENCH_POINTS[0].camera)
+      void runBench(() => engine.value!, benchFrames, canvas.value!)
+    } else {
+      const world = await loadWorld()
+      await start(world.seed, world.player, world.time)
+      autosaveId = window.setInterval(save, AUTOSAVE_MS)
+    }
   } catch (e) {
     error.value = String(e)
   } finally {
-    switching = false
+    setSwitching(false)
   }
 })
 
 onBeforeUnmount(() => {
   disposed = true
+  clearInterval(autosaveId)
+  void save()
   stop()
   document.removeEventListener('pointerlockchange', onLockChange)
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mousedown', onMouseDown)
   document.removeEventListener('mouseup', onMouseUp)
+  document.removeEventListener('wheel', onWheel)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', onBlur)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('pagehide', onPageHide)
 })
+
+defineExpose({ requestLock, releaseCursor, switchApi, newWorld })
 </script>
 
 <template>
@@ -281,10 +602,8 @@ onBeforeUnmount(() => {
     :key="canvasKey"
     ref="canvas"
     class="game"
-    @click="requestLock"
     @contextmenu.prevent
   />
-  <div v-if="engine && !locked" class="hint">Кликни, чтобы играть</div>
   <div v-if="engine && locked" class="crosshair" />
   <div v-if="error" class="error">Не удалось запустить движок: {{ error }}</div>
 </template>
@@ -294,17 +613,6 @@ onBeforeUnmount(() => {
   display: block;
   width: 100vw;
   height: 100vh;
-}
-.hint {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 24px;
-  text-shadow: 1px 1px 0 #000;
-  background: rgba(0, 0, 0, 0.45);
-  pointer-events: none;
 }
 .crosshair {
   position: fixed;

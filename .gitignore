@@ -4,3 +4,4 @@ target
 engine/pkg
 .claude/
 .DS_Store
+tsconfig.tsbuildinfo
