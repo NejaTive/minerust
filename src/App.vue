@@ -38,6 +38,7 @@ const noWebGpu = ref<string>()
 const stats = ref<WorldStats>()
 const time = ref<TimeInfo>()
 const notice = ref<string>()
+const newerSave = ref(false)
 const slot = ref(loadHotbarSlot())
 const block = computed(() => HOTBAR[slot.value] ?? null)
 const player = ref<PlayerInfo>()
@@ -103,6 +104,7 @@ async function newWorld() {
     @ready="ready = true"
     @no-webgpu="noWebGpu = $event ?? ''"
     @notice="showNotice"
+    @newer-save="newerSave = $event"
     @render-distance="settings.renderDistance = $event"
     @player="player = $event"
     @lock="onLock"
@@ -127,6 +129,7 @@ async function newWorld() {
     :started="started"
     :busy="busy"
     :lock-failed="lockFailed"
+    :newer-save="newerSave"
     @update:settings="updateSettings"
     @play="play"
     @new-world="newWorld"

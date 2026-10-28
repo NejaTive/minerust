@@ -41,6 +41,8 @@ const emit = defineEmits<{
   /** WebGPU нет: `reason` — текст ошибки движка, если браузер его заявил, но адаптера нет. */
   'no-webgpu': [reason?: string]
   notice: [text: string]
+  /** В базе мир более новой версии игры: он не загружен и не перезаписывается. */
+  'newer-save': [newer: boolean]
   'render-distance': [columns: number]
   /** Игрок выбрал слот хотбара (клавиша, колесо): v-model:slot. */
   'update:slot': [slot: number]
@@ -193,6 +195,9 @@ const AUTOSAVE_MS = 5000
 // `null` — IndexedDB недоступен, игра идёт без сохранений.
 let storage: WorldStorage | null = null
 let formatVersion = 0
+// В базе мир, записанный более новой версией игры: не читаем и не пишем поверх, пока
+// игрок явно не начнёт новый мир (`newWorld` сотрёт базу после подтверждения).
+let newerSave = false
 // Последние байты каждой изменённой колонки текущего мира (и прочитанных из базы).
 const worldColumns = new Map<string, SavedColumn>()
 // Колонки, снятые с движка, но ещё не записанные. При ошибке записи остаются здесь
@@ -229,7 +234,7 @@ function collectColumns(current: Engine) {
 function save(): Promise<void> {
   const current = engine.value
   const store = storage
-  if (!current || !store) return saving
+  if (!current || !store || newerSave) return saving
   collectColumns(current)
   const meta: WorldMeta = {
     version: formatVersion,
@@ -264,9 +269,15 @@ function onPageHide() {
   void save()
 }
 
-function isCompatible(meta: WorldMeta): boolean {
+/**
+ * Метаданные читаются: версия формата не раньше первой, seed и позиция на месте.
+ * Версию нового или старого формата проверяет `loadWorld`: колонки старых версий
+ * движок мигрирует при импорте.
+ */
+function isReadable(meta: WorldMeta): boolean {
   return (
-    meta.version === formatVersion &&
+    Number.isInteger(meta.version) &&
+    meta.version >= 1 &&
     Number.isInteger(meta.seed) &&
     Array.isArray(meta.player) &&
     meta.player.length === 6 &&
@@ -315,10 +326,16 @@ async function loadWorld(): Promise<WorldStart> {
     return { seed: DEFAULT_SEED }
   }
   if (!saved) return { seed: DEFAULT_SEED }
-  if (!isCompatible(saved.meta)) {
+  if (!isReadable(saved.meta)) {
     await clearStorage()
-    emit('notice', 'Сохранение несовместимо — начат новый мир')
+    emit('notice', 'Сохранение повреждено — начат новый мир')
     return { seed: randomSeed() }
+  }
+  if (saved.meta.version > formatVersion) {
+    newerSave = true
+    emit('newer-save', true)
+    emit('notice', 'Сохранение из более новой версии игры — мир не загружен')
+    return { seed: DEFAULT_SEED }
   }
   for (const column of saved.columns) worldColumns.set(columnKey(column), column)
   return saved.meta
@@ -493,6 +510,10 @@ async function newWorld() {
     worldColumns.clear()
     unsaved.clear()
     await clearStorage()
+    if (storage) {
+      newerSave = false
+      emit('newer-save', false)
+    }
     canvasKey.value++
     await nextTick()
     await start(randomSeed())
