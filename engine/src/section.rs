@@ -45,6 +45,18 @@ impl Section {
         self.blocks[index]
     }
 
+    /// Блоки строки по x при заданных y и z (0..16): 16 подряд идущих блоков, чтобы
+    /// кэш мешера копировал их срезом, а не по одному.
+    pub fn row(&self, y: i32, z: i32) -> &[Block] {
+        let start = (SECTION_SIZE * z + SECTION_SIZE * SECTION_SIZE * y) as usize;
+        &self.blocks[start..start + SECTION_SIZE as usize]
+    }
+
+    /// Нет ли в секции ничего, кроме воздуха.
+    pub fn is_air(&self) -> bool {
+        self.blocks.iter().all(|&b| b == Block::Air)
+    }
+
     /// Ставит блок по локальным координатам; за пределами 0..16 — panic.
     pub fn set(&mut self, local: IVec3, block: Block) {
         let slot = &mut self.blocks[Self::index(local)];
