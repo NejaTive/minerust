@@ -6,7 +6,18 @@ export const API_LABELS: Record<GraphicsApi, string> = {
 }
 
 /** Блоки, которые игрок ставит; имена — как в `Engine.select_block`. */
-export type BlockName = 'grass' | 'dirt' | 'stone' | 'sand' | 'log' | 'leaves' | 'glowstone'
+export type BlockName =
+  | 'grass'
+  | 'dirt'
+  | 'stone'
+  | 'sand'
+  | 'log'
+  | 'leaves'
+  | 'glowstone'
+  | 'tall_grass'
+  | 'poppy'
+  | 'dandelion'
+  | 'torch'
 
 export const BLOCK_LABELS: Record<BlockName, string> = {
   grass: 'трава',
@@ -16,6 +27,10 @@ export const BLOCK_LABELS: Record<BlockName, string> = {
   log: 'бревно',
   leaves: 'листва',
   glowstone: 'светокамень',
+  tall_grass: 'высокая трава',
+  poppy: 'мак',
+  dandelion: 'одуванчик',
+  torch: 'факел',
 }
 
 /**
@@ -30,8 +45,8 @@ export const HOTBAR: (BlockName | null)[] = [
   'log',
   'leaves',
   'glowstone',
-  null,
-  null,
+  'torch',
+  'poppy',
 ]
 
 const GRAPHICS_API_KEY = 'minerust.graphicsApi'

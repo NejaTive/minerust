@@ -5,7 +5,7 @@ use crate::block::Block;
 use crate::caves::Caves;
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::section::SECTION_SIZE;
-use crate::trees;
+use crate::{plants, trees};
 
 /// Слоёв земли под травой.
 const DIRT_DEPTH: i32 = 3;
@@ -143,6 +143,13 @@ impl Terrain {
     /// Колонка по её координатам (мировые x, z / 16): земля, пещеры и деревья, в том
     /// числе кроны деревьев соседних колонок, нависающие над этой.
     pub fn generate(&self, key: IVec2) -> Column {
+        let mut column = self.generate_trees(key);
+        plants::plant(self, key, &mut column);
+        column
+    }
+
+    /// Колонка с пещерами и деревьями, без растений: тесты мешера и деревьев сверяют кубы.
+    pub(crate) fn generate_trees(&self, key: IVec2) -> Column {
         let mut column = self.generate_carved(key);
         trees::plant(self, key, &mut column);
         column

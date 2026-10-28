@@ -15,6 +15,7 @@ pub mod mesh;
 pub mod mesher;
 pub mod outline;
 pub mod physics;
+pub mod plants;
 pub mod raycast;
 pub mod repeat;
 pub mod save;
