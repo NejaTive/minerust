@@ -48,6 +48,12 @@ impl World {
             .map_or(Block::Air, |column| column.get(local))
     }
 
+    /// Колонка `key` и восемь соседей: индекс `dx + 1 + 3·(dz + 1)`, центр — 4;
+    /// незагруженные — `None`. Мешеру: один запрос на колонку вместо хэша на блок.
+    pub fn neighborhood(&self, key: IVec2) -> [Option<&Column>; 9] {
+        std::array::from_fn(|i| self.column(key + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1)))
+    }
+
     /// Ставит блок по мировым координатам. `false` (и ничего не меняет), если y вне
     /// 0..WORLD_HEIGHT или колонка не загружена. Колонка помечается изменённой и
     /// несохранённой.

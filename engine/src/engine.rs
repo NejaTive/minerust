@@ -15,7 +15,7 @@ use crate::globals::Globals;
 use crate::light::LightMap;
 use crate::loader::{Loader, NEIGHBORS, Progress};
 use crate::mesh::{self, Vertex};
-use crate::mesher::{MeshData, MeshOptions, SectionMeshes, mesh_column, mesh_world_section};
+use crate::mesher::{MeshData, MeshOptions, SectionMeshes, mesh_world_column, mesh_world_section};
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, next_fov_scale};
 use crate::raycast::{Hit, raycast};
@@ -86,6 +86,9 @@ pub struct Engine {
     outline_pipeline: wgpu::RenderPipeline,
     /// Рёбра рамки вокруг `outline_block`.
     outline_buffer: wgpu::Buffer,
+    /// Индексы квадов `0,1,2, 0,2,3` для всех мешей секций ([`mesh::quad_index_bytes`]):
+    /// диагональ выбирается порядком вершин, так что своих индексов у секции нет.
+    quad_index_buffer: wgpu::Buffer,
     /// Блок, чья рамка сейчас лежит в `outline_buffer`.
     outline_block: Option<IVec3>,
     /// Блок под прицелом в последнем кадре; рамка рисуется вокруг него.
@@ -370,6 +373,11 @@ impl Engine {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let quad_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("quad indices"),
+            contents: &mesh::quad_index_bytes(),
+            usage: wgpu::BufferUsages::INDEX,
+        });
         let pipeline = create_block_pipeline(
             &device,
             &pipeline_layout,
@@ -395,6 +403,7 @@ impl Engine {
             water_pipeline,
             outline_pipeline,
             outline_buffer,
+            quad_index_buffer,
             outline_block: None,
             target: None,
             breaking: Repeat::new(REPEAT_S),
@@ -592,10 +601,9 @@ impl Engine {
             .values()
             .flatten()
             .flatten()
-            .flat_map(|mesh| [&mesh.solid, &mesh.water])
-            .flatten()
-            .map(GpuMesh::bytes)
-            .sum();
+            .map(SectionMesh::bytes)
+            .sum::<u64>()
+            + self.quad_index_buffer.size();
         let counts = self.frame_counts;
         vec![
             self.world.len() as u32,
@@ -895,6 +903,7 @@ impl Engine {
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipeline);
+            pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
             let visible: Vec<&SectionMesh> = self
                 .column_meshes
@@ -904,8 +913,11 @@ impl Engine {
                 .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max))
                 .collect();
             let mut counts = FrameCounts::default();
-            for mesh in visible.iter().filter_map(|mesh| mesh.solid.as_ref()) {
-                mesh.draw(&mut pass);
+            for (section, mesh) in visible
+                .iter()
+                .filter_map(|section| Some((*section, section.solid.as_ref()?)))
+            {
+                mesh.draw(&mut pass, &section.origin);
                 counts.solid_vertices += mesh.vertex_count;
                 counts.solid_indices += mesh.index_count;
                 counts.draw_calls += 1;
@@ -925,18 +937,18 @@ impl Engine {
             // Внутри секции грани не сортируются: цвет у воды один, и разница почти
             // не видна.
             let eye = self.camera.position;
-            let mut water: Vec<(f32, &GpuMesh)> = visible
+            let mut water: Vec<(f32, &SectionMesh, &GpuMesh)> = visible
                 .iter()
                 .filter_map(|mesh| {
                     let center = (mesh.min + mesh.max) / 2.0;
-                    Some((center.distance_squared(eye), mesh.water.as_ref()?))
+                    Some((center.distance_squared(eye), *mesh, mesh.water.as_ref()?))
                 })
                 .collect();
             if !water.is_empty() {
                 water.sort_by(|a, b| b.0.total_cmp(&a.0));
                 pass.set_pipeline(&self.water_pipeline);
-                for (_, mesh) in water {
-                    mesh.draw(&mut pass);
+                for (_, section, mesh) in water {
+                    mesh.draw(&mut pass, &section.origin);
                     counts.water_vertices += mesh.vertex_count;
                     counts.water_indices += mesh.index_count;
                     counts.draw_calls += 1;
@@ -1322,10 +1334,9 @@ struct FrameCounts {
     draw_calls: u32,
 }
 
-/// GPU-буферы одного меша. Индексы `u16`: на секцию их всегда хватает.
+/// GPU-буфер вершин одного меша; индексы общие (`Engine::quad_index_buffer`).
 struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
     vertex_count: u32,
     index_count: u32,
 }
@@ -1333,36 +1344,30 @@ struct GpuMesh {
 impl GpuMesh {
     /// `None` для пустого меша: буфер нулевого размера не нужен.
     fn upload(device: &wgpu::Device, data: &MeshData) -> Option<GpuMesh> {
-        if data.indices.is_empty() {
+        if data.vertices.is_empty() {
             return None;
         }
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("section vertices"),
-            contents: &mesh::vertex_bytes(&data.vertices),
+            contents: &mesh::vertex_bytes(&mesh::gpu_vertices(&data.vertices, &data.indices)),
             usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("section indices"),
-            contents: &mesh::index_bytes(&data.indices),
-            usage: wgpu::BufferUsages::INDEX,
         });
         Some(GpuMesh {
             vertex_buffer,
-            index_buffer,
             vertex_count: data.vertices.len() as u32,
             index_count: data.indices.len() as u32,
         })
     }
 
-    /// Размер обоих буферов на GPU, байт.
+    /// Размер буфера вершин на GPU, байт.
     fn bytes(&self) -> u64 {
-        self.vertex_buffer.size() + self.index_buffer.size()
+        self.vertex_buffer.size()
     }
 
-    /// Пайплайн и bind group уже выставлены.
-    fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+    /// Пайплайн, bind group и индексы уже выставлены; `origin` — буфер угла секции ([`mesh::origin_layout`]).
+    fn draw(&self, pass: &mut wgpu::RenderPass<'_>, origin: &wgpu::Buffer) {
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.set_vertex_buffer(1, origin.slice(..));
         pass.draw_indexed(0..self.index_count, 0, 0..1);
     }
 }
@@ -1371,9 +1376,23 @@ impl GpuMesh {
 struct SectionMesh {
     solid: Option<GpuMesh>,
     water: Option<GpuMesh>,
+    /// Мировой угол секции для вершинного шейдера: один буфер на оба прохода.
+    origin: wgpu::Buffer,
     /// Коробка секции целиком в мировых координатах — для отсечения по пирамиде.
     min: Vec3,
     max: Vec3,
+}
+
+impl SectionMesh {
+    /// Размер буферов секции на GPU, байт.
+    fn bytes(&self) -> u64 {
+        [&self.solid, &self.water]
+            .into_iter()
+            .flatten()
+            .map(GpuMesh::bytes)
+            .sum::<u64>()
+            + self.origin.size()
+    }
 }
 
 /// Меши секций колонки снизу вверх; `None` — секция без видимых граней. Номер
@@ -1389,17 +1408,9 @@ fn upload_column(
     key: IVec2,
     options: MeshOptions,
 ) -> ColumnMeshes {
-    let column = world
-        .column(key)
-        .expect("loader meshes only loaded columns");
     let origin = IVec3::new(key.x * SECTION_SIZE, 0, key.y * SECTION_SIZE);
-    let data = mesh_column(
-        column,
-        origin,
-        |local| world.block(origin + local),
-        light.column_sampler(key),
-        options,
-    );
+    let data =
+        mesh_world_column(world, light, key, options).expect("loader meshes only loaded columns");
     std::array::from_fn(|sy| {
         let min = (origin + IVec3::Y * sy as i32 * SECTION_SIZE).as_vec3();
         upload_section(device, &data[sy], min)
@@ -1413,9 +1424,15 @@ fn upload_section(device: &wgpu::Device, data: &SectionMeshes, min: Vec3) -> Opt
     if solid.is_none() && water.is_none() {
         return None;
     }
+    let origin = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("section origin"),
+        contents: &mesh::origin_bytes(min.to_array()),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
     Some(SectionMesh {
         solid,
         water,
+        origin,
         min,
         max: min + SECTION_SIZE as f32,
     })
@@ -1445,7 +1462,7 @@ fn create_block_pipeline(
         vertex: wgpu::VertexState {
             module: shader,
             entry_point: Some("vs_main"),
-            buffers: &[Some(Vertex::layout())],
+            buffers: &[Some(Vertex::layout()), Some(mesh::origin_layout())],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {

@@ -21,11 +21,12 @@ var block_textures: texture_2d_array<f32>;
 @group(0) @binding(2)
 var block_sampler: sampler;
 
+// Вершина — два u32, раскладка в mesh.rs (`Vertex`): позиция локальная в 1/16 блока,
+// UV в 1/16 тайла, слой и яркость по байту. `origin` — мировой угол секции, один на
+// весь вызов (буфер с шагом по экземплярам).
 struct VertexIn {
-    @location(0) position: vec3<f32>,
-    @location(1) uv: vec2<f32>,
-    @location(2) shade: f32,
-    @location(3) layer: u32,
+    @location(0) packed: vec2<u32>,
+    @location(1) origin: vec3<f32>,
 };
 
 struct VertexOut {
@@ -39,12 +40,20 @@ struct VertexOut {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
+    let a = in.packed.x;
+    let b = in.packed.y;
+    let local = vec3<f32>(
+        f32(a & 0x1FFu),
+        f32((a >> 9u) & 0x1FFu),
+        f32((a >> 18u) & 0x1FFu),
+    ) / 16.0;
+    let world_pos = in.origin + local;
     var out: VertexOut;
-    out.position = globals.view_proj * vec4<f32>(in.position, 1.0);
-    out.uv = in.uv;
-    out.shade = in.shade;
-    out.layer = in.layer;
-    out.world_pos = in.position;
+    out.position = globals.view_proj * vec4<f32>(world_pos, 1.0);
+    out.uv = vec2<f32>(f32(a >> 27u), f32(b & 0x1Fu)) / 16.0;
+    out.shade = f32((b >> 13u) & 0xFFu) / 255.0;
+    out.layer = (b >> 5u) & 0xFFu;
+    out.world_pos = world_pos;
     return out;
 }
 

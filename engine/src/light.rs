@@ -29,12 +29,17 @@ fn level_brightness(level: f32) -> f32 {
 }
 
 /// Яркость среднего уровня `sum / count` (count 1..=4, как у вершины при плавном
-/// освещении). Среднее кратно 1/12 (НОК 1..=4), поэтому хватает таблицы: `powf` на
-/// каждую вершину заметно удорожал бы меш.
+/// освещении, sum ≤ 4·[`MAX_LIGHT`]). Хватает таблицы: `powf` на каждую вершину заметно
+/// удорожал бы меш, а таблица по паре (count, sum) обходит ещё и деление на каждую
+/// вершину.
 pub fn average_brightness(sum: u32, count: u32) -> f32 {
-    static TABLE: LazyLock<[f32; 12 * MAX_LIGHT as usize + 1]> =
-        LazyLock::new(|| std::array::from_fn(|i| level_brightness(i as f32 / 12.0)));
-    TABLE[(sum * 12 / count) as usize]
+    const SUMS: usize = 4 * MAX_LIGHT as usize + 1;
+    static TABLE: LazyLock<[[f32; SUMS]; 4]> = LazyLock::new(|| {
+        std::array::from_fn(|c| {
+            std::array::from_fn(|sum| level_brightness(sum as f32 / (c + 1) as f32))
+        })
+    });
+    TABLE[count as usize - 1][sum as usize]
 }
 
 /// Два канала света в одном байте: солнечный в младших 4 битах, свет блоков в старших.
@@ -119,6 +124,14 @@ impl ColumnLight {
     }
 }
 
+impl ColumnLight {
+    /// Байты света строки по x при заданных y (0..128) и z (0..16): 16 подряд идущих.
+    pub fn row(&self, y: i32, z: i32) -> &[u8] {
+        let start = column_index(IVec3::new(0, y, z));
+        &self.0[start..start + SECTION_SIZE as usize]
+    }
+}
+
 fn column_index(local: IVec3) -> usize {
     (local.x + SECTION_SIZE * local.z + SECTION_SIZE * SECTION_SIZE * local.y) as usize
 }
@@ -185,14 +198,19 @@ impl LightMap {
         self.columns.get(&key)
     }
 
+    /// Свет колонки `key` и восьми соседей: индекс `dx + 1 + 3·(dz + 1)`, центр — 4.
+    pub fn neighborhood(&self, key: IVec2) -> [Option<&ColumnLight>; 9] {
+        std::array::from_fn(|i| {
+            self.columns
+                .get(&(key + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1)))
+        })
+    }
+
     /// Байт света по локальным координатам колонки `key`, в том числе за её краем (x, z в
     /// −16..32), как [`LightMap::packed`]. Мешер спрашивает свет всех клеток колонки, и
     /// поиск колонки в `HashMap` на каждую был бы заметен: колонки 3×3 берутся заранее.
     pub fn column_sampler(&self, key: IVec2) -> impl Fn(IVec3) -> u8 + '_ {
-        let columns: [Option<&ColumnLight>; 9] = std::array::from_fn(|i| {
-            self.columns
-                .get(&(key + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1)))
-        });
+        let columns = self.neighborhood(key);
         move |local: IVec3| {
             if local.y >= WORLD_HEIGHT {
                 return MAX_LIGHT;
