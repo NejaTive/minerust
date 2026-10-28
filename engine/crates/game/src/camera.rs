@@ -2,14 +2,16 @@ use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
 
 /// Вертикальный угол обзора по умолчанию, градусы.
-const DEFAULT_FOV: f32 = 70.0;
+pub const DEFAULT_FOV: f32 = 70.0;
 /// Пределы угла обзора, градусы: ниже 60 картинка «туннельная», выше 110 края сильно растянуты.
 pub const MIN_FOV: f32 = 60.0;
 pub const MAX_FOV: f32 = 110.0;
 const NEAR: f32 = 0.1;
 /// Поворот камеры при множителе 1, радиан на пиксель движения мыши.
 const BASE_SENSITIVITY: f32 = 0.002;
-/// Пределы множителя чувствительности; дублируются в `src/settings.ts`.
+/// Множитель чувствительности по умолчанию.
+pub const DEFAULT_SENSITIVITY: f32 = 1.0;
+/// Пределы множителя чувствительности.
 pub const MIN_SENSITIVITY: f32 = 0.25;
 pub const MAX_SENSITIVITY: f32 = 3.0;
 const MAX_PITCH: f32 = 89.0 * std::f32::consts::PI / 180.0;
@@ -36,7 +38,7 @@ impl Camera {
             position,
             yaw: 0.0,
             pitch: SPAWN_PITCH,
-            sensitivity: 1.0,
+            sensitivity: DEFAULT_SENSITIVITY,
             fov: DEFAULT_FOV,
         }
     }
@@ -54,7 +56,7 @@ impl Camera {
             position: Vec3::new(x, y, z),
             yaw,
             pitch: pitch.clamp(-MAX_PITCH, MAX_PITCH),
-            sensitivity: 1.0,
+            sensitivity: DEFAULT_SENSITIVITY,
             fov: DEFAULT_FOV,
         })
     }

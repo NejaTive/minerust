@@ -1,5 +1,6 @@
 // Весь код крейта — склейка под браузер: surface из canvas (`wgpu::SurfaceTarget::Canvas`)
 // есть только на wasm32. На хосте собираются лишь тесты констант шейдеров.
+pub mod api;
 #[cfg(target_arch = "wasm32")]
 mod engine;
 #[cfg(target_arch = "wasm32")]

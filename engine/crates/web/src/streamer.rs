@@ -76,10 +76,6 @@ impl Streamer {
         self.loader.set_radius(columns);
     }
 
-    pub(crate) fn ambient_occlusion(&self) -> bool {
-        self.mesh_options.ambient_occlusion
-    }
-
     /// Меши всех колонок перестраиваются постепенно, ближние первыми, в бюджете подгрузки.
     pub(crate) fn set_ambient_occlusion(
         &mut self,
