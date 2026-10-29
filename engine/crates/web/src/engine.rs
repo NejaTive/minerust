@@ -157,6 +157,7 @@ impl Engine {
             meshed_columns: self.renderer.column_count(),
             sections: self.renderer.section_count(),
             pending: self.streamer.pending(),
+            mesh_jobs: self.streamer.jobs_in_flight(),
             drawn_sections: self.renderer.drawn_sections(),
             light_kib: self.game.light.memory_bytes() / 1024,
             counts: self.renderer.frame_counts(),
@@ -168,6 +169,26 @@ impl Engine {
             self.profiler.gpu_frame_time.record_total(total_ms, count);
         }
         self.profiler.stats(&scene)
+    }
+
+    /// Сколько заданий мешера можно держать в воркерах одновременно; 0 — воркеров нет,
+    /// и меши строятся здесь же, в бюджете кадра. Фронт ставит число после запуска пула
+    /// и сбрасывает в 0, если пул упал: задания в полёте тогда строятся заново на месте.
+    pub fn set_mesh_slots(&mut self, slots: u32) {
+        self.streamer.set_job_slots(slots as usize);
+    }
+
+    /// Следующее задание для воркера (`mesh::job`) или `None`, если очередь пуста.
+    /// Задания кодирует `render` в бюджете подгрузки; забирать их надо после каждого кадра.
+    pub fn take_mesh_job(&mut self) -> Option<Vec<u8>> {
+        self.streamer.take_job()
+    }
+
+    /// Результат воркера на задание из [`Engine::take_mesh_job`]; `mesh_ms` — время меша
+    /// в воркере. На GPU результат встаёт в ближайшем `render`; устаревший отбрасывается.
+    pub fn submit_mesh_result(&mut self, bytes: &[u8], mesh_ms: f64) {
+        self.streamer
+            .push_result(bytes, mesh_ms, &mut self.profiler);
     }
 
     /// Длительность последней завершённой загрузки мира, мс; 0, пока идёт. В отличие от

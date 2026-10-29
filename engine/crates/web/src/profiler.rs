@@ -53,6 +53,8 @@ pub(crate) struct SceneStats {
     pub sections: usize,
     /// Колонки и секции в очередях загрузки и перестройки.
     pub pending: usize,
+    /// Заданий мешера в воркерах.
+    pub mesh_jobs: usize,
     pub drawn_sections: u32,
     pub light_kib: usize,
     pub counts: FrameCounts,
@@ -66,7 +68,14 @@ pub(crate) struct Profiler {
     /// `None`, если `window.performance` недоступен: тогда замеры нулевые.
     pub(crate) performance: Option<Performance>,
     pub(crate) generate_time: AverageTime,
+    /// Меш колонки на месте, без воркеров (запасной путь и старт).
     pub(crate) mesh_time: AverageTime,
+    /// Основной поток отдаёт задание воркеру: заполнение кэшей секций 18³.
+    pub(crate) encode_time: AverageTime,
+    /// Основной поток принимает результат: разбор байтов и загрузка на GPU.
+    pub(crate) apply_time: AverageTime,
+    /// Меш задания в воркере (мс считает воркер, `performance.now` вокруг `run_job`).
+    pub(crate) worker_time: AverageTime,
     /// Расчёт света колонки при подгрузке (`LightMap::add_column`).
     pub(crate) light_time: AverageTime,
     /// Правка блока: свет и немедленная перестройка задетых секций.
@@ -95,6 +104,9 @@ impl Profiler {
             performance,
             generate_time: AverageTime::default(),
             mesh_time: AverageTime::default(),
+            encode_time: AverageTime::default(),
+            apply_time: AverageTime::default(),
+            worker_time: AverageTime::default(),
             light_time: AverageTime::default(),
             edit_time: AverageTime::default(),
             gpu_frame_time: AverageTime::default(),
@@ -166,6 +178,10 @@ impl Profiler {
             meshed_columns: scene.meshed_columns as u32,
             meshed_sections: scene.sections as u32,
             queued: scene.pending as u32,
+            mesh_jobs: scene.mesh_jobs as u32,
+            encode_us: self.encode_time.take_micros(),
+            apply_us: self.apply_time.take_micros(),
+            worker_mesh_us: self.worker_time.take_micros(),
             generate_us: self.generate_time.take_micros(),
             mesh_us: self.mesh_time.take_micros(),
             drawn_sections: scene.drawn_sections,

@@ -1,0 +1,13 @@
+[package]
+name = "worker"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+console_error_panic_hook.workspace = true
+mesh.workspace = true
+wasm-bindgen.workspace = true
