@@ -19,6 +19,7 @@ pub enum Block {
     Poppy,
     Dandelion,
     Torch,
+    Gravel,
 }
 
 pub const WATER_SURFACE: f32 = 0.875;
@@ -95,6 +96,7 @@ pub struct BlockDef {
     pub targetable: bool,
     pub replaceable: bool,
     pub needs_support: bool,
+    pub falls: bool,
     pub data: DataKind,
     pub emission: u8,
     pub layer: RenderLayer,
@@ -114,6 +116,7 @@ impl BlockDef {
         targetable: true,
         replaceable: false,
         needs_support: false,
+        falls: false,
         data: DataKind::None,
         emission: 0,
         layer: RenderLayer::Opaque,
@@ -148,7 +151,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 13] = [
+pub const BLOCKS: [BlockDef; 14] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -167,7 +170,10 @@ pub const BLOCKS: [BlockDef; 13] = [
     },
     BlockDef::uniform("dirt", "земля", Tile::Dirt),
     BlockDef::uniform("stone", "камень", Tile::Stone),
-    BlockDef::uniform("sand", "песок", Tile::Sand),
+    BlockDef {
+        falls: true,
+        ..BlockDef::uniform("sand", "песок", Tile::Sand)
+    },
     BlockDef {
         data: DataKind::Axis,
         top: Some(Tile::LogTop),
@@ -205,10 +211,14 @@ pub const BLOCKS: [BlockDef; 13] = [
         emission: 14,
         ..BlockDef::plant("torch", "факел", Tile::Torch)
     },
+    BlockDef {
+        falls: true,
+        ..BlockDef::uniform("gravel", "гравий", Tile::Gravel)
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 13] = [
+    pub const ALL: [Block; 14] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -222,6 +232,7 @@ impl Block {
         Block::Poppy,
         Block::Dandelion,
         Block::Torch,
+        Block::Gravel,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -335,6 +346,10 @@ impl Block {
 
     pub fn emission(self) -> u8 {
         self.def().emission
+    }
+
+    pub fn falls(self) -> bool {
+        self.def().falls
     }
 
     pub fn is_water(self) -> bool {

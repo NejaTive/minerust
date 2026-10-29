@@ -11,5 +11,6 @@
   { "name": "tall_grass", "label": "высокая трава", "placeable": true },
   { "name": "poppy", "label": "мак", "placeable": true },
   { "name": "dandelion", "label": "одуванчик", "placeable": true },
-  { "name": "torch", "label": "факел", "placeable": true }
+  { "name": "torch", "label": "факел", "placeable": true },
+  { "name": "gravel", "label": "гравий", "placeable": true }
 ]

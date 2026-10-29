@@ -1,25 +1,14 @@
-use std::collections::{HashSet, VecDeque};
-
 use glam::IVec3;
 
 use crate::block::{Block, FLUID_FALLING, FLUID_LEVEL_MASK, FLUID_MAX_LEVEL, FLUID_SOURCE};
 use crate::column::WORLD_HEIGHT;
+use crate::updates::Updates;
 use crate::world::World;
 
-pub const STEP_LIMIT: usize = 512;
 const SLOPE_DISTANCE: u32 = 4;
 const NO_SLOPE: u32 = 1000;
 
 const SIDES: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
-const AROUND: [IVec3; 6] = [
-    IVec3::Y,
-    IVec3::NEG_Y,
-    IVec3::X,
-    IVec3::NEG_X,
-    IVec3::Z,
-    IVec3::NEG_Z,
-];
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Cell {
     Solid,
@@ -51,8 +40,7 @@ fn spread_level(data: u8) -> u8 {
 
 #[derive(Default)]
 pub struct Fluid {
-    queue: VecDeque<IVec3>,
-    queued: HashSet<IVec3>,
+    updates: Updates,
 }
 
 impl Fluid {
@@ -61,45 +49,19 @@ impl Fluid {
     }
 
     pub fn len(&self) -> usize {
-        self.queue.len()
+        self.updates.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.queue.is_empty()
+        self.updates.is_empty()
     }
 
     pub fn block_changed(&mut self, world: &World, pos: IVec3) {
-        for cell in std::iter::once(IVec3::ZERO).chain(AROUND) {
-            let cell = pos + cell;
-            if (0..WORLD_HEIGHT).contains(&cell.y)
-                && world.is_loaded(cell)
-                && self.queued.insert(cell)
-            {
-                self.queue.push_back(cell);
-            }
-        }
+        self.updates.wake(world, pos);
     }
 
     pub fn step(&mut self, world: &mut World) -> Vec<IVec3> {
-        let mut changed = Vec::new();
-        let mut touched = HashSet::new();
-        for _ in 0..self.queue.len().min(STEP_LIMIT) {
-            let Some(pos) = self.queue.pop_front() else {
-                break;
-            };
-            if touched.contains(&pos) {
-                self.queue.push_back(pos);
-                continue;
-            }
-            self.queued.remove(&pos);
-            let before = changed.len();
-            update(world, pos, &mut changed);
-            for &cell in &changed[before..] {
-                touched.insert(cell);
-                self.block_changed(world, cell);
-            }
-        }
-        changed
+        self.updates.step(world, update)
     }
 }
 

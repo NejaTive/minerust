@@ -17,10 +17,11 @@ pub enum Tile {
     Poppy,
     Dandelion,
     Torch,
+    Gravel,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 14] = [
+    pub const ALL: [Tile; 15] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -35,6 +36,7 @@ impl Tile {
         Tile::Poppy,
         Tile::Dandelion,
         Tile::Torch,
+        Tile::Gravel,
     ];
 
     pub fn layer(self) -> u32 {
@@ -82,7 +84,7 @@ impl Tile {
             Stone => "stone", Sand => "sand", LogSide => "log_side", LogTop => "log_top",
             Leaves => "leaves", Water => "water", Glowstone => "glowstone",
             TallGrass => "tall_grass", Poppy => "poppy", Dandelion => "dandelion",
-            Torch => "torch",
+            Torch => "torch", Gravel => "gravel",
         }
     }
 }

@@ -11,6 +11,7 @@ use crate::{plants, trees};
 const DIRT_DEPTH: i32 = 3;
 const SEA_LEVEL: f32 = 64.0;
 pub const WATER_LEVEL: i32 = 62;
+const GRAVEL_DEPTH: i32 = 2;
 const BEACH: std::ops::RangeInclusive<i32> = WATER_LEVEL - 2..=WATER_LEVEL + 1;
 const BEACH_SAND_DEPTH: i32 = 3;
 const PLAINS_AMPLITUDE: f32 = 6.0;
@@ -161,7 +162,9 @@ impl Terrain {
                 } else {
                     0
                 };
-                let top = if surface < WATER_LEVEL {
+                let top = if WATER_LEVEL - surface > GRAVEL_DEPTH {
+                    Block::Gravel
+                } else if surface < WATER_LEVEL {
                     Block::Dirt
                 } else {
                     Block::Grass
