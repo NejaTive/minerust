@@ -3,9 +3,11 @@ import { nextTick, onBeforeUnmount, onMounted, shallowRef, watch, type Ref } fro
 import { BENCH, BENCH_POINTS, BENCH_SEED, BENCH_TIME, BENCH_WORKERS } from '../bench/config'
 import { FrameRecorder } from '../bench/recorder'
 import { runBench } from '../bench/run'
-import { bindInput } from '../input/bind'
+import { beginInventory, bindInput, endInventory } from '../input/bind'
+import { inventoryFlags, type InventoryMode } from '../input/inventory-mode'
+import { INVENTORY_LOCK_GRACE_MS } from '../input/lock-policy'
 import { releasePointerLock, requestPointerLock } from '../input/pointer-lock'
-import { HOTBAR } from '../settings/hotbar'
+import { HOTBAR_SIZE } from '../settings/hotbar'
 import { clamp, columnsWord } from '../settings/settings'
 import { useSettings } from '../settings/useSettings'
 import { startAutosave } from '../world/autosave'
@@ -30,7 +32,7 @@ export function useEngine(
   canvasKey: Ref<number>,
   askNewWorld: () => void,
 ) {
-  const { settings, limits, slot } = useSettings()
+  const { settings, limits, slot, block, resetHotbar } = useSettings()
   const info = engineInfo()
   const benchFrames = new FrameRecorder()
   const persistence = new WorldPersistence({
@@ -48,6 +50,21 @@ export function useEngine(
   let switching = true
   let disposed = false
   let stopAutosave: (() => void) | undefined
+  let mode: InventoryMode = 'idle'
+  let graceTimer = 0
+  // Функция, а не прямое сравнение: после `await` TypeScript иначе считает режим неизменным.
+  const modeIs = (value: InventoryMode) => mode === value
+
+  /** Единственное место, где меняется режим инвентаря и выводятся его флаги в `gameState`. */
+  function setMode(next: InventoryMode) {
+    mode = next
+    clearTimeout(graceTimer)
+    // После окна обычный Esc из игры снова открывает меню, а не lockLost.
+    if (next === 'grace') {
+      graceTimer = window.setTimeout(() => mode === 'grace' && setMode('idle'), INVENTORY_LOCK_GRACE_MS)
+    }
+    Object.assign(state, inventoryFlags(next))
+  }
 
   function setSwitching(value: boolean) {
     switching = value
@@ -61,7 +78,7 @@ export function useEngine(
     canvas: () => canvas.value,
     showDebug: () => settings.showDebug,
     slot: () => slot.value,
-    slotCount: HOTBAR.length,
+    slotCount: HOTBAR_SIZE,
     selectSlot: (value) => (slot.value = value),
     changeRenderDistance(delta) {
       const columns = clamp(
@@ -75,19 +92,68 @@ export function useEngine(
       notify(`Дальность: ${columns} ${columnsWord(columns)}`)
     },
     askNewWorld() {
+      if (mode === 'inventory' || mode === 'closing' || mode === 'lock-lost') {
+        // N из инвентаря / после lockLost: закрываем UI и ставим паузу — дальше confirm в меню.
+        setMode('idle')
+        engine.value?.release_all_keys()
+        engine.value?.set_paused(true)
+      }
       if (!switching) askNewWorld()
     },
     lockChanged(locked) {
       state.locked = locked
+      // Успешный захват снимает lockLost; grace после инвентаря не трогаем —
+      // иначе pointerlockchange(true) сбросит окно до возможного мгновенного unlock.
+      if (locked && mode === 'lock-lost') setMode('idle')
       if (!locked) void save()
     },
+    lockLostAfterInventory() {
+      // Паузу bind уже не ставил; меню не показываем — ждём клик.
+      state.locked = false
+      setMode('lock-lost')
+      void save()
+    },
+    inventoryGrace: () => mode === 'grace',
+    inventoryOpen: () => state.inventoryOpen,
+    openInventory() {
+      if (!engine.value || switching || mode === 'lock-lost') return
+      setMode('inventory')
+      beginInventory(engine.value)
+    },
+    closeInventory() {
+      void closeInventory()
+    },
   })
+
+  async function closeInventory() {
+    // Повторный E/Esc пока ждём lock — игнор: режим уже не `inventory`.
+    if (mode !== 'inventory') return
+    setMode('closing')
+    engine.value?.release_all_keys()
+    // Захват только после действия (keyup Esc / keydown E); отказ → lockLost без меню.
+    const ok = await endInventory(canvas.value)
+    // N / dispose / start за время ожидания сбросили режим — новое состояние не трогаем.
+    if (!modeIs('closing')) return
+    // Promise мог resolve, а Chrome тем же Esc уже снять lock до этой строки.
+    if (ok && document.pointerLockElement === canvas.value) {
+      // locked до снятия экрана: иначе на кадр !locked && !inventoryOpen → PauseMenu.
+      // Если Chrome тут же снимет lock — onLockChange увидит grace и уйдёт в lockLost.
+      state.locked = true
+      setMode('grace')
+    } else {
+      // Отказ или мгновенный unlock: без паузы и без меню — ждём клик (lockLost в App).
+      state.locked = false
+      setMode('lock-lost')
+      engine.value?.set_paused(false)
+    }
+  }
 
   watch(
     () => ({ ...settings }),
     () => engine.value && applySettings(engine.value, settings),
   )
-  watch(slot, () => engine.value && applyBlock(engine.value, HOTBAR[slot.value] ?? null))
+  // Смена выбранного слота или его содержимого — блок в руке.
+  watch([slot, block], () => engine.value && applyBlock(engine.value, block.value))
 
   /** `player` — `camera_state()`; без него игрок на спауне. Правки берутся из `persistence`. */
   async function start(seed: number, player?: ArrayLike<number>, time?: number) {
@@ -107,8 +173,10 @@ export function useEngine(
     }
     applySettings(created, settings)
     // Меню открыто (курсор не захвачен) — новый движок тоже начинает с паузы.
+    // Инвентарь при пересоздании сбрасываем: lock всё равно снят.
+    setMode('idle')
     created.set_paused(BENCH ? false : !input.isLocked())
-    applyBlock(created, HOTBAR[slot.value] ?? null)
+    applyBlock(created, block.value)
     engine.value = created
     state.ready = true
     // Воркеры мешера; без них (нет поддержки, `?workers=0`) меши строит сам движок.
@@ -139,6 +207,7 @@ export function useEngine(
     loop = undefined
     pool?.dispose()
     pool = undefined
+    setMode('idle')
     if (document.pointerLockElement === canvas.value) document.exitPointerLock()
     engine.value?.free()
     engine.value = undefined
@@ -149,6 +218,8 @@ export function useEngine(
     if (switching || !engine.value) return
     setSwitching(true)
     try {
+      // Пустой хотбар — валидное состояние; сохраняется вместе с миром через watch.
+      resetHotbar()
       stop()
       await persistence.reset()
       // Смена ключа пересоздаёт <canvas>: новый мир начинается на чистом контексте, а не на

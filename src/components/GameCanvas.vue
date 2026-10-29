@@ -6,6 +6,8 @@ import { useEngine } from '../engine/useEngine'
 const emit = defineEmits<{
   /** Нажата N: подтверждение «Новый мир» показывает меню. */
   'ask-new-world': []
+  /** Клик по канвасу при свободном курсоре (после lockLost). */
+  'canvas-click': []
 }>()
 
 const canvas = ref<HTMLCanvasElement>()
@@ -16,11 +18,17 @@ const { requestLock, releaseCursor, newWorld } = useEngine(canvas, canvasKey, ()
   emit('ask-new-world'),
 )
 
+function onCanvasClick() {
+  // При захваченном курсоре клики идут в мир; иначе — попытка продолжить после lockLost.
+  if (gameState.locked || gameState.inventoryOpen) return
+  emit('canvas-click')
+}
+
 defineExpose({ requestLock, releaseCursor, newWorld })
 </script>
 
 <template>
-  <canvas :key="canvasKey" ref="canvas" class="game" @contextmenu.prevent />
+  <canvas :key="canvasKey" ref="canvas" class="game" @click="onCanvasClick" @contextmenu.prevent />
   <div v-if="gameState.ready && gameState.locked" class="crosshair" />
   <div v-if="gameState.error" class="error">Не удалось запустить движок: {{ gameState.error }}</div>
 </template>

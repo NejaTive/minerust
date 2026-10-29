@@ -1,39 +1,39 @@
 <script setup lang="ts">
-import { onMounted, useTemplateRef } from 'vue'
-import { block_icon } from '@engine'
+import { nextTick, onMounted, useTemplateRef, watch } from 'vue'
+import { BLOCK_ICON_SIZE, paintBlockIconsIn } from '../engine/blockIcon'
 import { blockLabel } from '../engine/info'
-import { HOTBAR } from '../settings/hotbar'
+import { useSettings } from '../settings/useSettings'
 
 defineProps<{ slotIndex: number }>()
 
-/** Сторона тайла в пикселях; иконка — тот же тайл, что на боковой грани блока в мире. */
-const ICON_SIZE = 16
-
+const { slots } = useSettings()
 const root = useTemplateRef<HTMLElement>('root')
 
+const paint = () => paintBlockIconsIn(root.value)
+
 // wasm к этому моменту уже инициализирован: хотбар монтируется после старта движка.
-// Иконки рисуются по data-block, а не по порядку ref'ов в v-for: Vue его не гарантирует.
-onMounted(() => {
-  root.value?.querySelectorAll('canvas').forEach((canvas) => {
-    const pixels = block_icon(canvas.dataset.block ?? '')
-    if (!pixels) return
-    canvas
-      .getContext('2d')
-      ?.putImageData(new ImageData(new Uint8ClampedArray(pixels), ICON_SIZE, ICON_SIZE), 0, 0)
-  })
-})
+onMounted(paint)
+// Смена содержимого слота (инвентарь) — перерисовать иконки после обновления DOM.
+watch(
+  slots,
+  async () => {
+    await nextTick()
+    paint()
+  },
+  { deep: true },
+)
 </script>
 
 <template>
   <div ref="root" class="hotbar">
     <div
-      v-for="(name, index) in HOTBAR"
+      v-for="(name, index) in slots"
       :key="index"
       class="slot"
       :class="{ selected: index === slotIndex }"
       :title="name ? blockLabel(name) : undefined"
     >
-      <canvas v-if="name" :data-block="name" :width="ICON_SIZE" :height="ICON_SIZE" />
+      <canvas v-if="name" :data-block="name" :width="BLOCK_ICON_SIZE" :height="BLOCK_ICON_SIZE" />
       <span class="number">{{ index + 1 }}</span>
     </div>
   </div>

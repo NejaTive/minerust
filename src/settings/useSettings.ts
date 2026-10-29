@@ -1,14 +1,23 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { BENCH, BENCH_DEBUG, BENCH_RENDER_DISTANCE } from '../bench/config'
 import { engineInfo } from '../engine/info'
-import { HOTBAR, loadHotbarSlot, saveHotbarSlot } from './hotbar'
+import {
+  clearHotbar,
+  clearHotbarSlot,
+  loadHotbarContents,
+  loadHotbarSlot,
+  putHotbarSlot,
+  saveHotbarContents,
+  saveHotbarSlot,
+  swapHotbarSlots,
+} from './hotbar'
 import { defaultSettings, loadSettings, saveSettings, type Settings } from './settings'
 import { localStore } from './store'
 
 let shared: ReturnType<typeof create> | undefined
 
 function create() {
-  const { limits, defaults } = engineInfo()
+  const { limits, defaults, blocks } = engineInfo()
   const settings = reactive<Settings>(loadSettings(localStore, limits, defaultSettings(defaults)))
   // Режим замера: фиксированные настройки, поверх сохранённых, и в localStorage они не попадают.
   if (BENCH) {
@@ -24,21 +33,47 @@ function create() {
 
   const slot = ref(loadHotbarSlot(localStore))
   watch(slot, (value) => saveHotbarSlot(localStore, value))
+
+  const knownNames = new Set(blocks.map((b) => b.name))
+  const slots = reactive(loadHotbarContents(localStore, knownNames))
+  watch(
+    slots,
+    (value) => {
+      if (!BENCH) saveHotbarContents(localStore, [...value])
+    },
+    { deep: true },
+  )
+
   // Блок в выбранном слоте; `null` — слот пуст.
-  const block = computed(() => HOTBAR[slot.value] ?? null)
+  const block = computed(() => slots[slot.value] ?? null)
 
   return {
     settings,
     limits,
     slot,
+    slots,
     block,
     update(patch: Partial<Settings>) {
       Object.assign(settings, patch)
     },
+    putInSlot(index: number, name: string | null) {
+      putHotbarSlot(slots, index, name)
+    },
+    swapSlots(a: number, b: number) {
+      swapHotbarSlots(slots, a, b)
+    },
+    clearSlot(index: number) {
+      clearHotbarSlot(slots, index)
+    },
+    /** Сброс при «Новый мир»: пустые слоты и выбранный слот 0. */
+    resetHotbar() {
+      clearHotbar(slots)
+      slot.value = 0
+    },
   }
 }
 
-/** Настройки игры и выбранный слот хотбара; общие на приложение. Нужен загруженный `engineInfo`. */
+/** Настройки игры и хотбар; общие на приложение. Нужен загруженный `engineInfo`. */
 export function useSettings() {
   shared ??= create()
   return shared
