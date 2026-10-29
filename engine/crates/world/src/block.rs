@@ -42,6 +42,7 @@ pub enum DataKind {
     None,
     Axis,
     Attachment,
+    Fluid,
 }
 
 pub const AXIS_Y: u8 = 0;
@@ -53,6 +54,26 @@ pub const ATTACH_POS_X: u8 = 1;
 pub const ATTACH_NEG_X: u8 = 2;
 pub const ATTACH_POS_Z: u8 = 3;
 pub const ATTACH_NEG_Z: u8 = 4;
+
+pub const FLUID_SOURCE: u8 = 0;
+pub const FLUID_MAX_LEVEL: u8 = 7;
+pub const FLUID_LEVEL_MASK: u8 = 0b111;
+pub const FLUID_FALLING: u8 = 0b1000;
+
+// шестнадцатые доли блока
+const FLUID_LEVEL_HEIGHT_UNITS: [u8; 8] = [14, 12, 11, 9, 7, 5, 4, 2];
+
+pub fn fluid_height_units(data: u8) -> u8 {
+    if data & FLUID_FALLING != 0 {
+        16
+    } else {
+        FLUID_LEVEL_HEIGHT_UNITS[usize::from(data & FLUID_LEVEL_MASK)]
+    }
+}
+
+pub fn fluid_height(data: u8) -> f32 {
+    f32::from(fluid_height_units(data)) / 16.0
+}
 
 pub const TORCH_WALL_SHIFT: u32 = 4;
 pub const TORCH_WALL_RISE: u32 = 3;
@@ -160,11 +181,11 @@ pub const BLOCKS: [BlockDef; 13] = [
         ..BlockDef::uniform("leaves", "листва", Tile::Leaves)
     },
     BlockDef {
-        selectable: false,
         solid: false,
         opaque: false,
         targetable: false,
         replaceable: true,
+        data: DataKind::Fluid,
         layer: RenderLayer::Translucent,
         ..BlockDef::uniform("water", "вода", Tile::Water)
     },
@@ -274,7 +295,7 @@ impl Block {
 
     pub fn placement_data(self, normal: IVec3) -> Option<u8> {
         match self.data_kind() {
-            DataKind::None => Some(0),
+            DataKind::None | DataKind::Fluid => Some(0),
             DataKind::Axis => Some(match normal.abs().max_position() {
                 0 => AXIS_X,
                 1 => AXIS_Y,

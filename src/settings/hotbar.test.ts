@@ -105,9 +105,9 @@ describe('содержимое хотбара', () => {
   it('имя из blocks() (в т.ч. неразмещаемое) принимается', () => {
     const store = memoryStore()
     const slots = [...SAMPLE]
-    slots[0] = 'water'
+    slots[0] = 'air'
     saveHotbarContents(store, slots)
-    expect(loadHotbarContents(store, known)[0]).toBe('water')
+    expect(loadHotbarContents(store, known)[0]).toBe('air')
   })
 })
 

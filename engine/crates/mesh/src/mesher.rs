@@ -3,14 +3,16 @@ use glam::IVec3;
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
     AO_BRIGHTNESS, CROSS, CUBE_FACE, FACES, Face, LOG_BARK_X, LOG_BARK_Z, TORCH_SIDE, TORCH_TOP,
-    TORCH_WALL, TORCH_WALL_PARTS, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SURFACE_UNITS,
-    WATER_TOP,
+    TORCH_WALL, TORCH_WALL_PARTS, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SIDE_SLOPED,
+    WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
-use world::block::{ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, RenderLayer, Shape};
+use world::block::{
+    ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, RenderLayer, Shape, fluid_height_units,
+};
 use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
 use world::pos::{ColumnPos, SectionPos};
-use world::section::{SECTION_SIZE, SECTION_VOLUME, Section};
+use world::section::{SECTION_SIZE, Section};
 use world::tile::{LAYER_COUNT, Tile};
 use world::world::World;
 
@@ -64,6 +66,14 @@ impl Neighborhood {
     }
 }
 
+pub(crate) struct Datas(pub(crate) [u8; (PADDED * PADDED * PADDED) as usize]);
+
+impl Datas {
+    fn at(&self, index: usize, offset: isize) -> u8 {
+        self.0[index.wrapping_add_signed(offset)]
+    }
+}
+
 pub(crate) struct Lights(pub(crate) [u8; (PADDED * PADDED * PADDED) as usize]);
 
 impl Lights {
@@ -105,15 +115,25 @@ impl<'a> Surroundings<'a> {
         })
     }
 
-    pub(crate) fn fill(&self, sy: i32, blocks: &mut Neighborhood, lights: &mut Lights) {
+    pub(crate) fn fill(
+        &self,
+        sy: i32,
+        blocks: &mut Neighborhood,
+        lights: &mut Lights,
+        datas: &mut Datas,
+    ) -> bool {
+        let mut has_data = false;
         for y in -1..=SECTION_SIZE {
             let world_y = sy * SECTION_SIZE + y;
             for z in -1..=SECTION_SIZE {
                 let row = Neighborhood::index(IVec3::new(-1, y, z));
-                let (block_row, light_row) = (
-                    &mut blocks.0[row..row + PADDED as usize],
-                    &mut lights.0[row..row + PADDED as usize],
+                let range = row..row + PADDED as usize;
+                let (block_row, light_row, data_row) = (
+                    &mut blocks.0[range.clone()],
+                    &mut lights.0[range.clone()],
+                    &mut datas.0[range],
                 );
+                data_row.fill(0);
                 if world_y < 0 {
                     block_row.fill(Block::Stone);
                     light_row.fill(0);
@@ -135,8 +155,15 @@ impl<'a> Surroundings<'a> {
                 ] {
                     let i = (dx + 3 * dz) as usize;
                     match self.columns[i] {
-                        Some(c) => block_row[dst.clone()]
-                            .copy_from_slice(&c.section(section).row(in_y, in_z)[src.clone()]),
+                        Some(c) => {
+                            let section = c.section(section);
+                            block_row[dst.clone()]
+                                .copy_from_slice(&section.row(in_y, in_z)[src.clone()]);
+                            if let Some(bytes) = section.data_row(in_y, in_z) {
+                                data_row[dst.clone()].copy_from_slice(&bytes[src.clone()]);
+                                has_data |= bytes[src.clone()].iter().any(|&b| b != 0);
+                            }
+                        }
                         None => block_row[dst.clone()].fill(Block::Air),
                     }
                     match self.lights[i] {
@@ -148,6 +175,7 @@ impl<'a> Surroundings<'a> {
                 }
             }
         }
+        has_data
     }
 }
 
@@ -167,11 +195,15 @@ impl SectionMeshes {
     }
 }
 
-fn fill_blocks(blocks: &mut Neighborhood, section: &Section) {
+fn fill_blocks(blocks: &mut Neighborhood, datas: &mut Datas, section: &Section) {
     for y in 0..SECTION_SIZE {
         for z in 0..SECTION_SIZE {
             let start = Neighborhood::index(IVec3::new(0, y, z));
-            blocks.0[start..start + SECTION_SIZE as usize].copy_from_slice(section.row(y, z));
+            let range = start..start + SECTION_SIZE as usize;
+            blocks.0[range.clone()].copy_from_slice(section.row(y, z));
+            if let Some(bytes) = section.data_row(y, z) {
+                datas.0[range].copy_from_slice(bytes);
+            }
         }
     }
 }
@@ -196,12 +228,13 @@ fn fill_halo(
     }
 }
 
-pub(crate) fn new_caches() -> (Box<Neighborhood>, Box<Lights>) {
+pub(crate) fn new_caches() -> (Box<Neighborhood>, Box<Lights>, Box<Datas>) {
     (
         Box::new(Neighborhood(
             [Block::Air; (PADDED * PADDED * PADDED) as usize],
         )),
         Box::new(Lights([0; (PADDED * PADDED * PADDED) as usize])),
+        Box::new(Datas([0; (PADDED * PADDED * PADDED) as usize])),
     )
 }
 
@@ -214,16 +247,16 @@ pub fn mesh_section(
     if section.is_air() {
         return SectionMeshes::empty();
     }
-    let (mut blocks, mut lights) = new_caches();
-    fill_blocks(&mut blocks, section);
+    let (mut blocks, mut lights, mut datas) = new_caches();
+    fill_blocks(&mut blocks, &mut datas, section);
     fill_halo(&mut blocks, &mut lights, neighbor, light);
-    mesh_cached(&blocks, &lights, section.data(), options)
+    mesh_cached(&blocks, &lights, &datas, options)
 }
 
 pub(crate) fn mesh_cached(
     blocks: &Neighborhood,
     lights: &Lights,
-    data: Option<&[u8; SECTION_VOLUME]>,
+    datas: &Datas,
     options: MeshOptions,
 ) -> SectionMeshes {
     let mut meshes = SectionMeshes::empty();
@@ -245,7 +278,7 @@ pub(crate) fn mesh_cached(
                     continue;
                 }
                 let cell = [x as u8, y as u8, z as u8];
-                let byte = || data.map_or(0, |d| d[(x + 16 * z + 256 * y) as usize]);
+                let byte = || datas.0[index];
                 if block.shape() != Shape::Cube {
                     let (sky, block_light) = lights.at(index, 0);
                     let light = [sky, block_light].map(|l| half_average(l, 1));
@@ -253,36 +286,32 @@ pub(crate) fn mesh_cached(
                     continue;
                 }
                 if block.is_water() {
-                    let top = if blocks.at(index, up).is_water() {
-                        POSITION_UNITS
-                    } else {
-                        WATER_SURFACE_UNITS
-                    };
-                    for (face_index, (_, normal, _)) in faces.iter().enumerate() {
-                        if blocks.at(index, *normal).shape() != Shape::Cube
-                            || blocks.at(index, *normal) == Block::Air
+                    for (face_index, (face, normal, _)) in faces.iter().enumerate() {
+                        if blocks.at(index, *normal).shape() == Shape::Cube
+                            && blocks.at(index, *normal) != Block::Air
                         {
-                            let (sky, block) = lights.at(index, *normal);
-                            let light = [sky, block].map(|l| half_average(l, 1));
-                            let template = match face_index {
-                                0 => {
-                                    debug_assert_eq!(top, WATER_SURFACE_UNITS);
-                                    WATER_TOP
-                                }
-                                1 => WATER_BOTTOM,
-                                side if top == POSITION_UNITS => WATER_SIDE + (side - 2) as u8,
-                                side => WATER_SIDE_LOW + (side - 2) as u8,
-                            };
-                            meshes.water.quads.push(Quad::new(
-                                cell,
-                                template,
-                                false,
-                                Tile::Water.layer() as u8,
-                                [3; 4],
-                                [light[0]; 4],
-                                [light[1]; 4],
-                            ));
+                            continue;
                         }
+                        let (sky, block) = lights.at(index, *normal);
+                        let light = [sky, block].map(|l| half_average(l, 1));
+                        let heights = face
+                            .corners
+                            .map(|[cx, _, cz]| surface_height(blocks, datas, index, cx, cz, up));
+                        let (template, sloped) = water_template(face_index, heights);
+                        let quad = Quad::new(
+                            cell,
+                            template,
+                            false,
+                            Tile::Water.layer() as u8,
+                            [3; 4],
+                            [light[0]; 4],
+                            [light[1]; 4],
+                        );
+                        meshes.water.quads.push(if sloped {
+                            quad.with_heights(heights)
+                        } else {
+                            quad
+                        });
                     }
                     continue;
                 }
@@ -352,6 +381,60 @@ pub(crate) fn mesh_cached(
         }
     }
     meshes
+}
+
+const TALL_WATER_UNITS: u32 = 13;
+const TALL_WATER_WEIGHT: u32 = 10;
+
+fn surface_height(
+    blocks: &Neighborhood,
+    datas: &Datas,
+    index: usize,
+    cx: i32,
+    cz: i32,
+    up: isize,
+) -> u8 {
+    let (mut sum, mut count) = (0u32, 0u32);
+    for dz in [cz - 1, cz] {
+        for dx in [cx - 1, cx] {
+            let offset = Neighborhood::stride(IVec3::new(dx, 0, dz));
+            let block = blocks.at(index, offset);
+            if block.is_water() {
+                if blocks.at(index, offset + up).is_water() {
+                    return POSITION_UNITS as u8;
+                }
+                let height = u32::from(fluid_height_units(datas.at(index, offset)));
+                let weight = if height >= TALL_WATER_UNITS {
+                    TALL_WATER_WEIGHT
+                } else {
+                    1
+                };
+                sum += height * weight;
+                count += weight;
+            } else if !block.is_solid() {
+                count += 1;
+            }
+        }
+    }
+    ((2 * sum + count) / (2 * count)).max(1) as u8
+}
+
+fn water_template(face_index: usize, heights: [u8; 4]) -> (u8, bool) {
+    let source = WATER_SURFACE_UNITS as u8;
+    let full = POSITION_UNITS as u8;
+    match face_index {
+        0 if heights == [source; 4] => (WATER_TOP, false),
+        0 => (WATER_TOP_SLOPED, true),
+        1 => (WATER_BOTTOM, false),
+        side => {
+            let side = (side - 2) as u8;
+            match [heights[2], heights[3]] {
+                [h, g] if h == full && g == full => (WATER_SIDE + side, false),
+                [h, g] if h == source && g == source => (WATER_SIDE_LOW + side, false),
+                _ => (WATER_SIDE_SLOPED + side, true),
+            }
+        }
+    }
 }
 
 fn axis_face(block: Block, axis: usize, face_index: usize, face: &Face) -> (Option<Tile>, u8) {
@@ -450,7 +533,7 @@ pub fn mesh_world_column(
     options: MeshOptions,
 ) -> Option<Vec<SectionMeshes>> {
     let around = Surroundings::new(world, light, key)?;
-    let (mut blocks, mut lights) = new_caches();
+    let (mut blocks, mut lights, mut datas) = new_caches();
     let column = around.columns[4]?;
     Some(
         (0..COLUMN_SECTIONS)
@@ -458,8 +541,8 @@ pub fn mesh_world_column(
                 if column.section(sy).is_air() {
                     return SectionMeshes::empty();
                 }
-                around.fill(sy, &mut blocks, &mut lights);
-                mesh_cached(&blocks, &lights, column.section(sy).data(), options)
+                around.fill(sy, &mut blocks, &mut lights, &mut datas);
+                mesh_cached(&blocks, &lights, &datas, options)
             })
             .collect(),
     )
@@ -478,14 +561,9 @@ pub fn mesh_world_section(
     if around.columns[4]?.section(key.y()).is_air() {
         return Some(SectionMeshes::empty());
     }
-    let (mut blocks, mut lights) = new_caches();
-    around.fill(key.y(), &mut blocks, &mut lights);
-    Some(mesh_cached(
-        &blocks,
-        &lights,
-        around.columns[4]?.section(key.y()).data(),
-        options,
-    ))
+    let (mut blocks, mut lights, mut datas) = new_caches();
+    around.fill(key.y(), &mut blocks, &mut lights, &mut datas);
+    Some(mesh_cached(&blocks, &lights, &datas, options))
 }
 
 #[cfg(test)]

@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::f32::consts::FRAC_PI_2;
 use std::f32::consts::FRAC_PI_4;
 
+use world::block::WATER_SURFACE;
+
 use super::*;
 
 const FLOOR: i32 = 63;
@@ -328,13 +330,15 @@ fn clock_counts_ticks_and_keeps_remainder() {
     assert_eq!(clock.alpha(), 0.0);
 }
 
-fn dry(_: IVec3) -> bool {
-    false
+fn dry(_: IVec3) -> Option<f32> {
+    None
 }
 
-fn pool(top: i32) -> impl Fn(IVec3) -> bool {
+fn pool(top: i32) -> impl Fn(IVec3) -> Option<f32> {
     move |p: IVec3| {
-        p.y > FLOOR && p.y <= top && (-10..10).contains(&p.x) && (-10..10).contains(&p.z)
+        let inside =
+            p.y > FLOOR && p.y <= top && (-10..10).contains(&p.x) && (-10..10).contains(&p.z);
+        inside.then_some(if p.y == top { WATER_SURFACE } else { 1.0 })
     }
 }
 
@@ -368,7 +372,7 @@ fn run_in(
     input: Input,
     ticks: u32,
     solid: &impl Fn(IVec3) -> bool,
-    water: &impl Fn(IVec3) -> bool,
+    water: &impl Fn(IVec3) -> Option<f32>,
 ) {
     for _ in 0..ticks {
         player.step(&input, 0.0, solid, water);
@@ -414,7 +418,7 @@ fn swims_slower_than_walking() {
 fn fall_into_water_slows_down() {
     let (solid, water) = (world(&[]), pool(70));
     let mut player = Player::new(Vec3::new(0.5, 110.0, 0.5), Mode::Walking);
-    while !water(player.feet.floor().as_ivec3()) {
+    while water(player.feet.floor().as_ivec3()).is_none() {
         player.step(&Input::default(), 0.0, &solid, &water);
     }
     assert!(player.velocity.y < -20.0, "{}", player.velocity.y);
@@ -485,7 +489,7 @@ fn jumps_out_onto_shore_one_block_above_water() {
         .flat_map(|y| (-5..5).flat_map(move |z| (3..40).map(move |x| IVec3::new(x, y, z))))
         .collect();
     let solid = world(&shore);
-    let water = |p: IVec3| pool(66)(p) && p.x < 3;
+    let water = |p: IVec3| pool(66)(p).filter(|_| p.x < 3);
     let mut player = standing();
     let out = Input {
         jump: true,
@@ -581,4 +585,23 @@ fn fov_scale_follows_sprint_in_set_time() {
         scale = next_fov_scale(scale, false, TICK);
     }
     assert!((scale - 1.0).abs() < 1e-4, "{scale}");
+}
+
+fn shallow(height: f32) -> impl Fn(IVec3) -> Option<f32> {
+    move |p: IVec3| {
+        let inside = p.y == FLOOR + 1 && (-10..10).contains(&p.x) && (-10..10).contains(&p.z);
+        inside.then_some(height)
+    }
+}
+
+#[test]
+fn shallow_water_does_not_float_or_cover_eyes() {
+    let (solid, water) = (world(&[]), shallow(0.25));
+    let mut player = standing();
+    assert!(player.water_depth(&water) <= 0.25);
+    run_in(&mut player, JUMP, 240, &solid, &water);
+    assert!(player.feet.y < GROUND + 0.5, "floated to {}", player.feet.y);
+    let at_eye = |y: f32| Player::new(Vec3::new(0.5, y - EYE_HEIGHT, 0.5), Mode::Walking);
+    assert!(!at_eye(GROUND + 0.5).eyes_in_water(&water));
+    assert!(at_eye(GROUND + 0.2).eyes_in_water(&water));
 }

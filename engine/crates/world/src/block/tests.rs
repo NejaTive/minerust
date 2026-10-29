@@ -30,7 +30,7 @@ fn selectable_by_name() {
     assert_eq!(Block::from_name("leaves"), Some(Block::Leaves));
     assert_eq!(Block::from_name("glowstone"), Some(Block::Glowstone));
     assert_eq!(Block::from_name("air"), None);
-    assert_eq!(Block::from_name("water"), None);
+    assert_eq!(Block::from_name("water"), Some(Block::Water));
     assert_eq!(Block::from_name("Stone"), None);
 }
 
@@ -203,13 +203,40 @@ fn support_direction_by_block() {
 }
 
 #[test]
-fn only_log_and_torch_use_data() {
+fn only_log_torch_and_water_use_data() {
     for block in ALL {
         let expected = match block {
             Block::Log => DataKind::Axis,
             Block::Torch => DataKind::Attachment,
+            Block::Water => DataKind::Fluid,
             _ => DataKind::None,
         };
         assert_eq!(block.data_kind(), expected, "{block:?}");
     }
+}
+
+#[test]
+fn fluid_heights_fall_with_level_and_falling_is_full() {
+    use crate::block::{FLUID_FALLING, FLUID_MAX_LEVEL, FLUID_SOURCE, fluid_height_units};
+    assert_eq!(fluid_height_units(FLUID_SOURCE), 14);
+    assert_eq!(fluid_height_units(FLUID_MAX_LEVEL), 2);
+    let heights: Vec<u8> = (0..=FLUID_MAX_LEVEL).map(fluid_height_units).collect();
+    assert!(
+        heights.windows(2).all(|pair| pair[0] > pair[1]),
+        "{heights:?}"
+    );
+    assert_eq!(fluid_height_units(FLUID_FALLING), 16);
+    assert_eq!(fluid_height_units(FLUID_FALLING | 3), 16);
+}
+
+#[test]
+fn water_is_placed_as_source() {
+    assert_eq!(Block::Water.placement_data(IVec3::Y), Some(0));
+    assert_eq!(Block::Water.placement_data(IVec3::NEG_X), Some(0));
+}
+
+#[test]
+fn water_has_icon_for_the_palette() {
+    let icon = Block::Water.icon_pixels().expect("water icon");
+    assert_eq!(icon.len(), 16 * 16 * 4);
 }

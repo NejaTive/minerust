@@ -67,6 +67,24 @@ impl Quad {
         ])
     }
 
+    // шаги 1/16 блока; биты полей знает и shader.wgsl (vs_main)
+    pub fn with_heights(mut self, heights: [u8; 4]) -> Self {
+        debug_assert!(heights.iter().all(|h| (1..=16).contains(h)), "{heights:?}");
+        let [h0, h1, h2, h3] = heights.map(|h| u32::from(h - 1));
+        self.0[1] |= h0 << 28;
+        self.0[2] |= h1 << 20 | h2 << 24 | h3 << 28;
+        self
+    }
+
+    pub fn heights(self) -> [u8; 4] {
+        [
+            (self.0[1] >> 28 & 0xF) as u8 + 1,
+            (self.0[2] >> 20 & 0xF) as u8 + 1,
+            (self.0[2] >> 24 & 0xF) as u8 + 1,
+            (self.0[2] >> 28 & 0xF) as u8 + 1,
+        ]
+    }
+
     pub fn words(self) -> [u32; 3] {
         self.0
     }

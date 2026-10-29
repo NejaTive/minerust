@@ -162,10 +162,7 @@ fn section_job_carries_data_only_when_present() {
     );
     let without = without.unwrap();
     assert!(with.len() > without.len());
-    assert_eq!(
-        with.len() - 6,
-        2 + 2 * super::CACHE_LEN + world::section::SECTION_VOLUME
-    );
+    assert_eq!(with.len() - 6, 2 + 3 * super::CACHE_LEN);
     let want = mesh_world_section(
         &world,
         &light,

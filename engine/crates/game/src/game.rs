@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use glam::{IVec3, Vec3};
 use world::block::Block;
 use world::column::{Column, WORLD_HEIGHT};
+use world::fluid::Fluid;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
 use world::terrain::Terrain;
@@ -21,6 +22,7 @@ const REPEAT_S: f32 = 0.25;
 const DEFAULT_BLOCK: Block = Block::Grass;
 const MAX_DT: f32 = 0.1;
 const DOUBLE_TAP_S: f32 = 0.3;
+const FLUID_STEP_TICKS: u32 = 15;
 
 #[derive(Default)]
 pub struct Edits {
@@ -31,6 +33,10 @@ pub struct Edits {
 pub struct Game {
     pub world: World,
     pub light: LightMap,
+    fluid: Fluid,
+    fluid_ticks: u32,
+    flow_dirty: HashSet<SectionPos>,
+    flow_lit: Vec<SectionPos>,
     pub terrain: Terrain,
     seed: i32,
     camera: Camera,
@@ -70,6 +76,10 @@ impl Game {
         Ok(Game {
             world: World::new(),
             light: LightMap::new(),
+            fluid: Fluid::new(),
+            fluid_ticks: 0,
+            flow_dirty: HashSet::new(),
+            flow_lit: Vec::new(),
             terrain,
             seed,
             camera,
@@ -184,7 +194,7 @@ impl Game {
 
     pub fn underwater(&self) -> bool {
         self.player
-            .eyes_in_water(|pos| self.world.block(pos).is_water())
+            .eyes_in_water(|pos| self.world.water_height(pos))
     }
 
     pub fn set_paused(&mut self, paused: bool) {
@@ -274,12 +284,15 @@ impl Game {
     }
 
     pub fn interact(&mut self, time: f32) -> Edits {
+        let mut dirty = std::mem::take(&mut self.flow_dirty);
+        let mut lit = std::mem::take(&mut self.flow_lit);
         if self.paused {
-            return Edits::default();
+            return Edits {
+                dirty: dirty.into_iter().collect(),
+                lit,
+            };
         }
         let mut target = self.pick();
-        let mut dirty = HashSet::new();
-        let mut lit = Vec::new();
         if self.breaking.fire(time)
             && let Some(hit) = target
             && hit.block.y >= 0
@@ -296,7 +309,7 @@ impl Game {
             let pos = hit.block + hit.normal;
             if let Some(data) = block.placement_data(hit.normal)
                 && self.world.can_place_with_data(pos, block, data)
-                && !self.player.overlaps_block(pos)
+                && (block.is_water() || !self.player.overlaps_block(pos))
             {
                 let changed = self.world.set_block_supported_with_data(pos, block, data);
                 if !changed.is_empty() {
@@ -339,6 +352,7 @@ impl Game {
         lit: &mut Vec<SectionPos>,
     ) {
         for &pos in changed {
+            self.fluid.block_changed(&self.world, pos);
             dirty.extend(affected_sections(pos));
             lit.extend(self.light.block_changed(&self.world, pos));
         }
@@ -351,6 +365,7 @@ impl Game {
             let factor = if self.time_fast { TIME_FAST_FACTOR } else { 1 };
             self.day.advance(ticks * factor);
         }
+        self.advance_fluid(ticks);
         for _ in 0..ticks {
             if !self.body_loaded() {
                 self.clock.reset();
@@ -362,11 +377,25 @@ impl Game {
                 &input,
                 self.camera.yaw,
                 |pos| self.world.block(pos).is_solid(),
-                |pos| self.world.block(pos).is_water(),
+                |pos| self.world.water_height(pos),
             );
         }
         let feet = self.prev_feet.lerp(self.player.feet, self.clock.alpha());
         self.camera.position = feet + Vec3::Y * EYE_HEIGHT;
+    }
+
+    fn advance_fluid(&mut self, ticks: u32) {
+        self.fluid_ticks += ticks;
+        while self.fluid_ticks >= FLUID_STEP_TICKS {
+            self.fluid_ticks -= FLUID_STEP_TICKS;
+            let changed = self.fluid.step(&mut self.world);
+            let (mut dirty, mut lit) = (
+                std::mem::take(&mut self.flow_dirty),
+                std::mem::take(&mut self.flow_lit),
+            );
+            self.apply_edit(&changed, &mut dirty, &mut lit);
+            (self.flow_dirty, self.flow_lit) = (dirty, lit);
+        }
     }
 
     fn input(&self) -> Input {
