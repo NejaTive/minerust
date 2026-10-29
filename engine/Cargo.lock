@@ -853,6 +853,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "worker"
+version = "0.20.0"
+dependencies = [
+ "console_error_panic_hook",
+ "mesh",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "world"
 version = "0.20.0"
 dependencies = [

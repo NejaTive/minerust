@@ -44,6 +44,10 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
       Колонка: генерация {{ ms(stats.generateUs) }} мс · меш {{ ms(stats.meshUs) }} мс
     </div>
     <div v-if="showDebug && stats">
+      Меш в воркерах: в полёте {{ stats.meshJobs }} · в воркере {{ ms(stats.workerMeshUs) }} · кэш
+      {{ ms(stats.encodeUs) }} · приём {{ ms(stats.applyUs) }} мс
+    </div>
+    <div v-if="showDebug && stats">
       Кадр CPU: подгрузка {{ ms(stats.streamUs) }} · сборка {{ ms(stats.buildUs) }} · отправка
       {{ ms(stats.submitUs) }} мс
     </div>

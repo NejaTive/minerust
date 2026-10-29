@@ -2,6 +2,7 @@ node_modules
 dist
 target
 engine/pkg
+engine/pkg-worker
 .claude/
 .DS_Store
 tsconfig.tsbuildinfo

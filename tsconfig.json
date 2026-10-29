@@ -12,7 +12,8 @@
     "jsx": "preserve",
     "types": ["vite/client"],
     "paths": {
-      "@engine": ["./engine/pkg/engine.d.ts"]
+      "@engine": ["./engine/pkg/engine.d.ts"],
+      "@engine-worker": ["./engine/pkg-worker/worker.d.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]

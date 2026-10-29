@@ -1,6 +1,6 @@
 import type { Engine } from '@engine'
 import { nextTick, onBeforeUnmount, onMounted, shallowRef, watch, type Ref } from 'vue'
-import { BENCH, BENCH_POINTS, BENCH_SEED, BENCH_TIME } from '../bench/config'
+import { BENCH, BENCH_POINTS, BENCH_SEED, BENCH_TIME, BENCH_WORKERS } from '../bench/config'
 import { FrameRecorder } from '../bench/recorder'
 import { runBench } from '../bench/run'
 import { bindInput } from '../input/bind'
@@ -14,6 +14,7 @@ import { openStorage } from '../world/storage'
 import { applyBlock, applySettings } from './apply'
 import { NoWebGpuError, hasWebGpu } from './gpu'
 import { FrameLoop, createEngine } from './host'
+import { MeshPool } from './mesh-pool'
 import { engineInfo } from './info'
 import { gameState as state, notify } from './state'
 
@@ -42,6 +43,7 @@ export function useEngine(
   // shallowRef: Vue не должен оборачивать wasm-объект в Proxy.
   const engine = shallowRef<Engine>()
   let loop: FrameLoop | undefined
+  let pool: MeshPool | undefined
   // Блокирует N, пока движок пересоздаётся; до конца загрузки true.
   let switching = true
   let disposed = false
@@ -109,20 +111,34 @@ export function useEngine(
     applyBlock(created, HOTBAR[slot.value] ?? null)
     engine.value = created
     state.ready = true
+    // Воркеры мешера; без них (нет поддержки, `?workers=0`) меши строит сам движок.
+    pool = BENCH_WORKERS ? startPool(created) : undefined
     loop = new FrameLoop(created, el, {
       fps: (v) => (state.fps = v),
       stats: (v) => (state.stats = v),
       time: (v) => (state.time = v),
       player: (v) => (state.player = v),
       rendered: BENCH ? (now, ms) => benchFrames.push(now, ms) : undefined,
+      afterRender: () => pool?.pump(),
     })
     loop.start()
+  }
+
+  function startPool(created: Engine) {
+    try {
+      return new MeshPool(created)
+    } catch (e) {
+      console.error('mesh workers are unavailable', e)
+      return undefined
+    }
   }
 
   /** Освобождает движок и всё, что привязано к текущему canvas. */
   function stop() {
     loop?.stop()
     loop = undefined
+    pool?.dispose()
+    pool = undefined
     if (document.pointerLockElement === canvas.value) document.exitPointerLock()
     engine.value?.free()
     engine.value = undefined

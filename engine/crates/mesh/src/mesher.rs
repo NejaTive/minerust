@@ -48,12 +48,12 @@ pub fn vertex_ao(side1: bool, side2: bool, corner: bool) -> u8 {
 }
 
 /// Сторона куба блоков секции с полем в один блок со всех сторон.
-const PADDED: i32 = SECTION_SIZE + 2;
+pub(crate) const PADDED: i32 = SECTION_SIZE + 2;
 
 /// Блоки секции и всех её соседей в пределах −1..=16 по каждой оси. AO смотрит на
 /// 12 блоков на грань, и брать их из массива намного дешевле, чем из мира (поиск
 /// колонки в `HashMap`).
-struct Neighborhood([Block; (PADDED * PADDED * PADDED) as usize]);
+pub(crate) struct Neighborhood(pub(crate) [Block; (PADDED * PADDED * PADDED) as usize]);
 
 impl Neighborhood {
     /// Индекс локальных координат секции, −1..=16 по каждой оси.
@@ -78,7 +78,7 @@ impl Neighborhood {
 
 /// Байты света секции и соседей ([`world::light::pack_light`]), как [`Neighborhood`]
 /// для блоков.
-struct Lights([u8; (PADDED * PADDED * PADDED) as usize]);
+pub(crate) struct Lights(pub(crate) [u8; (PADDED * PADDED * PADDED) as usize]);
 
 impl Lights {
     /// Солнечный уровень и уровень света блоков клетки.
@@ -113,7 +113,7 @@ fn corner_strides(face: &Face) -> CornerStrides {
 pub struct Surroundings<'a> {
     /// Индекс `dx + 1 + 3·(dz + 1)`, центр — 4; незагруженные — `None`
     /// (блоки там воздух, свет 0, как раньше у `World::block` и `LightMap::packed`).
-    columns: [Option<&'a Column>; 9],
+    pub(crate) columns: [Option<&'a Column>; 9],
     lights: [Option<&'a ColumnLight>; 9],
 }
 
@@ -130,7 +130,7 @@ impl<'a> Surroundings<'a> {
 
     /// Заполняет кэши для секции `sy` центральной колонки (0..8): строки по x копируются
     /// срезами. Ниже мира блоки — камень, свет 0; выше — воздух и полный свет.
-    fn fill(&self, sy: i32, blocks: &mut Neighborhood, lights: &mut Lights) {
+    pub(crate) fn fill(&self, sy: i32, blocks: &mut Neighborhood, lights: &mut Lights) {
         for y in -1..=SECTION_SIZE {
             let world_y = sy * SECTION_SIZE + y;
             for z in -1..=SECTION_SIZE {
@@ -191,7 +191,7 @@ pub struct SectionMeshes {
 }
 
 impl SectionMeshes {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             solid: MeshData::new(),
             cutout: MeshData::new(),
@@ -234,7 +234,7 @@ fn fill_halo(
     }
 }
 
-fn new_caches() -> (Box<Neighborhood>, Box<Lights>) {
+pub(crate) fn new_caches() -> (Box<Neighborhood>, Box<Lights>) {
     (
         Box::new(Neighborhood(
             [Block::Air; (PADDED * PADDED * PADDED) as usize],
@@ -281,7 +281,11 @@ pub fn mesh_section(
 /// солнца и блоков в половинках ([`half_average`]); яркость из них считает шейдер со
 /// тьмой неба. У воды — уровни клетки перед гранью, одни на грань. Диагональ квада
 /// выбирается по дневной яркости ([`day_shade`]).
-fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> SectionMeshes {
+pub(crate) fn mesh_cached(
+    blocks: &Neighborhood,
+    lights: &Lights,
+    options: MeshOptions,
+) -> SectionMeshes {
     let mut meshes = SectionMeshes::empty();
     let faces = FACES.each_ref().map(|face| {
         (

@@ -24,10 +24,22 @@ pub struct WorldStats {
     pub meshed_sections: u32,
     /// Колонок в очереди на меш, включая перестройку после смены AO и секции после смены света.
     pub queued: u32,
+    /// Заданий мешера в воркерах (с принятыми, но ещё не поставленными на GPU результатами).
+    #[wasm_bindgen(js_name = meshJobs)]
+    pub mesh_jobs: u32,
+    /// Заполнение кэшей задания в основном потоке, мкс на задание (колонку или секцию).
+    #[wasm_bindgen(js_name = encodeUs)]
+    pub encode_us: u32,
+    /// Приём результата в основном потоке (разбор и загрузка на GPU), мкс на задание.
+    #[wasm_bindgen(js_name = applyUs)]
+    pub apply_us: u32,
+    /// Меш задания в воркере, мкс: время без очереди и пересылки.
+    #[wasm_bindgen(js_name = workerMeshUs)]
+    pub worker_mesh_us: u32,
     /// Генерация колонки, мкс.
     #[wasm_bindgen(js_name = generateUs)]
     pub generate_us: u32,
-    /// Меширование колонки, мкс.
+    /// Меширование колонки в основном потоке, мкс; 0, пока меши строят воркеры.
     #[wasm_bindgen(js_name = meshUs)]
     pub mesh_us: u32,
     /// Секций, прошедших отсечение по пирамиде видимости, в последнем кадре.
