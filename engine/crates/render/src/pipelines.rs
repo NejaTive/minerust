@@ -6,8 +6,10 @@ pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth3
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockPass {
-    /// Непрозрачные блоки и листва: с записью глубины, листва — через `discard`.
+    /// Непрозрачные блоки: с записью глубины, без `discard`.
     Solid,
+    /// Листва, кресты, факел: с записью глубины, дырки через `discard`.
+    Cutout,
     Water,
 }
 
@@ -23,7 +25,11 @@ pub(crate) fn create_block_pipeline(
 ) -> wgpu::RenderPipeline {
     let water = pass == BlockPass::Water;
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(if water { "water" } else { "main" }),
+        label: Some(match pass {
+            BlockPass::Solid => "main",
+            BlockPass::Cutout => "cutout",
+            BlockPass::Water => "water",
+        }),
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: shader,
@@ -33,7 +39,11 @@ pub(crate) fn create_block_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some(if water { "fs_water" } else { "fs_main" }),
+            entry_point: Some(match pass {
+                BlockPass::Solid => "fs_main",
+                BlockPass::Cutout => "fs_cutout",
+                BlockPass::Water => "fs_water",
+            }),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: water.then_some(wgpu::BlendState::ALPHA_BLENDING),
