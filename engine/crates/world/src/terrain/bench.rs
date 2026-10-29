@@ -1,7 +1,5 @@
 use super::*;
 
-/// Среднее время `generate` на квадрате колонок 16×16; запуск:
-/// `cargo test --release generate_timing -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn generate_timing() {
@@ -17,10 +15,6 @@ fn generate_timing() {
     println!("generate: {per_column:?} per column");
 }
 
-/// Подбор точек для режима замера (`?bench`): равнина и лес у воды на сиде 1337
-/// (`BENCH_SEED` в `GameCanvas.vue`). Оценивает круг радиуса 192 блока вокруг каждого узла
-/// сетки и печатает лучшие; запуск:
-/// `cargo test --release bench_points -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn bench_points() {

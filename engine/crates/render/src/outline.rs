@@ -1,20 +1,13 @@
 use glam::{IVec3, Vec3};
 
-/// Насколько рамка больше блока с каждой стороны, блоков. Линии ровно на гранях
-/// мерцали бы в z-fighting с самими гранями.
 const INFLATE: f32 = 0.002;
 
-/// 12 рёбер куба парами концов для `LineList`.
 pub const OUTLINE_VERTICES: usize = 24;
-/// Вершина рамки — только позиция, `Float32x3`.
 pub const OUTLINE_VERTEX_SIZE: usize = 12;
 
-/// Рёбра рамки вокруг бокса `bounds` (min, max в долях клетки) блока `block`, в
-/// мировых координатах, парами концов.
 pub fn outline_vertices(block: IVec3, bounds: (Vec3, Vec3)) -> [Vec3; OUTLINE_VERTICES] {
     let min = block.as_vec3() + bounds.0 - INFLATE;
     let size = bounds.1 - bounds.0 + 2.0 * INFLATE;
-    // Угол куба по номеру 0..8: бит 0 — x, бит 1 — y, бит 2 — z.
     let corner = |i: usize| {
         min + Vec3::new(
             (i & 1) as f32 * size.x,

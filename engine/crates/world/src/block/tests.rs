@@ -41,7 +41,6 @@ fn icon_is_side_face() {
     assert_eq!(Block::Log.icon_pixels(), pixels(Tile::LogSide));
     assert_eq!(Block::Stone.icon_pixels(), pixels(Tile::Stone));
     assert_eq!(Block::Air.icon_pixels(), None);
-    // Зелёная кайма сверху и земля ниже: иконка травы не сплошная.
     let grass = Block::Grass.icon_pixels().unwrap();
     let (top, bottom) = (&grass[..3], &grass[grass.len() - 4..][..3]);
     assert_ne!(top, bottom);
@@ -170,7 +169,6 @@ fn air_has_no_tiles_and_others_have_all() {
 fn support_is_for_non_solid_blocks() {
     for def in &BLOCKS {
         assert!(!(def.needs_support && def.solid), "{}", def.name);
-        // Непрозрачный блок обязан быть твёрдым кубом.
         assert!(
             !def.opaque || def.solid && def.shape == Shape::Cube,
             "{}",
@@ -191,7 +189,6 @@ fn wall_torch_bounds_lean_away_from_the_wall() {
     let (lo, hi) = Block::Torch.bounds(ATTACH_POS_Z);
     assert_eq!((lo.z, hi.z), (10.0 * u, 1.0));
     assert_eq!((lo.x, hi.x), (7.0 * u, 9.0 * u));
-    // Неизвестный байт — напольный.
     assert_eq!(Block::Torch.bounds(77), Block::Torch.bounds(0));
 }
 

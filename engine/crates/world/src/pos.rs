@@ -4,8 +4,6 @@ use glam::{IVec2, IVec3};
 
 use crate::section::SECTION_SIZE;
 
-/// Ключ колонки: (x, z) в колонках, то есть мировой блок `div_euclid(16)`. Поле открыто
-/// ради арифметики glam; тип нужен, чтобы не спутать ключ с позицией блока и с ключом секции.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct ColumnPos(pub IVec2);
 
@@ -24,28 +22,23 @@ impl ColumnPos {
         self.0.y
     }
 
-    /// Колонка, в которой лежит блок с мировыми координатами `block` (в блоках).
     pub fn of_block(block: IVec3) -> Self {
         Self(IVec2::new(block.x, block.z).div_euclid(IVec2::splat(SECTION_SIZE)))
     }
 
-    /// Мировой угол колонки (min x, 0, min z) в блоках.
     pub fn origin(self) -> IVec3 {
         IVec3::new(self.0.x * SECTION_SIZE, 0, self.0.y * SECTION_SIZE)
     }
 
-    /// Ключ секции этой колонки с номером `sy` (0..COLUMN_SECTIONS).
     pub fn section(self, sy: i32) -> SectionPos {
         SectionPos::new(self.0.x, sy, self.0.y)
     }
 
-    /// Квадрат расстояния до `other` в колонках.
     pub fn dist2(self, other: Self) -> i32 {
         (self.0 - other.0).length_squared()
     }
 }
 
-/// Сдвиг ключа на целое число колонок.
 impl Add<IVec2> for ColumnPos {
     type Output = Self;
 
@@ -66,7 +59,6 @@ impl SubAssign<IVec2> for ColumnPos {
     }
 }
 
-/// Разность ключей — вектор в колонках.
 impl Sub for ColumnPos {
     type Output = IVec2;
 
@@ -93,8 +85,6 @@ impl std::fmt::Display for ColumnPos {
     }
 }
 
-/// Ключ секции: (x колонки, номер секции по высоте, z колонки). Поле открыто по той же
-/// причине, что у [`ColumnPos`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct SectionPos(pub IVec3);
 
@@ -103,22 +93,18 @@ impl SectionPos {
         Self(IVec3::new(x, y, z))
     }
 
-    /// Секция, в которой лежит блок с мировыми координатами `block` (в блоках).
     pub fn of_block(block: IVec3) -> Self {
         Self(block.div_euclid(IVec3::splat(SECTION_SIZE)))
     }
 
-    /// Колонка, которой принадлежит секция.
     pub fn column(self) -> ColumnPos {
         ColumnPos::new(self.0.x, self.0.z)
     }
 
-    /// Номер секции в колонке (0..COLUMN_SECTIONS у существующих секций).
     pub const fn y(self) -> i32 {
         self.0.y
     }
 
-    /// Мировой угол секции (min x, min y, min z) в блоках.
     pub fn origin(self) -> IVec3 {
         self.0 * SECTION_SIZE
     }

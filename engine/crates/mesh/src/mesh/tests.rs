@@ -33,7 +33,6 @@ fn quad_fields_round_trip_at_bounds() {
     assert_eq!(q.ao(), [3, 0, 3, 1]);
     assert_eq!(q.sun_halves(), [MAX_LIGHT_HALVES, 0, 1, 29]);
     assert_eq!(q.block_halves(), [0, MAX_LIGHT_HALVES, 17, 2]);
-    // Поля не заходят друг на друга: переворот и слой не трогают шаблон и позицию.
     let flipped = Quad::new([15, 0, 15], 24, true, 0, [0; 4], [0; 4], [0; 4]);
     assert_eq!(
         (flipped.template(), flipped.layer(), flipped.cell()),
@@ -57,7 +56,6 @@ fn slot_bytes_hold_origin_and_first_word() {
 }
 
 /// Формула шейдера (`vertex_brightness` в shader.wgsl) повторена здесь по тексту:
-/// `pow(0.8, 15 − level)` через `exp2`, минимум 0.05.
 fn shader_brightness(sun_halves: u8, block_halves: u8, dark: f32) -> f32 {
     let level = (f32::from(sun_halves) / 2.0 - dark).max(f32::from(block_halves) / 2.0);
     (0.8f32.log2() * (15.0 - level)).exp2().max(0.05)
@@ -79,7 +77,6 @@ fn shader_formula_matches_cpu() {
             }
         }
     }
-    // Целые уровни при тьме 0 — ровно прежняя `light::brightness`.
     for level in 0..=MAX_LIGHT {
         assert_eq!(
             light_brightness(level * 2, 0, 0.0),
@@ -90,7 +87,6 @@ fn shader_formula_matches_cpu() {
 
 #[test]
 fn darkness_leaves_block_light() {
-    // Ночью солнце 15 − 11 = 4 слабее светокамня 10.
     assert_eq!(light_brightness(30, 20, 0.0), 1.0);
     assert_eq!(light_brightness(30, 20, 11.0), level_brightness(10.0));
     assert!(light_brightness(30, 0, 11.0) > 0.05);

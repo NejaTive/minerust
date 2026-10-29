@@ -4,8 +4,6 @@ fn module() -> naga::Module {
     naga::front::wgsl::parse_str(BLOCK_SHADER).expect("wgsl parses")
 }
 
-/// Шейдер блоков разбирается и проходит валидацию naga: опечатка в раскладке записи
-/// иначе всплыла бы только при создании модуля в браузере.
 #[test]
 fn block_shader_validates() {
     naga::valid::Validator::new(
@@ -16,8 +14,6 @@ fn block_shader_validates() {
     .expect("wgsl validates");
 }
 
-/// Структура `ShapeTable` в шейдере занимает ровно столько, сколько байт отдаёт
-/// `mesh::templates::table_bytes`: иначе uniform-буфер не совпал бы с привязкой.
 #[test]
 fn shape_table_size_matches_rust_table() {
     let module = module();

@@ -14,15 +14,10 @@ const props = defineProps<{
   screen: MenuScreen
   settings: Settings
   limits: SettingsLimits
-  /** Игра уже шла: вместо «Играть» — «Продолжить». */
   started: boolean
-  /** Движок грузится или пересоздаётся: играть и менять мир пока нельзя. */
   busy: boolean
-  /** Браузер отказал в захвате курсора. */
   lockFailed: boolean
-  /** В базе мир более новой версии игры: он не загружен, «Новый мир» его сотрёт. */
   newerSave: boolean
-  /** Движок упал: Esc не должен пытаться продолжить. */
   hasError: boolean
 }>()
 
@@ -35,8 +30,6 @@ const emit = defineEmits<{
 
 const go = (screen: MenuScreen) => emit('update:screen', screen)
 
-// Из игры Esc сюда не доходит (браузер снимает lock). В меню: подменю → назад,
-// главный после старта → «Продолжить» (отказ Chrome ~1 с — меню остаётся).
 function onKeyDown(e: KeyboardEvent) {
   if (e.code !== 'Escape' || e.repeat) return
   const action = pauseMenuEscAction({

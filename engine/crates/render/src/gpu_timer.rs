@@ -1,15 +1,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
-/// Буферов чтения по кругу: результат приходит через `map_async` с задержкой в пару
-/// кадров, и кадр не ждёт GPU. Занятый буфер просто пропускает замер этого кадра.
 const READBACK_SLOTS: usize = 3;
-/// Два штампа времени: начало и конец прохода, по `u64`.
 const RESULT_BYTES: u64 = 16;
 
 struct ReadbackSlot {
     buffer: wgpu::Buffer,
-    /// Идёт чтение или `map_async` не вернулся: в буфер копировать нельзя.
     busy: Arc<AtomicBool>,
 }
 
@@ -19,13 +15,11 @@ struct Samples {
     count: AtomicU32,
 }
 
-/// Время GPU одного render pass по `timestamp-query`. Нужна фича `TIMESTAMP_QUERY`.
 pub(crate) struct GpuTimer {
     query_set: wgpu::QuerySet,
     resolve: wgpu::Buffer,
     slots: Vec<ReadbackSlot>,
     next: usize,
-    /// Наносекунд в одном тике штампа.
     period_ns: f32,
     samples: Arc<Samples>,
 }
@@ -64,7 +58,6 @@ impl GpuTimer {
         }
     }
 
-    /// Свободный буфер чтения для кадра; `None` — все заняты, кадр без замера.
     pub(crate) fn acquire(&mut self) -> Option<usize> {
         let index = self.next;
         if self.slots[index].busy.load(Ordering::Acquire) {
@@ -82,14 +75,11 @@ impl GpuTimer {
         }
     }
 
-    /// После конца прохода: штампы в буфер чтения `slot`.
     pub(crate) fn resolve(&self, encoder: &mut wgpu::CommandEncoder, slot: usize) {
         encoder.resolve_query_set(&self.query_set, 0..2, &self.resolve, 0);
         encoder.copy_buffer_to_buffer(&self.resolve, 0, &self.slots[slot].buffer, 0, RESULT_BYTES);
     }
 
-    /// После `queue.submit` кадра: `map_async` нельзя звать раньше, буфер ушёл бы в
-    /// команды уже «в ожидании отображения».
     pub(crate) fn read_back(&self, slot: usize) {
         let slot = &self.slots[slot];
         slot.busy.store(true, Ordering::Release);
@@ -121,7 +111,6 @@ impl GpuTimer {
             });
     }
 
-    /// Сумма времени проходов (мс) и их число с прошлого вызова; `None`, если замеров не было.
     pub(crate) fn take_samples(&self) -> Option<(f64, u32)> {
         let count = self.samples.count.swap(0, Ordering::Relaxed);
         let total_ns = self.samples.total_ns.swap(0, Ordering::Relaxed);

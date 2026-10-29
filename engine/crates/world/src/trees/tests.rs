@@ -36,7 +36,6 @@ fn trees_keep_their_distance_and_shape() {
                     .map(|l| (l.x - x).abs().max((l.z - z).abs()))
                     .max();
                 assert_eq!(spread, Some(CROWN_RADIUS));
-                // Над стволом лист, крона выше третьего бревна сверху не опускается.
                 let top = tree.base.y + tree.height - 1;
                 assert!(leaves.contains(&IVec3::new(x, top + 1, z)));
                 assert!(leaves.iter().all(|l| (top - 2..=top + 1).contains(&l.y)));
@@ -73,7 +72,6 @@ fn no_trees_in_water_or_on_beaches() {
 
 #[test]
 fn forest_is_denser_than_plains_and_desert_is_empty() {
-    // Площадь — только суша: в воде и на пляжах деревьев нет в любом биоме.
     let terrain = Terrain::new(1337);
     let mut area = [0; 3];
     let mut trees = [0; 3];
@@ -107,8 +105,6 @@ fn crowns_cross_columns_seamlessly() {
         .collect();
     assert!(leaf_columns.len() > 1, "{tree:?} does not cross a border");
 
-    // «Окно» 3×3 колонок одним массивом: земля, затем деревья со стволами в окне
-    // целиком, с записью за границы колонок.
     let size = 3 * SECTION_SIZE;
     let min = (center.0 - IVec2::ONE) * SECTION_SIZE;
     let index = |p: IVec3| ((p.x - min.x) + size * (p.z - min.y) + size * size * p.y) as usize;
@@ -148,8 +144,6 @@ fn crowns_cross_columns_seamlessly() {
         }
     }
 
-    // Колонки по отдельности совпадают с окном везде, куда не дотягиваются деревья
-    // из-за его края.
     let mut compared = 0;
     for cz in -1..=1 {
         for cx in -1..=1 {

@@ -4,14 +4,11 @@ import { gameState } from '../engine/state'
 import { useEngine } from '../engine/useEngine'
 
 const emit = defineEmits<{
-  /** Нажата N: подтверждение «Новый мир» показывает меню. */
   'ask-new-world': []
-  /** Клик по канвасу при свободном курсоре (после lockLost). */
   'canvas-click': []
 }>()
 
 const canvas = ref<HTMLCanvasElement>()
-// Смена ключа пересоздаёт <canvas>, см. `newWorld`.
 const canvasKey = ref(0)
 
 const { requestLock, releaseCursor, newWorld } = useEngine(canvas, canvasKey, () =>
@@ -19,7 +16,6 @@ const { requestLock, releaseCursor, newWorld } = useEngine(canvas, canvasKey, ()
 )
 
 function onCanvasClick() {
-  // При захваченном курсоре клики идут в мир; иначе — попытка продолжить после lockLost.
   if (gameState.locked || gameState.inventoryOpen) return
   emit('canvas-click')
 }

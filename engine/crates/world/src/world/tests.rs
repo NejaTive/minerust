@@ -35,11 +35,9 @@ fn placement_replaces_grass_and_needs_support() {
         !world.can_place(above, Block::Stone),
         "cubes are not replaced"
     );
-    // Без твёрдого блока снизу цветок и факел не ставятся, куб — ставится.
     let air = floor + 3 * IVec3::Y;
     assert!(!world.can_place(air, Block::Poppy) && !world.can_place(air, Block::Torch));
     assert!(world.can_place(air, Block::Stone));
-    // Цветок не опора для другого цветка.
     world.set_block(air, Block::Poppy);
     assert!(!world.can_place(air + IVec3::Y, Block::Dandelion));
     world.set_block(floor + 5 * IVec3::Y, Block::Water);
@@ -73,7 +71,6 @@ fn replacing_support_with_solid_keeps_plant() {
     world.set_block(floor + IVec3::Y, Block::Torch);
     assert_eq!(world.set_block_supported(floor, Block::Stone), vec![floor]);
     assert_eq!(world.block(floor + IVec3::Y), Block::Torch);
-    // Блок, не требующий опоры, над воздухом остаётся.
     world.set_block(floor + 3 * IVec3::Y, Block::Stone);
     assert_eq!(
         world.set_block_supported(floor + 2 * IVec3::Y, Block::Air),
@@ -157,7 +154,6 @@ fn edited_column_survives_unload() {
     assert_eq!(world.block(pos), Block::Stone);
     assert!(world.take_edited(key).is_none());
 
-    // Вернувшаяся колонка по-прежнему изменённая: вторая выгрузка снова её отложит.
     world.remove(key);
     assert!(world.take_edited(key).is_some());
 }
@@ -189,7 +185,6 @@ fn drain_dirty_reports_each_edit_once() {
 
     world.set_block(IVec3::new(16, 4, -16), Block::Stone);
     assert_eq!(world.drain_dirty(), vec![key]);
-    // Загруженная, но не тронутая колонка — не изменённая.
     assert!(world.edited_column(ColumnPos::ZERO).is_none());
 }
 
@@ -221,7 +216,6 @@ fn import_replaces_loaded_column() {
     assert!(world.edited_column(key).is_some());
     assert!(world.drain_dirty().is_empty());
 
-    // Импортированная колонка снова отложится при выгрузке.
     world.remove(key);
     assert!(world.edited_column(key).is_some());
 }
@@ -241,12 +235,10 @@ fn affected_sections_in_middle_is_one() {
 
 #[test]
 fn affected_sections_on_column_border() {
-    // x = 15 — край колонки 0, сосед справа — колонка 1.
     assert_eq!(
         sorted(affected_sections(IVec3::new(15, 40, 5))),
         sorted(vec![SectionPos::new(0, 2, 0), SectionPos::new(1, 2, 0)])
     );
-    // x = -16 — левый край колонки -1.
     assert_eq!(
         sorted(affected_sections(IVec3::new(-16, 40, 5))),
         sorted(vec![SectionPos::new(-1, 2, 0), SectionPos::new(-2, 2, 0)])
@@ -255,7 +247,6 @@ fn affected_sections_on_column_border() {
 
 #[test]
 fn affected_sections_on_edge() {
-    // x = 15 и y = 32: ребро между колонками 0/1 и секциями 1/2.
     assert_eq!(
         sorted(affected_sections(IVec3::new(15, 32, 5))),
         sorted(vec![
@@ -297,7 +288,6 @@ fn affected_sections_stay_in_height() {
         sorted(affected_sections(IVec3::new(5, 16, 5))),
         sorted(vec![SectionPos::new(0, 1, 0), SectionPos::new(0, 0, 0)])
     );
-    // Углы колонки на дне и на верху мира: 4 секции, все в 0..COLUMN_SECTIONS.
     for (pos, sy) in [
         (IVec3::new(0, 0, 0), 0),
         (IVec3::new(15, WORLD_HEIGHT - 1, 15), COLUMN_SECTIONS - 1),
@@ -308,7 +298,6 @@ fn affected_sections_stay_in_height() {
     }
 }
 
-/// Мир с одной колонкой, пол из камня на y = 9, в клетке (3, 10, 3) воздух.
 fn floor_world() -> World {
     let mut world = World::new();
     world.insert(ColumnPos::ZERO, Column::new());
@@ -343,7 +332,6 @@ fn wall_torch_needs_solid_opaque_wall() {
         (IVec3::Z, ATTACH_POS_Z),
         (IVec3::NEG_Z, ATTACH_NEG_Z),
     ] {
-        // Опоры нет: воздух.
         assert!(!world.can_place_with_data(torch, Block::Torch, data));
         for bad in [Block::Water, Block::Leaves] {
             world.set_block(torch + wall, bad);
@@ -354,7 +342,6 @@ fn wall_torch_needs_solid_opaque_wall() {
         }
         world.set_block(torch + wall, Block::Stone);
         assert!(world.can_place_with_data(torch, Block::Torch, data));
-        // Стена с другой стороны не подходит.
         let other = if data == ATTACH_POS_X {
             ATTACH_NEG_X
         } else {
@@ -397,21 +384,18 @@ fn breaking_wall_removes_wall_torch() {
 #[test]
 fn removal_cascades_through_wall_and_floor_dependents() {
     let mut world = floor_world();
-    // Столбик камня (3, 10..12, 3) с факелом на стене (4, 11, 3) и цветком сверху.
     for y in 10..12 {
         world.set_block(IVec3::new(3, y, 3), Block::Stone);
     }
     let torch = IVec3::new(4, 11, 3);
     world.set_block_supported_with_data(torch, Block::Torch, ATTACH_NEG_X);
     world.set_block(IVec3::new(3, 12, 3), Block::Poppy);
-    // Под факелом ещё один факел, висящий на полу, у которого опора — его клетка.
     let changed = world.set_block_supported(IVec3::new(3, 11, 3), Block::Air);
     assert_eq!(changed[0], IVec3::new(3, 11, 3));
     assert!(changed.contains(&torch));
     assert!(changed.contains(&IVec3::new(3, 12, 3)));
     assert_eq!(world.block(torch), Block::Air);
     assert_eq!(world.block(IVec3::new(3, 12, 3)), Block::Air);
-    // Нижний столбик остался.
     assert_eq!(world.block(IVec3::new(3, 10, 3)), Block::Stone);
 }
 
@@ -424,7 +408,6 @@ fn replacing_wall_with_solid_opaque_keeps_wall_torch() {
     world.set_block_supported_with_data(torch, Block::Torch, ATTACH_POS_X);
     assert_eq!(world.set_block_supported(wall, Block::Dirt), vec![wall]);
     assert_eq!(world.block(torch), Block::Torch);
-    // Листва твёрдая, но на ней настенный факел не держится.
     assert_eq!(
         world.set_block_supported(wall, Block::Leaves),
         vec![wall, torch]
@@ -441,7 +424,6 @@ fn placement_data_by_face() {
     assert_eq!(Block::Log.placement_data(IVec3::Z), Some(AXIS_Z));
     assert_eq!(Block::Torch.placement_data(IVec3::Y), Some(ATTACH_FLOOR));
     assert_eq!(Block::Torch.placement_data(IVec3::NEG_Y), None);
-    // Факел на грани +X блока стоит в клетке к +X от него, а опора — на −X от факела.
     assert_eq!(Block::Torch.placement_data(IVec3::X), Some(ATTACH_NEG_X));
     assert_eq!(
         Block::Torch.placement_data(IVec3::NEG_X),

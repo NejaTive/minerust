@@ -8,20 +8,10 @@ use crate::block::{Block, fluid_height};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::section::SECTION_SIZE;
 
-/// Загруженные колонки по ключу [`ColumnPos`].
-///
-/// Колонки с правками игрока при выгрузке не пропадают, а ждут в `stashed`, пока
-/// загрузчик не вернёт их через [`World::take_edited`]. Правки целиком — это
-/// изменённые загруженные колонки плюс `stashed`. Сохранение пишет не все правки, а
-/// только колонки, изменённые с прошлого раза: их отдаёт [`World::drain_dirty`].
 pub struct World {
     columns: HashMap<ColumnPos, Column>,
-    /// Ключи загруженных колонок, в которых что-то меняли через [`World::set_block`].
     edited: HashSet<ColumnPos>,
-    /// Выгруженные изменённые колонки. Без ограничения: их немного, и терять нельзя.
     stashed: HashMap<ColumnPos, Column>,
-    /// Колонки, изменённые после прошлого [`World::drain_dirty`], загруженные или
-    /// отложенные. Выгрузка признак не снимает: колонку ещё надо сохранить.
     dirty: HashSet<ColumnPos>,
 }
 
@@ -35,8 +25,6 @@ impl World {
         }
     }
 
-    /// Блок по мировым координатам. y < 0 — твёрдый (`Stone`: дно мира не мешируется),
-    /// y ≥ WORLD_HEIGHT — `Air`, незагруженная колонка — `Air`.
     pub fn block(&self, pos: IVec3) -> Block {
         if pos.y < 0 {
             return Block::Stone;
@@ -50,13 +38,10 @@ impl World {
             .map_or(Block::Air, |column| column.get(local))
     }
 
-    /// Загружена ли колонка с клеткой `pos` (высота не проверяется).
     pub fn is_loaded(&self, pos: IVec3) -> bool {
         self.columns.contains_key(&ColumnPos::of_block(pos))
     }
 
-    /// Высота воды в клетке `pos` над её низом; `None` — в клетке не вода. Полная, если
-    /// над ней тоже вода, иначе по уровню (см. [`fluid_height`]).
     pub fn water_height(&self, pos: IVec3) -> Option<f32> {
         self.block(pos).is_water().then(|| {
             if self.block(pos + IVec3::Y).is_water() {
@@ -67,13 +52,10 @@ impl World {
         })
     }
 
-    /// Колонка `key` и восемь соседей: индекс `dx + 1 + 3·(dz + 1)`, центр — 4;
-    /// незагруженные — `None`. Мешеру: один запрос на колонку вместо хэша на блок.
     pub fn neighborhood(&self, key: ColumnPos) -> [Option<&Column>; 9] {
         std::array::from_fn(|i| self.column(key + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1)))
     }
 
-    /// Байт данных блока по мировым координатам; вне мира и в незагруженной колонке — 0.
     pub fn block_data(&self, pos: IVec3) -> u8 {
         if !(0..WORLD_HEIGHT).contains(&pos.y) {
             return 0;
@@ -84,14 +66,10 @@ impl World {
             .map_or(0, |column| column.get_data(local))
     }
 
-    /// Ставит блок с нулевыми данными. См. [`World::set_block_with_data`].
     pub fn set_block(&mut self, pos: IVec3, block: Block) -> bool {
         self.set_block_with_data(pos, block, 0)
     }
 
-    /// Ставит блок и байт данных по мировым координатам. `false` (и ничего не меняет),
-    /// если y вне 0..WORLD_HEIGHT или колонка не загружена. Колонка помечается
-    /// изменённой и несохранённой.
     pub fn set_block_with_data(&mut self, pos: IVec3, block: Block, data: u8) -> bool {
         if !(0..WORLD_HEIGHT).contains(&pos.y) {
             return false;
@@ -106,9 +84,6 @@ impl World {
         true
     }
 
-    /// Держится ли `block` с данными `data` в клетке `pos`: опора на месте. Блок без
-    /// опоры держится всегда. Для настенного блока опора ещё и непрозрачная: листва
-    /// «твёрдая» для ног, но факел на ней смотрелся бы висящим в дырках.
     pub fn is_supported(&self, pos: IVec3, block: Block, data: u8) -> bool {
         let Some(dir) = block.support_dir(data) else {
             return true;
@@ -117,27 +92,18 @@ impl World {
         support.is_solid() && (dir.y != 0 || support.is_opaque())
     }
 
-    /// Можно ли поставить `block` в клетку `pos`: там воздух, вода или трава (она
-    /// заменяется), а растению и факелу нужна опора. Игрока не учитывает.
     pub fn can_place(&self, pos: IVec3, block: Block) -> bool {
         self.can_place_with_data(pos, block, 0)
     }
 
-    /// [`World::can_place`] для блока с данными (направление крепления берётся из них).
     pub fn can_place_with_data(&self, pos: IVec3, block: Block, data: u8) -> bool {
         self.block(pos).is_replaceable() && self.is_supported(pos, block, data)
     }
 
-    /// Правка с опорой без данных. См. [`World::set_block_supported_with_data`].
     pub fn set_block_supported(&mut self, pos: IVec3, block: Block) -> Vec<IVec3> {
         self.set_block_supported_with_data(pos, block, 0)
     }
 
-    /// Правка с опорой: ставит `block` и убирает блоки, потерявшие опору (трава, цветы,
-    /// факел на полу и на стене), и так каскадом: у снятого блока тоже могли быть
-    /// зависимые. Возвращает изменённые клетки — первой `pos`, затем снятые в порядке
-    /// снятия; пусто, если правка не прошла (`set_block_with_data`). Одно место для
-    /// ломания и установки: движок обновляет свет и меши по каждой клетке списка.
     pub fn set_block_supported_with_data(
         &mut self,
         pos: IVec3,
@@ -162,7 +128,6 @@ impl World {
             ] {
                 let around = cell + dir;
                 let (neighbor, data) = (self.block(around), self.block_data(around));
-                // Зависимый блок смотрит на `cell` как на опору (она против `dir`).
                 if neighbor.support_dir(data) == Some(-dir)
                     && !self.is_supported(around, neighbor, data)
                     && self.set_block(around, Block::Air)
@@ -182,8 +147,6 @@ impl World {
         self.columns.insert(key, column);
     }
 
-    /// Выгружает колонку. Изменённая не пропадает: её копия уходит в отложенные
-    /// правки, откуда её заберёт [`World::take_edited`].
     pub fn remove(&mut self, key: ColumnPos) -> Option<Column> {
         let column = self.columns.remove(&key)?;
         if self.edited.remove(&key) {
@@ -192,27 +155,20 @@ impl World {
         Some(column)
     }
 
-    /// Отложенная изменённая колонка, если есть (забирает её из отложенных). Колонка
-    /// по-прежнему считается изменённой: вызывающий должен вернуть её через
-    /// [`World::insert`], и следующая выгрузка снова её отложит.
     pub fn take_edited(&mut self, key: ColumnPos) -> Option<Column> {
         let column = self.stashed.remove(&key)?;
         self.edited.insert(key);
         Some(column)
     }
 
-    /// Изменена ли колонка (загруженная или отложенная).
     pub fn is_edited(&self, key: ColumnPos) -> bool {
         self.edited.contains(&key) || self.stashed.contains_key(&key)
     }
 
-    /// Ключи колонок, изменённых после прошлого вызова (загруженных и отложенных), в
-    /// произвольном порядке; сбрасывает признак.
     pub fn drain_dirty(&mut self) -> Vec<ColumnPos> {
         self.dirty.drain().collect()
     }
 
-    /// Изменённая колонка — загруженная или отложенная.
     pub fn edited_column(&self, key: ColumnPos) -> Option<&Column> {
         if self.edited.contains(&key) {
             self.columns.get(&key)
@@ -221,10 +177,6 @@ impl World {
         }
     }
 
-    /// Сохранённая колонка из хранилища: если колонка загружена — заменяет её, иначе
-    /// кладёт в отложенные, и загрузчик возьмёт её вместо генерации. В обоих случаях
-    /// колонка считается изменённой (её снова надо сохранять при выгрузке), но не
-    /// несохранённой: в хранилище она уже такая.
     pub fn import(&mut self, key: ColumnPos, column: Column) {
         if let Some(loaded) = self.columns.get_mut(&key) {
             *loaded = column;
@@ -235,7 +187,6 @@ impl World {
         self.dirty.remove(&key);
     }
 
-    /// Ключи загруженных колонок, в произвольном порядке.
     pub fn keys(&self) -> impl Iterator<Item = ColumnPos> + '_ {
         self.columns.keys().copied()
     }
@@ -255,15 +206,9 @@ impl Default for World {
     }
 }
 
-/// Ключи секций, которые надо перестроить
-/// после изменения блока `pos`: его секция и все соседние, к которым он примыкает, —
-/// по граням, рёбрам и углам, до 8. Диагональные нужны из-за AO: вершины соседней
-/// секции затеняются блоками по диагонали от них. Секции вне 0..COLUMN_SECTIONS по
-/// вертикали не возвращаются.
 pub fn affected_sections(pos: IVec3) -> Vec<SectionPos> {
     let own = SectionPos::of_block(pos);
     let local = pos.rem_euclid(IVec3::splat(SECTION_SIZE));
-    // Сдвиги по оси: своя секция и, если блок на краю, соседняя с этой стороны.
     let span = |axis: usize| match local[axis] {
         0 => -1..=0,
         l if l == SECTION_SIZE - 1 => 0..=1,
@@ -281,8 +226,6 @@ pub fn affected_sections(pos: IVec3) -> Vec<SectionPos> {
     keys
 }
 
-/// Мировые координаты → (ключ колонки, локальные в ней). `div_euclid`, а не `/`,
-/// чтобы x = -1 попадал в колонку -1, а не 0.
 fn split(pos: IVec3) -> (ColumnPos, IVec3) {
     let key = ColumnPos::of_block(pos);
     let local = IVec3::new(

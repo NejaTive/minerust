@@ -16,17 +16,14 @@ use world::section::{SECTION_SIZE, Section};
 use world::tile::{LAYER_COUNT, Tile};
 use world::world::World;
 
-// Слой хранится в вершине одним байтом.
 const _: () = assert!(LAYER_COUNT <= 256);
 
 pub struct MeshData {
     pub quads: Vec<Quad>,
 }
 
-/// Настройки построения меша, общие для всего мира.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshOptions {
-    /// Затенять углы и стыки блоков (ambient occlusion по вершинам).
     pub ambient_occlusion: bool,
 }
 
@@ -38,10 +35,6 @@ impl Default for MeshOptions {
     }
 }
 
-/// Уровень затенения вершины по схеме 0fps, 0 — темнее всего, 3 — без затенения.
-/// `side1`, `side2` — непрозрачные ли блоки, примыкающие к вершине по рёбрам грани,
-/// `corner` — блок по диагонали; все три — в слое перед гранью. Если обе стороны
-/// непрозрачные, угловой блок не виден и уровень 0 независимо от него.
 pub fn vertex_ao(side1: bool, side2: bool, corner: bool) -> u8 {
     if side1 && side2 {
         0
@@ -50,22 +43,16 @@ pub fn vertex_ao(side1: bool, side2: bool, corner: bool) -> u8 {
     }
 }
 
-/// Сторона куба блоков секции с полем в один блок со всех сторон.
 pub(crate) const PADDED: i32 = SECTION_SIZE + 2;
 
-/// Блоки секции и всех её соседей в пределах −1..=16 по каждой оси. AO смотрит на
-/// 12 блоков на грань, и брать их из массива намного дешевле, чем из мира (поиск
-/// колонки в `HashMap`).
 pub(crate) struct Neighborhood(pub(crate) [Block; (PADDED * PADDED * PADDED) as usize]);
 
 impl Neighborhood {
-    /// Индекс локальных координат секции, −1..=16 по каждой оси.
     fn index(local: IVec3) -> usize {
         let p = local + IVec3::ONE;
         (p.x + PADDED * p.z + PADDED * PADDED * p.y) as usize
     }
 
-    /// Сдвиг индекса при шаге на `offset`: так соседи блока берутся без пересчёта координат.
     fn stride(offset: IVec3) -> isize {
         (offset.x + PADDED * offset.z + PADDED * PADDED * offset.y) as isize
     }
@@ -79,8 +66,6 @@ impl Neighborhood {
     }
 }
 
-/// Байты данных блоков секции и соседей, как [`Neighborhood`] для блоков: уровень воды
-/// соседней клетки нужен высоте её поверхности у стыка.
 pub(crate) struct Datas(pub(crate) [u8; (PADDED * PADDED * PADDED) as usize]);
 
 impl Datas {
@@ -89,27 +74,21 @@ impl Datas {
     }
 }
 
-/// Байты света секции и соседей ([`world::light::pack_light`]), как [`Neighborhood`]
-/// для блоков.
 pub(crate) struct Lights(pub(crate) [u8; (PADDED * PADDED * PADDED) as usize]);
 
 impl Lights {
-    /// Солнечный уровень и уровень света блоков клетки.
     fn at(&self, index: usize, offset: isize) -> (u32, u32) {
         let packed = self.0[index.wrapping_add_signed(offset)];
         (u32::from(sky_level(packed)), u32::from(block_level(packed)))
     }
 }
 
-/// Для каждой вершины грани — сдвиги индекса в [`Neighborhood`] к трём блокам перед
-/// ней: два боковых и угловой. Те же клетки дают и плавный свет вершины.
 type CornerStrides = [[isize; 3]; 4];
 
 fn corner_strides(face: &Face) -> CornerStrides {
     let normal_axis = face.normal.abs().max_position();
     let [a, b] = [1, 2].map(|i| (normal_axis + i) % 3);
     face.corners.map(|corner| {
-        // От центра блока к вершине: ±1 по каждой оси.
         let toward = IVec3::from(corner) * 2 - IVec3::ONE;
         let along = |axis: usize| {
             let mut step = IVec3::ZERO;
@@ -121,17 +100,12 @@ fn corner_strides(face: &Face) -> CornerStrides {
     })
 }
 
-/// Колонка, её восемь соседей и их свет: всё, из чего строится кэш секции. Берётся
-/// один раз на колонку, а не хэш-запросом на клетку.
 pub struct Surroundings<'a> {
-    /// Индекс `dx + 1 + 3·(dz + 1)`, центр — 4; незагруженные — `None`
-    /// (блоки там воздух, свет 0, как раньше у `World::block` и `LightMap::packed`).
     pub(crate) columns: [Option<&'a Column>; 9],
     lights: [Option<&'a ColumnLight>; 9],
 }
 
 impl<'a> Surroundings<'a> {
-    /// `None`, если колонка `key` не загружена.
     pub fn new(world: &'a World, light: &'a LightMap, key: ColumnPos) -> Option<Self> {
         let columns = world.neighborhood(key);
         columns[4]?;
@@ -141,10 +115,6 @@ impl<'a> Surroundings<'a> {
         })
     }
 
-    /// Заполняет кэши для секции `sy` центральной колонки (0..8): строки по x копируются
-    /// срезами. Ниже мира блоки — камень, свет 0; выше — воздух и полный свет. Данные
-    /// блоков вне мира и незагруженных колонок — нули. Возвращает, есть ли в `datas`
-    /// ненулевой байт.
     pub(crate) fn fill(
         &self,
         sy: i32,
@@ -177,8 +147,6 @@ impl<'a> Surroundings<'a> {
                 let (section, in_y) = (world_y / SECTION_SIZE, world_y % SECTION_SIZE);
                 let in_z = z.rem_euclid(SECTION_SIZE);
                 let dz = (z + SECTION_SIZE) / SECTION_SIZE;
-                // Строка из трёх кусков: последний блок западного соседа, строка
-                // самой колонки, первый блок восточного.
                 let last = SECTION_SIZE as usize - 1;
                 for (dx, src, dst) in [
                     (0, last..last + 1, 0..1),
@@ -211,15 +179,9 @@ impl<'a> Surroundings<'a> {
     }
 }
 
-/// Меши секции по проходам отрисовки.
 pub struct SectionMeshes {
-    /// Непрозрачные блоки (`RenderLayer::Opaque`): шейдер без `discard`, поэтому GPU
-    /// может отсекать скрытые пиксели до шейдера.
     pub solid: MeshData,
-    /// Листва, кресты, факел (`RenderLayer::Cutout`): у них альфа двоичная, хватает
-    /// `discard` без смешения. Рисуется после `solid`.
     pub cutout: MeshData,
-    /// Вода (`RenderLayer::Translucent`): рисуется после `cutout` со смешением.
     pub water: MeshData,
 }
 
@@ -233,9 +195,6 @@ impl SectionMeshes {
     }
 }
 
-/// Копирует блоки и их данные секции в середину кэшей срезами по строкам. Данные
-/// соседей остаются нулями. Вынесено из [`mesh_section`], чтобы замер по этапам
-/// (`mesh_stages`) видел этап отдельно.
 fn fill_blocks(blocks: &mut Neighborhood, datas: &mut Datas, section: &Section) {
     for y in 0..SECTION_SIZE {
         for z in 0..SECTION_SIZE {
@@ -249,9 +208,6 @@ fn fill_blocks(blocks: &mut Neighborhood, datas: &mut Datas, section: &Section) 
     }
 }
 
-/// Добирает у кэша блоки соседей по краям и заполняет кэш света для всех клеток −1..=16.
-/// Общий вариант с замыканиями — для секции вне мира (тесты); из мира кэш строит
-/// [`Surroundings`].
 fn fill_halo(
     blocks: &mut Neighborhood,
     lights: &mut Lights,
@@ -282,15 +238,6 @@ pub(crate) fn new_caches() -> (Box<Neighborhood>, Box<Lights>, Box<Datas>) {
     )
 }
 
-/// Строит меши видимых граней секции по замыканиям. Позиции вершин локальные
-/// (от угла секции, см. [`Quad`]).
-///
-/// `neighbor` возвращает блок по локальным координатам за краем секции: вызывается для
-/// любых координат вне 0..16 в пределах −1..=16 по каждой оси (рёбра и углы — две или
-/// три компоненты вне 0..16). `light` — уровень света по локальным координатам
-/// секции, для всех клеток −1..=16 по каждой оси. У секции из одного воздуха оба не
-/// вызываются. Мир строит меши через [`mesh_world_section`] и [`mesh_world_column`],
-/// без вызова замыкания на клетку.
 pub fn mesh_section(
     section: &Section,
     neighbor: impl Fn(IVec3) -> Block,
@@ -306,25 +253,6 @@ pub fn mesh_section(
     mesh_cached(&blocks, &lights, &datas, options)
 }
 
-/// Грань блока рисуется, если сосед в её направлении не непрозрачный: так грани за
-/// листвой и водой остаются в меше, сквозь них их видно. У воды правило другое — грань
-/// только к воздуху: между водой и чем-либо ещё поверхности не видно, а грань воды к
-/// листве легла бы в одну плоскость с гранью листвы. Если над водой не вода, её верх
-/// опущен до [`WATER_SURFACE`]. AO у воды нет: только яркость стороны.
-///
-/// Свет плавный, как в Minecraft: в вершине — среднее уровней клетки перед гранью и
-/// трёх клеток рядом с ней у этого угла (тех же, что у AO), без непрозрачных: иначе
-/// стена тянула бы вершину к темноте, которой там нет. Угловую клетку не берём и
-/// тогда, когда обе боковые непрозрачные: она не видна из угла, и свет просочился
-/// бы сквозь стену. В вершину уходят раздельно `shade` (сторона × AO) и средние уровни
-/// солнца и блоков в половинках ([`half_average`]); яркость из них считает шейдер со
-/// тьмой неба. У воды — уровни клетки перед гранью, одни на грань. Диагональ квада
-/// выбирается по дневной яркости ([`day_shade`]).
-///
-/// Высота воды зависит от уровней соседей, поэтому данные берутся из кэша `datas` с
-/// полем, как блоки. У воды верх каждого угла — среднее высот четырёх клеток вокруг
-/// угла ([`surface_height`]), так что поверхность наклонная и стык двух клеток воды
-/// общий: боковых граней между водой не нужно.
 pub(crate) fn mesh_cached(
     blocks: &Neighborhood,
     lights: &Lights,
@@ -359,7 +287,6 @@ pub(crate) fn mesh_cached(
                 }
                 if block.is_water() {
                     for (face_index, (face, normal, _)) in faces.iter().enumerate() {
-                        // Растения и факел не закрывают грань, но и не заполняют клетку.
                         if blocks.at(index, *normal).shape() == Shape::Cube
                             && blocks.at(index, *normal) != Block::Air
                         {
@@ -388,7 +315,6 @@ pub(crate) fn mesh_cached(
                     }
                     continue;
                 }
-                // Лежачее бревно; стоячее рисуется как обычный куб.
                 let lying = (block == Block::Log)
                     .then(|| block.axis(byte()))
                     .filter(|&axis| axis != 1);
@@ -433,8 +359,6 @@ pub(crate) fn mesh_cached(
                             ao,
                         )
                     });
-                    // Свет вершины — больший из двух средних: два источника не складываются,
-                    // а под открытым небом без светокамня картинка прежняя.
                     let days =
                         corner_data.map(|(shade, [sun, block], _)| day_shade(shade, sun, block));
                     let layer = tile.layer() as u8;
@@ -462,11 +386,6 @@ pub(crate) fn mesh_cached(
 const TALL_WATER_UNITS: u32 = 13;
 const TALL_WATER_WEIGHT: u32 = 10;
 
-/// Высота воды клетки `index` в углу `(cx, cz)` (0 или 1 по x и z), шаги 1/16 блока:
-/// среднее высот четырёх клеток вокруг угла. Вода над любой из них — угол полный (16);
-/// воздух и растения считаются нулевой высоты, твёрдые блоки не учитываются. Высокая вода
-/// (от [`TALL_WATER_UNITS`]) весит [`TALL_WATER_WEIGHT`] раз больше, как в Minecraft: край
-/// озера рядом с воздухом провисает не до середины. `up` — сдвиг индекса на клетку вверх.
 fn surface_height(
     blocks: &Neighborhood,
     datas: &Datas,
@@ -497,13 +416,9 @@ fn surface_height(
             }
         }
     }
-    // Собственная клетка — вода, поэтому счёт не нулевой.
     ((2 * sum + count) / (2 * count)).max(1) as u8
 }
 
-/// Шаблон грани воды `face_index` (номер в `FACES`) по высотам её углов и признак
-/// наклона: при наклоне высоты уходят в запись квада. Верх ровно на уровне источника и
-/// полные стороны, как и прежде, не несут высот.
 fn water_template(face_index: usize, heights: [u8; 4]) -> (u8, bool) {
     let source = WATER_SURFACE_UNITS as u8;
     let full = POSITION_UNITS as u8;
@@ -522,14 +437,11 @@ fn water_template(face_index: usize, heights: [u8; 4]) -> (u8, bool) {
     }
 }
 
-/// Тайл и шаблон грани блока с осью, лежащего вдоль `axis` (0 — x, 2 — z): торцы на
-/// гранях поперёк оси, на остальных кора с UV, повёрнутой вдоль оси.
 fn axis_face(block: Block, axis: usize, face_index: usize, face: &Face) -> (Option<Tile>, u8) {
     if face.normal[axis] != 0 {
         return (block.tile(Facing::Top), CUBE_FACE + face_index as u8);
     }
     let template = if axis == 0 {
-        // Кора по оси X — грани 0, 1, 4, 5 из `FACES`.
         LOG_BARK_X + [0, 1, 0, 0, 2, 3][face_index]
     } else {
         LOG_BARK_Z + face_index as u8
@@ -537,10 +449,6 @@ fn axis_face(block: Block, axis: usize, face_index: usize, face: &Face) -> (Opti
     (block.tile(Facing::Side), template)
 }
 
-/// Записи квадов блока не-куба: крест (две плоскости в обе стороны) или столбик факела
-/// (стоячий или наклонённый от стены по `data`).
-/// Без AO, свет — одной клетки блока (`light` в половинках уровня), одинаковый на всех углах.
-/// Всегда слой Cutout.
 fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light: [u8; 2]) {
     let quad = |template: u8, layer: u8| {
         Quad::new(
@@ -570,7 +478,6 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
                 }
                 return;
             }
-            // Верх, затем бока.
             for t in std::iter::once(TORCH_TOP).chain(TORCH_SIDE..TORCH_TOP) {
                 mesh.quads.push(quad(t, layer));
             }
@@ -584,30 +491,15 @@ impl MeshData {
     }
 }
 
-/// Средний уровень `sum / count` (count 1..=4) в половинках уровня, с округлением.
 fn half_average(sum: u32, count: u32) -> u8 {
     ((4 * sum + count) / (2 * count)) as u8
 }
 
-/// Переворачивать ли диагональ квада: треугольники `0,1,2` и `0,2,3` или `1,2,3` и
-/// `1,3,0` (оба против часовой стрелки, как и углы шаблона). Яркость интерполируется по
-/// треугольникам, и тень от тёмной вершины на диагонали тянулась бы косой полосой через
-/// весь квад. Режем по диагонали, концы которой в сумме светлее (1–3, если пара 0–2
-/// темнее): одиночная тёмная вершина тогда остаётся в одном треугольнике. Сравниваем
-/// итоговую яркость в байтах (`day_shade`), а не уровни AO: тень от света режется так
-/// же. Ночью диагональ не пересчитывается — меши остаются прежними.
 fn flip_diagonal(shades: [u8; 4]) -> bool {
     let sum = |a: usize, b: usize| u16::from(shades[a]) + u16::from(shades[b]);
     sum(0, 2) < sum(1, 3)
 }
 
-/// Меши всех секций колонки по замыканиям, снизу вверх (`[0]` — y 0..16). Общий
-/// вариант для колонки вне мира (тесты); из мира — [`mesh_world_column`].
-///
-/// Соседей по вертикали внутри колонки берёт из неё самой; `neighbor` вызывается только
-/// для локальных координат колонки за её краем: x или z в −1 или 16 (в том числе оба —
-/// угол колонки), либо y равен −1 или 128. `light` — уровень света по локальным
-/// координатам колонки, внутри неё и за краем в тех же пределах.
 pub fn mesh_column(
     column: &Column,
     neighbor: impl Fn(IVec3) -> Block,
@@ -634,8 +526,6 @@ pub fn mesh_column(
         .collect()
 }
 
-/// Меши всех секций загруженной колонки `key`, снизу вверх; грани и свет на стыках —
-/// из соседних колонок мира. `None`, если колонка не загружена.
 pub fn mesh_world_column(
     world: &World,
     light: &LightMap,
@@ -658,9 +548,6 @@ pub fn mesh_world_column(
     )
 }
 
-/// Меш одной секции `key` с соседями
-/// из `world` и светом из `light` — для перестройки после правки блока или света.
-/// `None`, если колонка не загружена или номер секции вне 0..COLUMN_SECTIONS.
 pub fn mesh_world_section(
     world: &World,
     light: &LightMap,

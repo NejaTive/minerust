@@ -60,7 +60,6 @@ fn view_dir_recovers_pixel_direction() {
         let dir = (inverse * glam::Vec4::new(x, y, 1.0, 0.0))
             .truncate()
             .normalize();
-        // Точка на этом луче проецируется обратно в тот же пиксель.
         let clip = proj * view * (eye + dir * 10.0).extend(1.0);
         assert!((clip.x / clip.w - x).abs() < 1e-3, "{x} {y}");
         assert!((clip.y / clip.w - y).abs() < 1e-3, "{x} {y}");

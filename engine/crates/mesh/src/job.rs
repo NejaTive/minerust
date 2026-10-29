@@ -1,14 +1,3 @@
-//! Задание и результат мешера для воркера. Основной поток заполняет кэши секций 18³
-//! ([`Surroundings`]), воркер строит из них меши и ничего не знает про мир: на секцию
-//! уходит ~11.4 КиБ, назад возвращаются только квады.
-//!
-//! Все числа — little endian.
-//! - Задание: `id: u32`, `ambient_occlusion: u8`, `count: u8`, затем `count` секций:
-//!   `sy: u8`, `has_data: u8`, блоки кэша (`PADDED³` байт), свет кэша (`PADDED³` байт) и,
-//!   если `has_data = 1`, `PADDED³` байт данных блоков кэша (уровень воды у стыка секций
-//!   зависит от данных соседей). Без данных все нули.
-//! - Результат: `id: u32`, `count: u8`, затем `count` секций: `sy: u8` и три меша
-//!   (`solid`, `cutout`, `water`), у каждого `quads: u32` и столько записей по 12 байт.
 use world::block::Block;
 use world::column::COLUMN_SECTIONS;
 use world::light::LightMap;
@@ -23,18 +12,14 @@ use crate::mesher::{
 
 const CACHE_LEN: usize = (PADDED * PADDED * PADDED) as usize;
 const HEADER_LEN: usize = 6;
-/// Секция без данных: `sy`, флаг данных, блоки и свет.
 const SECTION_JOB_LEN: usize = 2 + 2 * CACHE_LEN;
 
-/// Результат задания: меши непустых секций, снизу вверх.
 pub struct JobResult {
     pub id: u32,
-    /// `(номер секции в колонке, меши)`. Секции, которых нет в задании (воздух), не вошли.
     pub sections: Vec<(u8, SectionMeshes)>,
 }
 
 impl JobResult {
-    /// Меши всех секций колонки для `Renderer::upload_column`; пропущенные — пустые.
     pub fn into_column(self) -> Vec<SectionMeshes> {
         let mut column: Vec<SectionMeshes> = (0..COLUMN_SECTIONS)
             .map(|_| SectionMeshes::empty())
@@ -45,7 +30,6 @@ impl JobResult {
         column
     }
 
-    /// Меш единственной секции задания; пустой, если секция была воздухом.
     pub fn into_section(mut self) -> SectionMeshes {
         self.sections
             .pop()
@@ -81,8 +65,6 @@ fn push_section(
     bytes[HEADER_LEN - 1] += 1;
 }
 
-/// Задание на все непустые секции колонки `key`; `None`, если колонка не загружена.
-/// Колонка без непустых секций даёт задание с `count = 0`.
 pub fn encode_column_job(
     world: &World,
     light: &LightMap,
@@ -109,8 +91,6 @@ pub fn encode_column_job(
     Some(bytes)
 }
 
-/// Задание на одну секцию; воздух даёт задание без секций. `None`, если колонка не
-/// загружена или номер секции вне колонки.
 pub fn encode_section_job(
     world: &World,
     light: &LightMap,
@@ -137,8 +117,6 @@ pub fn encode_section_job(
     Some(bytes)
 }
 
-/// Строит меши по заданию и пакует результат. Паникует на заданиях не из
-/// `encode_*_job`: границу пересекают только свои байты.
 pub fn run_job(job: &[u8]) -> Vec<u8> {
     let id = u32::from_le_bytes(job[..4].try_into().expect("job header"));
     let options = MeshOptions {
@@ -177,7 +155,6 @@ pub fn run_job(job: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Разбирает результат [`run_job`]. Паникует на чужих байтах, как и `run_job`.
 pub fn decode_result(bytes: &[u8]) -> JobResult {
     let id = u32::from_le_bytes(bytes[..4].try_into().expect("result header"));
     let count = usize::from(bytes[4]);

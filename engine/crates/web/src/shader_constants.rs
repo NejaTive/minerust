@@ -1,5 +1,3 @@
-//! Константы WGSL-шейдеров, продублированные в CPU-коде другого крейта. Тесты здесь, потому что
-//! только `web` видит и шейдеры (`render`), и CPU-сторону (`game`, `mesh`, `world`).
 use game::daytime::DUSK_SKY;
 use render::shaders::{BLOCK_SHADER, SKY_SHADER};
 use world::light::MAX_LIGHT;

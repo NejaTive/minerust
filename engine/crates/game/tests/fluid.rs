@@ -1,5 +1,3 @@
-//! Течение воды в `Game`: правка игрока запускает течение, а изменения от шагов
-//! жидкости доходят до `interact` в том же кадре, что и правки игрока.
 use std::collections::HashSet;
 
 use game::Game;
@@ -29,7 +27,6 @@ fn game_with_floor() -> Game {
     game
 }
 
-/// Летим над полом и смотрим вниз.
 fn look_down_at(game: &mut Game, x: f32, z: f32) {
     let pitch = -std::f32::consts::FRAC_PI_2;
     game.set_camera_state(&[x, 13.0, z, 0.0, pitch, 1.0])

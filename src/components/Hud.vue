@@ -7,14 +7,12 @@ defineProps<{
   fps: number
   stats?: WorldStats
   time?: TimeInfo
-  /** Блок в выбранном слоте; `null` — слот пуст. */
   block: string | null
   player?: PlayerInfo
   notice?: string
   showDebug: boolean
 }>()
 
-// 0 — начало дня (06:00): полдень (0.25) = 12:00, как `daytime`.
 const PHASES: Record<string, string> = {
   day: 'день',
   dusk: 'закат',
@@ -91,7 +89,6 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
   line-height: 1.4;
   text-shadow: 1px 1px 0 #000;
   pointer-events: none;
-  /* Выше затемнения меню: подсказки видны и на паузе. */
   z-index: 20;
 }
 .notice {

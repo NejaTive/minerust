@@ -2,18 +2,13 @@
 struct Globals {
     view_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
-    // Туман — по горизонтальному расстоянию в блоках: иначе при полёте на высоте
-    // затуманилась бы земля прямо под камерой.
     fog_start: f32,
     fog_color: vec3<f32>,
     fog_end: f32,
-    // 1 — глаза под водой: туман по полному расстоянию и синий тон.
     underwater: f32,
-    // Уровней солнечного света, которые отнимает ночь (0 днём); блочный свет не гаснет.
     darkness: f32,
 };
 
-// Множитель цвета под водой, линейный: гасит красный и зелёный сильнее синего.
 // Яркость уровня света — как `light::level_brightness`: 0.8^(15 − уровень), не ниже
 // минимума. Менять вместе с light.rs; константы сверяет тест в mesh.rs.
 const LIGHT_BASE: f32 = 0.8;
@@ -29,10 +24,6 @@ var block_textures: texture_2d_array<f32>;
 @group(0) @binding(2)
 var block_sampler: sampler;
 
-// Квады блоков лежат в одном storage-буфере (арена) по три слова, раскладка — в
-// mesh.rs (`Quad`). Вершинных буферов нет; общий индексный буфер (quad_indices.rs) даёт на
-// квад 4 вершины (`vertex_index / 4`, угол — `vertex_index % 4`), угол берётся из таблицы
-// шаблонов `shapes`.
 @group(1) @binding(0)
 var<storage, read> quads: array<u32>;
 
@@ -67,7 +58,6 @@ struct VertexOut {
     @location(3) world_pos: vec3<f32>,
 };
 
-// Яркость вершины от света: больший из «солнце минус тьма» и блоков, в половинках.
 fn vertex_brightness(sun_halves: u32, block_halves: u32) -> f32 {
     let level = max(f32(sun_halves) * 0.5 - globals.darkness, f32(block_halves) * 0.5);
     return max(pow(LIGHT_BASE, MAX_LIGHT - level), MIN_BRIGHTNESS);
@@ -80,8 +70,6 @@ fn vs_main(in: VertexIn) -> VertexOut {
     let w1 = quads[at + 1u];
     let w2 = quads[at + 2u];
     let flip = (w0 >> 17u) & 1u;
-    // Индексы везде `0,1,2, 0,2,3`; переворот диагонали сдвигает номер угла на один и даёт
-    // `1,2,3, 1,3,0`: те же треугольники и обход, что давал прежний путь без индексов.
     let corner = ((in.vertex % 4u) + flip) & 3u;
     let shape = ((w0 >> 12u) & 0x1Fu) | (((w0 >> 26u) & 1u) << 5u);
     let packed = table.shapes[shape].corners[corner];
@@ -92,9 +80,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
         f32((packed >> 10u) & 0x1Fu),
     );
     var v = f32((packed >> 20u) & 0x1Fu);
-    // Верх воды с наклоном: у угла `y` = 30 или 31, высота (в 1/16, от 1) лежит в записи
-    // квада у угла `corner`: у нулевого в слове 1, у остальных в слове 2. 30 — верх
-    // боковой грани, у неё ещё и `v` идёт от высоты.
+    // y = 30 и 31 — маркеры SIDE_TOP_CORNER / TOP_CORNER из templates.rs: высота угла берётся из квада
     if offset.y >= 30.0 {
         var stored = (w1 >> 28u) & 0xFu;
         if corner > 0u {
@@ -119,13 +105,11 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
-// Цвет грани с тоном и туманом.
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
     var color = texel * in.shade;
     var distance = length(in.world_pos.xz - globals.camera_pos.xz);
     if globals.underwater > 0.5 {
         color *= UNDERWATER_TINT;
-        // Под водой дно в паре блоков под камерой уже должно тонуть в мути.
         distance = length(in.world_pos - globals.camera_pos);
     }
     let fog = smoothstep(globals.fog_start, globals.fog_end, distance);
@@ -152,7 +136,6 @@ fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(shaded(in, texel.rgb), 1.0);
 }
 
-// Вода: полупрозрачная, смешивается пайплайном; `discard` не нужен.
 @fragment
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);

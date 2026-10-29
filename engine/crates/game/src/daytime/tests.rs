@@ -44,8 +44,6 @@ fn dusk_is_warm_in_the_middle() {
 
 #[test]
 fn transitions_are_continuous() {
-    // Шаг в 1/20000 суток (~0.06 с): между соседними значениями разница мала,
-    // в том числе на границах фаз и на стыке 1 → 0.
     let n = 20_000;
     let mut prev = sky_state(0.0);
     for i in 1..=n + 1 {
@@ -98,7 +96,6 @@ fn sun_is_continuous() {
 
 #[test]
 fn twilight_is_centered_on_the_horizon() {
-    // Тёплый пик неба — когда солнце на горизонте.
     let sunset = sun_direction((DAY_END + DUSK_END) / 2.0)[1];
     let sunrise = sun_direction((NIGHT_END + 1.0) / 2.0)[1];
     assert!(sunset.abs() < 1e-4 && sunrise.abs() < 1e-4);
@@ -110,7 +107,6 @@ fn stars_turn_uniformly_and_wrap() {
         let [c, s] = star_rotation(t);
         s.atan2(c).rem_euclid(std::f32::consts::TAU)
     };
-    // Равные шаги времени — равные углы, и днём, и ночью.
     let step = angle(0.1) - angle(0.0);
     for t in [0.0, 0.3, 0.45, 0.6, 0.8] {
         let d = (angle(t + 0.1) - angle(t)).rem_euclid(std::f32::consts::TAU);

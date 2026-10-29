@@ -6,7 +6,6 @@ use crate::pos::ColumnPos;
 const FLOOR: i32 = 10;
 const WATER_Y: i32 = FLOOR + 1;
 
-/// Мир из колонок `columns` с каменным полом на `FLOOR`.
 fn flat_world(columns: &[(i32, i32)]) -> World {
     let mut world = World::new();
     for &(x, z) in columns {
@@ -30,7 +29,6 @@ fn put(world: &mut World, fluid: &mut Fluid, pos: IVec3, block: Block, data: u8)
     fluid.block_changed(world, pos);
 }
 
-/// Шагает, пока очередь не опустеет; возвращает все изменённые клетки.
 fn settle(world: &mut World, fluid: &mut Fluid) -> Vec<IVec3> {
     let mut all = Vec::new();
     for _ in 0..200 {
@@ -72,7 +70,6 @@ fn spreads_seven_blocks_over_flat_floor() {
     assert_eq!(data_at(&world, at(16 + 8, 16)), None);
     assert_eq!(data_at(&world, at(19, 18)), Some(5));
     assert_eq!(data_at(&world, at(20, 20)), None);
-    // Ромб радиуса 7: 2·7·8 + 1 клетка.
     assert_eq!(water_cells(&world, WATER_Y), 113);
 }
 
@@ -93,7 +90,6 @@ fn advances_one_cell_per_step() {
 fn falls_off_ledge_and_spreads_below() {
     let mut world = flat_world(&[(0, 0)]);
     let mut fluid = Fluid::new();
-    // Уступ на блок выше пола при x < 8.
     for z in 0..16 {
         for x in 0..8 {
             world.set_block(IVec3::new(x, WATER_Y, z), Block::Stone);
@@ -116,7 +112,6 @@ fn falls_off_ledge_and_spreads_below() {
     );
     assert_eq!(data_at(&world, IVec3::new(9, WATER_Y, 8)), Some(1));
     assert_eq!(data_at(&world, IVec3::new(10, WATER_Y, 8)), Some(2));
-    // Край уступа падает целой полосой: соседи по z тоже у обрыва.
     assert_eq!(
         data_at(&world, IVec3::new(8, WATER_Y, 9)),
         Some(FLUID_FALLING)
@@ -142,7 +137,6 @@ fn source_over_air_falls_in_a_column() {
             "y {y}"
         );
     }
-    // Внизу колонка растекается от стока, как от источника.
     assert!(world.block(at(11, 8)).is_water());
 }
 
@@ -168,7 +162,6 @@ fn dries_up_after_source_removed() {
 fn flows_toward_nearest_cliff_only() {
     let mut world = flat_world(&[(0, 0)]);
     let mut fluid = Fluid::new();
-    // Обрывы: на 2 клетки вправо от источника и на 4 влево.
     world.set_block(IVec3::new(10, FLOOR, 8), Block::Air);
     world.set_block(IVec3::new(4, FLOOR, 8), Block::Air);
     put(&mut world, &mut fluid, at(8, 8), Block::Water, FLUID_SOURCE);
@@ -183,7 +176,6 @@ fn flows_toward_nearest_cliff_only() {
 fn flows_everywhere_without_cliffs_in_range() {
     let mut world = flat_world(&[(0, 0)]);
     let mut fluid = Fluid::new();
-    // Обрыв в шести клетках — за пределами радиуса поиска.
     world.set_block(IVec3::new(14, FLOOR, 8), Block::Air);
     put(&mut world, &mut fluid, at(8, 8), Block::Water, FLUID_SOURCE);
     fluid.step(&mut world);

@@ -13,7 +13,6 @@ const NO_AO: MeshOptions = MeshOptions {
     ambient_occlusion: false,
 };
 
-/// Наибольшая ошибка яркости от квантования в байт.
 const QUANT: f32 = 0.5 / 255.0 + 1e-6;
 
 fn assert_near(actual: [f32; 4], expected: [f32; 4]) {
@@ -26,12 +25,10 @@ fn air(_: IVec3) -> Block {
     Block::Air
 }
 
-/// Всё освещено полностью: яркость вершин — только сторона и AO.
 fn full(_: IVec3) -> u8 {
     MAX_LIGHT
 }
 
-/// Свет мира, где загружены все колонки `world`.
 fn world_light(world: &World) -> LightMap {
     let mut light = LightMap::new();
     for key in world.keys().collect::<Vec<_>>() {
@@ -145,7 +142,6 @@ fn checkerboard_fits_u16() {
     let mesh = mesh_section(&section, air, full, AO).solid;
     assert_eq!(face_count(&mesh), 2048 * 6);
     assert_eq!(vertices(&mesh).len(), 2048 * 24);
-    // Индексы развёртки (4 вершины и 6 индексов на квад) не выходят за вершины.
     let count = vertices(&mesh).len();
     assert!(indices(&mesh).iter().all(|&i| usize::from(i) < count));
 }
@@ -202,7 +198,6 @@ fn faces_wind_counter_clockwise_from_outside() {
     for quad in vertices(&mesh).chunks(4) {
         let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(quad[i].position()));
         let winding = (b - a).cross(c - b).normalize();
-        // Сторону грани берём из геометрии: от центра блока к центру грани.
         let face_center = quad.iter().map(|v| Vec3::from(v.position())).sum::<Vec3>() / 4.0;
         let normal = (face_center - center) * 2.0;
         assert!(
@@ -216,15 +211,11 @@ fn faces_wind_counter_clockwise_from_outside() {
     assert_eq!(normals.len(), 6);
 }
 
-/// Нормаль квада по обходу первых трёх вершин: обход против часовой снаружи.
 fn quad_normal(quad: &[Vertex]) -> IVec3 {
     let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(quad[i].position()));
     (b - a).cross(c - b).normalize().round().as_ivec3()
 }
 
-/// Поля света вершин квада, посчитанные по миру напрямую: блок за гранью, три блока
-/// перед каждой вершиной (AO) и свет клетки перед гранью и этих трёх клеток.
-/// Возвращает на вершину `(сторона × AO, солнце, блоки)`; свет — в половинках уровня.
 fn world_shades(
     origin: IVec3,
     block_at: impl Fn(IVec3) -> Block,
@@ -273,9 +264,6 @@ fn face_shade(normal: IVec3) -> f32 {
     FACES.iter().find(|f| f.normal == normal).unwrap().shade
 }
 
-/// Каждый квад меша: яркость вершин и выбор диагонали совпадают с расчётом по
-/// `block_at` и `light_at`. Возвращает число затенённых (ярче нет) вершин, где
-/// `pred` от позиции истинен.
 fn assert_shades_match(
     mesh: &MeshData,
     origin: IVec3,
@@ -322,12 +310,10 @@ fn vertex_ao_levels() {
     }
 }
 
-/// Пол на y = 0 по всей секции и `extra` поверх него.
 fn floor_with(extra: &[IVec3]) -> Section {
     filled(|p| p.y == 0 || extra.contains(&p))
 }
 
-/// Вершины верхней грани блока `block` в порядке `Face::corners` и её индексы.
 fn top_face(mesh: &MeshData, block: IVec3) -> ([Vertex; 4], [u16; 6]) {
     let q = vertices(mesh)
         .chunks(4)
@@ -348,7 +334,6 @@ fn shades(quad: &[Vertex; 4]) -> [f32; 4] {
     quad.map(|v| v.brightness(0.0))
 }
 
-/// Секция с двумя блоками рядом по x: `a` в (5, 5, 5), `b` в (6, 5, 5).
 fn pair(a: Block, b: Block) -> MeshData {
     let mut section = Section::new();
     section.set(IVec3::new(5, 5, 5), a);
@@ -357,7 +342,6 @@ fn pair(a: Block, b: Block) -> MeshData {
     merged(&meshes)
 }
 
-/// Твёрдое и вырезанное одним мешом: тесты граней не различают слой.
 fn merged(meshes: &SectionMeshes) -> MeshData {
     let mut all = MeshData::new();
     all.quads.extend(&meshes.solid.quads);
@@ -365,7 +349,6 @@ fn merged(meshes: &SectionMeshes) -> MeshData {
     all
 }
 
-/// Есть ли в меше грань с нормалью `normal` в плоскости x = `x`.
 fn has_face_at_x(mesh: &MeshData, x: f32, normal: IVec3) -> bool {
     vertices(mesh)
         .chunks(4)
@@ -396,14 +379,12 @@ fn leaves_next_to_leaves_draw_both_faces() {
 
 #[test]
 fn leaves_do_not_shade_corners() {
-    // Как в `open_floor_and_block_tops_are_unshaded`, но рядом с полом листва.
     let block = IVec3::new(8, 1, 8);
     let mut section = floor_with(&[]);
     section.set(block, Block::Leaves);
     let mesh = mesh_section(&section, air, full, AO).solid;
     let (beside, _) = top_face(&mesh, IVec3::new(7, 0, 8));
     assert_near(shades(&beside), [1.0; 4]);
-    // А пол под листвой (верхняя грань пола видна сквозь неё) — тоже без затенения.
     assert_near(shades(&top_face(&mesh, IVec3::new(8, 0, 8)).0), [1.0; 4]);
     assert_shades_match(&mesh, IVec3::ZERO, in_section(&section), full, |_| true);
 }
@@ -414,28 +395,23 @@ fn open_floor_and_block_tops_are_unshaded() {
     let mesh = mesh_section(&floor_with(&[block]), air, full, AO).solid;
     assert_near(shades(&top_face(&mesh, block).0), [1.0; 4]);
     assert_near(shades(&top_face(&mesh, IVec3::new(4, 0, 4)).0), [1.0; 4]);
-    // Пол у подножия блока со стороны −x: у ребра к блоку один боковой сосед.
     let (beside, _) = top_face(&mesh, IVec3::new(7, 0, 8));
     assert_near(shades(&beside), [1.0, 0.85, 0.85, 1.0]);
 }
 
 #[test]
 fn inner_corner_is_darkest() {
-    // Стены вдоль x = 0 и z = 0 высотой в два блока; пол в углу — блок (1, 0, 1).
     let walls: Vec<IVec3> = (1..3)
         .flat_map(|y| (0..16).flat_map(move |i| [IVec3::new(0, y, i), IVec3::new(i, y, 0)]))
         .collect();
     let section = floor_with(&walls);
     let mesh = mesh_section(&section, air, full, AO).solid;
     let (quad, indices) = top_face(&mesh, IVec3::new(1, 0, 1));
-    // Углы верхней грани: (1, 2), (2, 2), (2, 1), (1, 1) по x, z.
     assert_near(shades(&quad), [0.7, 1.0, 0.7, 0.5]);
-    // Диагональ 0–2 темнее (1 + 1 против 3 + 0) — режем по 1–3.
     assert_eq!(indices, [1, 2, 3, 1, 3, 0]);
     assert!(assert_shades_match(&mesh, IVec3::ZERO, in_section(&section), full, |_| true) > 0);
 }
 
-/// Блок секции, за её краем — воздух.
 fn in_section(section: &Section) -> impl Fn(IVec3) -> Block {
     |p| {
         if Section::contains(p) {
@@ -446,7 +422,6 @@ fn in_section(section: &Section) -> impl Fn(IVec3) -> Block {
     }
 }
 
-/// Пара вершин квада, общая для двух его треугольников.
 fn diagonal(indices: [u16; 6]) -> [u16; 2] {
     let mut shared: Vec<u16> = indices[..3]
         .iter()
@@ -460,8 +435,6 @@ fn diagonal(indices: [u16; 6]) -> [u16; 2] {
 #[test]
 fn diagonal_avoids_single_dark_vertex() {
     let floor = IVec3::new(5, 0, 5);
-    // Блок по диагонали над одним из углов верхней грани `floor`: затеняет одну
-    // вершину. Углы грани по порядку: (5, 6), (6, 6), (6, 5), (5, 5) по x, z.
     let cases = [
         (IVec3::new(4, 1, 6), 0),
         (IVec3::new(6, 1, 6), 1),
@@ -483,7 +456,6 @@ fn diagonal_avoids_single_dark_vertex() {
 
 #[test]
 fn flipped_quads_keep_winding() {
-    // Рваный рельеф, чтобы встретились обе диагонали.
     let section = filled(|p| p.y < 4 + (p.x * 7 + p.z * 13) % 5);
     let mesh = mesh_section(&section, air, full, AO).solid;
     let mut flipped = 0;
@@ -532,7 +504,6 @@ fn no_ao_keeps_plain_side_shading() {
                 [0, 1, 2, 0, 2, 3].map(|i| first + i)
             );
         }
-        // Кроме яркости, вершины те же.
         for (a, b) in vertices(with).iter().zip(&vertices(without)) {
             assert_eq!(
                 (a.position(), a.uv(), a.layer()),
@@ -542,9 +513,6 @@ fn no_ao_keeps_plain_side_shading() {
     }
 }
 
-/// Видимые грани колонки `key` (`solid`, `water`), посчитанные по миру целиком, без
-/// деления на колонки и секции: у воды — к воздуху, у остальных блоков — к не
-/// непрозрачному соседу.
 fn world_face_count(world: &World, key: ColumnPos) -> (usize, usize) {
     use world::column::WORLD_HEIGHT;
 
@@ -567,12 +535,10 @@ fn world_face_count(world: &World, key: ColumnPos) -> (usize, usize) {
     (solid, water)
 }
 
-/// Мировой угол секции `sy` колонки с углом `origin`.
 fn section_origin(origin: IVec3, sy: usize) -> IVec3 {
     origin + IVec3::Y * (sy as i32 * SECTION_SIZE)
 }
 
-/// Грани всех секций колонки (`solid`, `water`).
 fn column_face_count(meshes: &[SectionMeshes]) -> (usize, usize) {
     meshes.iter().fold((0, 0), |(solid, water), m| {
         (
@@ -586,7 +552,6 @@ fn column_face_count(meshes: &[SectionMeshes]) -> (usize, usize) {
 fn no_seams_between_columns() {
     use world::terrain::Terrain;
 
-    // Центр с отрицательными координатами, чтобы задеть и div_euclid на стыках.
     let center = ColumnPos::new(-1, 2);
     let terrain = Terrain::new(1337);
     let mut world = World::new();
@@ -605,9 +570,6 @@ fn no_seams_between_columns() {
     assert!(expected.0 > 256, "flat terrain would not test side faces");
     assert_eq!(column_face_count(&meshes), expected);
 
-    // AO по миру целиком; отдельно считаем затенённые вершины на рёбрах колонки
-    // (вертикальных, где сходятся четыре колонки) и на стыках секций, чтобы тест
-    // точно задевал соседей по диагонали.
     let min = origin.as_vec3();
     let on_edge = |p: Vec3| {
         let local = p - min;
@@ -659,7 +621,6 @@ fn tree_on_column_border_matches_whole_world() {
             world.insert(key, terrain.generate_trees(key));
         }
     }
-    // Колонка ствола и все соседи, куда заходит крона.
     let mut keys: Vec<ColumnPos> = tree.leaves().map(ColumnPos::of_block).collect();
     keys.sort();
     keys.dedup();
@@ -694,7 +655,6 @@ fn tree_on_column_border_matches_whole_world() {
     }
 }
 
-/// Меши секции `key` с соседями из `world`, в сравнимом виде.
 fn world_mesh(world: &World, light: &LightMap, key: SectionPos) -> [(Vec<Vertex>, Vec<u16>); 3] {
     let SectionMeshes {
         solid,
@@ -722,7 +682,6 @@ fn edits_on_seams_remesh_exactly_affected_sections() {
         }
     }
     let mut light = world_light(&world);
-    // Секции колонок -1..=0, у которых загружены все 8 соседних колонок.
     let sections: Vec<SectionPos> = (-1..=0)
         .flat_map(|z| {
             (-1..=0)
@@ -732,20 +691,16 @@ fn edits_on_seams_remesh_exactly_affected_sections() {
 
     let surface = terrain.surface_height(-1, 0);
     let corner_surface = terrain.surface_height(-1, -1);
-    // Угол колонок 0/-1 по x и секций по высоте: под землёй, на стыке трёх секций.
     let underground = IVec3::new(-1, 32, 0);
     assert!(surface > 40, "edit must be underground, surface {surface}");
     let edits = [
         (underground, Block::Air),
-        // Над поверхностью, на краю колонки по z и на стыке секций сверху.
         (IVec3::new(-16, 79, -1), Block::Stone),
-        // Ставим обратно рядом с выкопанным: грани должны исчезнуть.
         (underground, Block::Dirt),
         (
             IVec3::new(0, terrain.surface_height(0, -16), -16),
             Block::Air,
         ),
-        // На поверхности в углу четырёх колонок: затенение у диагональных соседей.
         (IVec3::new(-1, corner_surface + 1, -1), Block::Stone),
         (IVec3::new(0, corner_surface + 1, 0), Block::Stone),
         (IVec3::new(-1, corner_surface + 1, -1), Block::Air),
@@ -772,7 +727,6 @@ fn edits_on_seams_remesh_exactly_affected_sections() {
     }
 }
 
-/// Секция с блоками `blocks`, остальное — воздух; за краем тоже воздух.
 fn section_of(blocks: &[(IVec3, Block)]) -> SectionMeshes {
     let mut section = Section::new();
     for &(pos, block) in blocks {
@@ -781,7 +735,6 @@ fn section_of(blocks: &[(IVec3, Block)]) -> SectionMeshes {
     mesh_section(&section, air, full, AO)
 }
 
-/// Нормали квадов меша по порядку вершин (по четыре на квад).
 fn quad_normals(mesh: &MeshData) -> Vec<IVec3> {
     vertices(mesh).chunks(4).map(quad_normal).collect()
 }
@@ -794,7 +747,6 @@ fn cross_has_both_sides_of_both_planes() {
         assert_eq!(vertices(&mesh).len(), 16, "{block:?}");
         assert_eq!(indices(&mesh).len(), 24, "{block:?}");
         let normals = quad_normals(&mesh);
-        // Диагонали (±1, 0, ±1): у каждой плоскости обе стороны.
         for n in [(1, -1), (-1, 1), (1, 1), (-1, -1)] {
             let count = normals.iter().filter(|v| v.x == n.0 && v.z == n.1).count();
             assert_eq!(count, 1, "{block:?} normal {n:?}: {normals:?}");
@@ -821,7 +773,6 @@ fn cross_has_light_of_its_own_cell_and_full_shade() {
 #[test]
 fn cube_next_to_cross_draws_its_face_toward_it() {
     let mesh = pair(Block::Stone, Block::TallGrass);
-    // Камень рисует все шесть граней, трава — свой крест.
     assert_eq!(vertices(&mesh).len(), 24 + 16);
 }
 
@@ -830,7 +781,6 @@ fn cross_does_not_hide_cube_faces_or_shade_corners() {
     let floor = IVec3::new(5, 4, 5);
     let plain = section_of(&[(floor, Block::Stone)]).solid;
     let with = section_of(&[(floor, Block::Stone), (floor + IVec3::Y, Block::Torch)]).solid;
-    // Верх камня остался, и тени от факела на нём нет: вершины камня те же.
     assert_eq!(
         &vertices(&with)[..vertices(&plain).len()],
         &vertices(&plain)[..]
@@ -868,10 +818,8 @@ fn torch_light_comes_from_its_cell() {
     );
 }
 
-/// Высота угла одиночного источника в воздухе: (14·10) / (10 + 3 воздуха) ≈ 10.8 из 16.
 const LONE_SOURCE: f32 = 11.0 / 16.0;
 
-/// Секция из блоков с байтами данных.
 fn section_with_data(blocks: &[(IVec3, Block, u8)]) -> SectionMeshes {
     let mut section = Section::new();
     for &(pos, block, data) in blocks {
@@ -880,7 +828,6 @@ fn section_with_data(blocks: &[(IVec3, Block, u8)]) -> SectionMeshes {
     mesh_section(&section, air, full, AO)
 }
 
-/// Углы верхних граней воды (по четыре, в порядке шаблона) и номера их клеток.
 fn water_tops(mesh: &SectionMeshes) -> Vec<(IVec3, Vec<[f32; 3]>)> {
     let corners = vertices(&mesh.water);
     mesh.water
@@ -904,7 +851,6 @@ fn water_block_in_air_has_six_lowered_faces() {
     let top = 5.0 + LONE_SOURCE;
     for quad in vertices(&mesh.water).chunks(4) {
         assert!(quad.iter().all(|v| v.layer() == Tile::Water.layer() as u8));
-        // Без AO: одна яркость стороны на весь квад.
         let shade = face_shade(quad_normal(quad));
         assert!(
             quad.iter().all(|v| v.shade_byte() == quantize_shade(shade)),
@@ -977,7 +923,6 @@ fn water_under_water_is_full_height_without_top() {
         [6.0 + LONE_SOURCE; 4],
         "only the upper block has a top"
     );
-    // Боковые грани нижнего блока — до самого верха, без щели под верхним.
     let water_vertices = vertices(&mesh.water);
     let low_sides = water_vertices
         .chunks(4)
@@ -1000,7 +945,6 @@ fn water_under_stone_is_lowered_without_top() {
         .map(|v| v.position()[1])
         .fold(0.0, f32::max);
     assert_eq!(max, 5.0 + LONE_SOURCE);
-    // Низ камня над водой виден.
     assert_eq!(face_count(&mesh.solid), 6);
 }
 
@@ -1032,8 +976,6 @@ fn lake_on_column_seams_matches_whole_world() {
             |_| true,
         );
     }
-    // Вода на западном краю колонки, и сосед за краем — тоже вода: грани между
-    // ними нет ни в одной из двух колонок.
     let seam_water = (0..SECTION_SIZE).any(|z| {
         let p = origin + IVec3::new(0, world::terrain::WATER_LEVEL, z);
         world.block(p).is_water() && world.block(p - IVec3::X).is_water()
@@ -1041,15 +983,12 @@ fn lake_on_column_seams_matches_whole_world() {
     assert!(seam_water, "lake does not cross the seam");
 }
 
-/// Кэш из колонок (срезами) и кэш из замыканий дают побитово те же меши — в том числе
-/// у границ мира сверху и снизу и рядом с незагруженными колонками.
 #[test]
 fn world_cache_matches_closure_cache() {
     use world::terrain::Terrain;
 
     let terrain = Terrain::new(1337);
     let mut world = World::new();
-    // Колонка (2, 0) намеренно без восточного соседа (3, 0) и юго-восточного.
     for z in -1..=1 {
         for x in -1..=2 {
             let key = ColumnPos::new(x, z);
@@ -1090,9 +1029,6 @@ fn world_cache_matches_closure_cache() {
     }
 }
 
-/// Квантованная яркость и позиции совпадают с точным расчётом из блоков и света
-/// мира с точностью до шага квантования (`assert_shades_match` сравнивает байт
-/// вершины с `quantize_shade` независимого расчёта по миру).
 #[test]
 fn quantization_error_is_below_one_step() {
     let (world, light) = small_world(|p| if p.y < 5 { Block::Stone } else { Block::Air });
@@ -1104,7 +1040,6 @@ fn quantization_error_is_below_one_step() {
     }
 }
 
-/// Мир 3×3 колонок вокруг (0, 0) из `block_at` и его свет.
 fn small_world(block_at: impl Fn(IVec3) -> Block) -> (World, LightMap) {
     use world::column::WORLD_HEIGHT;
 
@@ -1131,7 +1066,6 @@ fn small_world(block_at: impl Fn(IVec3) -> Block) -> (World, LightMap) {
 
 #[test]
 fn glowstone_lights_a_dark_room_by_the_brighter_channel() {
-    // Закрытая комната 1 блок высотой с светокамнем: солнца нет, свет только блочный.
     let (world, light) = small_world(|p| match (p.y, p.x, p.z) {
         (1, 8, 8) => Block::Glowstone,
         (1, ..) => Block::Air,
@@ -1159,7 +1093,6 @@ fn glowstone_lights_a_dark_room_by_the_brighter_channel() {
 
 #[test]
 fn floor_under_canopy_is_darker_and_fades() {
-    // Пол на y = 0, навес на y = 3 над x ≥ 6: под ним свет убывает от края.
     let (world, light) = small_world(|p| {
         if p.y == 0 || (p.y == 3 && p.x >= 6) {
             Block::Stone
@@ -1191,8 +1124,6 @@ fn floor_under_canopy_is_darker_and_fades() {
 
 #[test]
 fn opaque_cells_do_not_darken_average() {
-    // Блок на открытом полу: у его подножия AO, но свет 15 — сам блок (уровень 0)
-    // в среднее не входит, и яркость та же, что без света.
     let block = IVec3::new(8, 1, 8);
     let (world, light) = small_world(|p| {
         if p.y == 0 || p == block {
@@ -1210,7 +1141,6 @@ fn opaque_cells_do_not_darken_average() {
 
 #[test]
 fn water_takes_light_of_cell_in_front() {
-    // Лужа под навесом и такая же под открытым небом.
     let (world, light) = small_world(|p| match p.y {
         0 => Block::Stone,
         1 if p.x == 2 || p.x == 12 => Block::Water,
@@ -1270,7 +1200,6 @@ fn lake(levels: &[(i32, i32, u8)]) -> SectionMeshes {
     section_with_data(&blocks)
 }
 
-/// Высоты углов верха клетки `cell` с заданной координатой `x`.
 fn heights_at_x(tops: &[(IVec3, Vec<[f32; 3]>)], cell: IVec3, x: f32) -> Vec<f32> {
     let (_, corners) = tops
         .iter()
@@ -1307,19 +1236,14 @@ fn flat_lake_center_keeps_source_height_and_legacy_template() {
 
 #[test]
 fn water_top_slopes_by_averaged_corner_heights() {
-    // Источник (14, вес 10) рядом с уровнем 7 (2, вес 1): у общих углов по две воздушные
-    // клетки, (140 + 2) / 13 ≈ 10.9 → 11.
     let mesh = lake(&[(5, 5, 0), (6, 5, 7)]);
     let tops = water_tops(&mesh);
     assert_eq!(tops.len(), 2);
     let expected = vec![5.0 + 11.0 / 16.0; 2];
     assert_eq!(heights_at_x(&tops, IVec3::new(5, 5, 5), 6.0), expected);
-    // Общие углы одни и те же у обеих клеток: поверхность без щели.
     assert_eq!(heights_at_x(&tops, IVec3::new(6, 5, 5), 6.0), expected);
-    // Дальний от источника угол низкой воды — ниже общих.
     let far = heights_at_x(&tops, IVec3::new(6, 5, 5), 7.0);
     assert!(far.iter().all(|&y| y < expected[0]), "{far:?}");
-    // Боковой грани между водой нет: у каждой клетки верх, низ и три стороны к воздуху.
     assert_eq!(face_count(&mesh.water), 10);
 }
 
@@ -1331,7 +1255,6 @@ fn corner_next_to_water_above_is_full() {
         (IVec3::new(6, 6, 5), Block::Water, 0),
     ]);
     let tops = water_tops(&mesh);
-    // Над (6,5,5) вода: у (5,5,5) общие углы по x = 6 полные, остальные ниже.
     assert_eq!(heights_at_x(&tops, IVec3::new(5, 5, 5), 6.0), [6.0, 6.0]);
     assert!(
         heights_at_x(&tops, IVec3::new(5, 5, 5), 5.0)
@@ -1345,7 +1268,6 @@ fn falling_water_counts_as_full_height_in_the_average() {
     use world::block::FLUID_FALLING;
     let mesh = lake(&[(5, 5, 0), (6, 5, FLUID_FALLING)]);
     let tops = water_tops(&mesh);
-    // Падающая клетка высотой 16 и источник 14, оба весом 10, плюс два воздуха: 300 / 22.
     let expected = 5.0 + 14.0 / 16.0;
     assert_eq!(heights_at_x(&tops, IVec3::new(5, 5, 5), 6.0), [expected; 2]);
 }

@@ -1,4 +1,3 @@
-/** Экраны меню; новый пункт — значение здесь, компонент в `menu/` и ветка в `PauseMenu.vue`. */
 export type MenuScreen = 'main' | 'settings' | 'controls' | 'confirm'
 
 export const TITLES: Record<MenuScreen, string> = {

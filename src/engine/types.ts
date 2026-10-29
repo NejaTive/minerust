@@ -1,7 +1,5 @@
 export interface TimeInfo {
-  /** Время суток 0..1. */
   time: number
-  /** `day`, `dusk`, `night` или `dawn`. */
   phase: string
 }
 

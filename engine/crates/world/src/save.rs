@@ -7,23 +7,12 @@ use crate::block::Block;
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::section::{SECTION_SIZE, SECTION_VOLUME};
 
-/// Версия формата колонки, которую пишет [`encode_column`]. Её же фронт пишет в
-/// метаданные мира. Колонки версий `1..=FORMAT_VERSION` читаются (старые мигрируют),
-/// остальные — [`SaveError::UnsupportedVersion`].
-///
-/// Как добавить версию: поднять `FORMAT_VERSION`, дописать в конец [`MIGRATIONS`]
-/// функцию «тело версии N → тело версии N+1» (заголовок она не видит), поменять
-/// кодирование и тест на прежние байты оставить как есть.
 pub const FORMAT_VERSION: u8 = 2;
 
-/// Шаг миграции: тело колонки (байты после заголовка) одной версии → тело следующей.
 type Migration = fn(&[u8]) -> Result<Vec<u8>, SaveError>;
 
-/// `MIGRATIONS[n - 1]` поднимает версию n до n + 1.
 const MIGRATIONS: &[Migration] = &[v1_to_v2];
 
-/// В v2 перед сериями блоков встал байт флагов секций с данными; в v1 данных не было,
-/// то есть флаги нулевые.
 fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut out = Vec::with_capacity(body.len() + 1);
     out.push(0);
@@ -37,21 +26,16 @@ const MAGIC: &[u8; 3] = b"MRC";
 const COLUMN_VOLUME: usize = (SECTION_SIZE * SECTION_SIZE * WORLD_HEIGHT) as usize;
 const RUN_SIZE: usize = 3;
 
-// Флаги секций с данными лежат в одном байте.
 const _: () = assert!(COLUMN_SECTIONS <= 8);
 
-// Серия не длиннее колонки, поэтому длина всегда влезает в u16 и серии не дробятся.
 const _: () = assert!(COLUMN_VOLUME <= u16::MAX as usize);
 
-/// Почему байты не читаются как колонка.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SaveError {
     BadMagic,
     UnsupportedVersion(u8),
     UnknownBlock(u8),
-    /// Данные кончились посреди серии или серии не покрыли колонку.
     Truncated,
-    /// Серии вышли за колонку или после неё остались байты.
     Overflow,
 }
 
@@ -69,11 +53,6 @@ impl fmt::Display for SaveError {
 
 impl std::error::Error for SaveError {}
 
-/// Колонка → байты: магия `b"MRC"`, версия, байт флагов (бит `sy` — у секции `sy` есть
-/// ненулевые данные блоков), по 4096 байт данных на каждую секцию с флагом (в порядке
-/// секции, индекс `x + 16·z + 256·y`), затем RLE-пары (блок u8, длина u16 LE) в порядке
-/// x, z снаружи, y внутри (вертикальные столбы дают длинные серии). Колонка без данных
-/// весит как в v1 плюс байт флагов.
 pub fn encode_column(column: &Column) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(64);
     bytes.extend_from_slice(MAGIC);
@@ -105,8 +84,6 @@ pub fn encode_column(column: &Column) -> Vec<u8> {
     bytes
 }
 
-/// Обратное к [`encode_column`]. Ошибка, если магия или версия не те, блок неизвестен
-/// или сумма длин серий не равна объёму колонки.
 pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     let body = bytes.strip_prefix(MAGIC).ok_or(SaveError::BadMagic)?;
     let (&version, body) = body.split_first().ok_or(SaveError::Truncated)?;
@@ -134,7 +111,6 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
         if end > COLUMN_VOLUME {
             return Err(SaveError::Overflow);
         }
-        // Новая колонка — сплошной воздух, его не переписываем.
         if block != Block::Air {
             for i in index..end {
                 column.set(position(i), block);
@@ -145,7 +121,6 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     if index < COLUMN_VOLUME {
         return Err(SaveError::Truncated);
     }
-    // После серий: `Column::set` в них обнуляет данные клетки.
     for (sy, data) in section_data {
         let data: Box<[u8; SECTION_VOLUME]> = Box::new(data.try_into().expect("section data len"));
         column.set_section_data(sy, Some(data));
@@ -153,8 +128,6 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     Ok(column)
 }
 
-/// Тело колонки версии `version` → тело последней версии (`steps.len() + 1`). Тело
-/// текущей версии не копируется.
 fn upgrade<'a>(
     version: u8,
     body: &'a [u8],
@@ -171,7 +144,6 @@ fn upgrade<'a>(
     Ok(body)
 }
 
-/// Номер блока в порядке сериализации → локальные координаты колонки.
 fn position(i: usize) -> IVec3 {
     let i = i as i32;
     let size = SECTION_SIZE;

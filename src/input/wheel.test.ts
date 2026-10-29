@@ -19,9 +19,9 @@ describe('WheelAccumulator', () => {
   })
 
   it('строки и страницы переводятся в пиксели', () => {
-    expect(new WheelAccumulator().push(1, LINES)).toBe(0) // 40 px < порога
-    expect(new WheelAccumulator().push(3, LINES)).toBe(1) // 120 px
-    expect(new WheelAccumulator().push(1, PAGES)).toBe(1) // 800 px
+    expect(new WheelAccumulator().push(1, LINES)).toBe(0)
+    expect(new WheelAccumulator().push(3, LINES)).toBe(1)
+    expect(new WheelAccumulator().push(1, PAGES)).toBe(1)
   })
 
   it('большая прокрутка за одно событие — не больше одного слота', () => {

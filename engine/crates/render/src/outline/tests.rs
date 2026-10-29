@@ -16,7 +16,6 @@ fn twelve_axis_aligned_edges_around_block() {
         );
         axes[axis] += 1;
         for v in pair {
-            // Каждый конец — угол блока, раздутый наружу.
             let off = *v - block.as_vec3();
             assert!(off.cmpge(Vec3::splat(-INFLATE - 1e-5)).all());
             assert!(off.cmple(Vec3::splat(1.0 + INFLATE + 1e-5)).all());

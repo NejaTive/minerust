@@ -2,13 +2,9 @@ import type { Engine, WorldStats } from '@engine'
 import { BENCH_POINTS, BENCH_SEED, BENCH_WORKERS } from './config'
 import { FrameRecorder, frameSummary, round } from './recorder'
 
-/** Сколько секунд стоять на точке после полной загрузки. */
 const STAND_MS = 10_000
-/** Если мир не догрузился за это время, замер прерывается с ошибкой. */
 const LOAD_TIMEOUT_MS = 180_000
-/** Длительность полёта по прямой, мс. */
 const FLIGHT_MS = 20_000
-/** Пауза между нажатиями W двойного тапа: окно игры 0.3 с по времени кадров. */
 const TAP_GAP_MS = 80
 
 function geometry(s: WorldStats) {
@@ -24,7 +20,6 @@ function geometry(s: WorldStats) {
   }
 }
 
-/** Мкс на задание мешера: в воркере, кэш и приём в основном потоке (нули без воркеров). */
 function workerUs(s: WorldStats) {
   return { worker: s.workerMeshUs, encode: s.encodeUs, apply: s.applyUs }
 }
@@ -32,11 +27,9 @@ function workerUs(s: WorldStats) {
 export interface BenchResult {
   done: boolean
   error?: string
-  /** Версия и коммит сборки: замеры разных версий сравниваются по ним. */
   version: string
   build: string
   seed: number
-  /** Меши строят воркеры; иначе основной поток (`?workers=0`). */
   workers: boolean
   renderDistance: number
   ambientOcclusion: boolean
@@ -48,18 +41,12 @@ export interface BenchResult {
 declare global {
   interface Window {
     __benchResult?: BenchResult
-    /** Движок режима `?bench`: для проверки из консоли (время суток, камера). */
     __benchEngine?: Engine
   }
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-/**
- * Полёт с бегом (16 блоков/с) по прямой через незагруженный мир: подгрузка идёт на ходу,
- * кадры пишутся всё время. Старт — после загрузки стартового круга, чтобы замер не
- * смешивался с ней.
- */
 async function runFlight(current: Engine, recorder: FrameRecorder) {
   const start = BENCH_POINTS[0].camera
   current.set_camera_state(Float32Array.from(start))
@@ -70,7 +57,6 @@ async function runFlight(current: Engine, recorder: FrameRecorder) {
   }
   current.stats()
   recorder.reset()
-  // Двойной W — бег; клавиша остаётся нажатой до конца полёта.
   current.set_key('KeyW', true)
   await sleep(TAP_GAP_MS)
   current.set_key('KeyW', false)
@@ -96,12 +82,6 @@ async function runFlight(current: Engine, recorder: FrameRecorder) {
   }
 }
 
-/**
- * Две точки подряд: переход → ждём полной загрузки → стоим `STAND_MS` → сводка;
- * затем полёт ([`runFlight`]).
- * Сводка пишется в `window.__benchResult` по мере готовности (`done` — после последней точки)
- * и целиком в `console.log`.
- */
 export async function runBench(
   engine: () => Engine,
   recorder: FrameRecorder,
@@ -125,7 +105,7 @@ export async function runBench(
     for (const point of BENCH_POINTS) {
       const current = engine()
       current.set_camera_state(Float32Array.from(point.camera))
-      current.stats() // сбрасывает средние: дальше они относятся только к этой загрузке
+      current.stats()
       recorder.reset()
       const started = performance.now()
       while (current.load_ms() === 0) {
@@ -149,7 +129,6 @@ export async function runBench(
         steady: {
           frame: frameSummary(recorder),
           cpuUs: { stream: steady.streamUs, build: steady.buildUs, submit: steady.submitUs },
-          // null — адаптер без timestamp-query; 0 при gpuTimer — замеров ещё нет.
           gpuFrameUs: steady.gpuTimer ? steady.gpuFrameUs : null,
           ...geometry(steady),
         },

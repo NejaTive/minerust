@@ -1,6 +1,5 @@
 use super::*;
 
-/// Углы квада для `vertex_index % 6` в прежнем шейдере без индексов.
 const OLD_TRIANGLE_CORNERS: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
 #[test]
@@ -14,8 +13,6 @@ fn indices_cover_each_quad_with_four_vertices() {
 
 #[test]
 fn indexed_path_gives_the_same_triangles_as_six_vertices_per_quad() {
-    // Шейдер: старый путь — угол `(TRI[v % 6] + flip) & 3`, новый — `(v % 4 + flip) & 3`,
-    // где v берётся из индекса.
     for flip in [0, 1] {
         let old: Vec<u32> = (0..6)
             .map(|v| (OLD_TRIANGLE_CORNERS[v] + flip) & 3)

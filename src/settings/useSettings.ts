@@ -19,7 +19,6 @@ let shared: ReturnType<typeof create> | undefined
 function create() {
   const { limits, defaults, blocks } = engineInfo()
   const settings = reactive<Settings>(loadSettings(localStore, limits, defaultSettings(defaults)))
-  // Режим замера: фиксированные настройки, поверх сохранённых, и в localStorage они не попадают.
   if (BENCH) {
     Object.assign(settings, {
       renderDistance: BENCH_RENDER_DISTANCE,
@@ -44,7 +43,6 @@ function create() {
     { deep: true },
   )
 
-  // Блок в выбранном слоте; `null` — слот пуст.
   const block = computed(() => slots[slot.value] ?? null)
 
   return {
@@ -65,7 +63,6 @@ function create() {
     clearSlot(index: number) {
       clearHotbarSlot(slots, index)
     },
-    /** Сброс при «Новый мир»: пустые слоты и выбранный слот 0. */
     resetHotbar() {
       clearHotbar(slots)
       slot.value = 0
@@ -73,7 +70,6 @@ function create() {
   }
 }
 
-/** Настройки игры и хотбар; общие на приложение. Нужен загруженный `engineInfo`. */
 export function useSettings() {
   shared ??= create()
   return shared

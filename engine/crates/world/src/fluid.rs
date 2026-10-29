@@ -6,11 +6,8 @@ use crate::block::{Block, FLUID_FALLING, FLUID_LEVEL_MASK, FLUID_MAX_LEVEL, FLUI
 use crate::column::WORLD_HEIGHT;
 use crate::world::World;
 
-/// Сколько клеток пересчитывает один [`Fluid::step`]; остаток ждёт следующего шага.
 pub const STEP_LIMIT: usize = 512;
-/// Как далеко от клетки вода высматривает обрыв, клеток.
 const SLOPE_DISTANCE: u32 = 4;
-/// Расстояние до обрыва там, где его нет: любое настоящее меньше.
 const NO_SLOPE: u32 = 1000;
 
 const SIDES: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
@@ -23,14 +20,10 @@ const AROUND: [IVec3; 6] = [
     IVec3::NEG_Z,
 ];
 
-/// Что течению видно в клетке.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Cell {
-    /// Вода сюда не течёт: твёрдый блок, дно мира, незагруженная колонка.
     Solid,
-    /// Воздух или не твёрдый блок (растение, факел): вода его займёт.
     Open,
-    /// Вода с таким байтом данных.
     Water(u8),
 }
 
@@ -48,7 +41,6 @@ fn probe(world: &World, pos: IVec3) -> Cell {
     }
 }
 
-/// Уровень, от которого вода растекается: падающая течёт как источник.
 fn spread_level(data: u8) -> u8 {
     if data & FLUID_FALLING != 0 {
         0
@@ -57,8 +49,6 @@ fn spread_level(data: u8) -> u8 {
     }
 }
 
-/// Очередь клеток, которые течению надо пересчитать. Не сохраняется: после загрузки
-/// вода стоит до следующей правки рядом.
 #[derive(Default)]
 pub struct Fluid {
     queue: VecDeque<IVec3>,
@@ -70,7 +60,6 @@ impl Fluid {
         Self::default()
     }
 
-    /// Клеток в очереди.
     pub fn len(&self) -> usize {
         self.queue.len()
     }
@@ -79,8 +68,6 @@ impl Fluid {
         self.queue.is_empty()
     }
 
-    /// Блок в `pos` изменился: пересчитать его и шестерых соседей. Клетки незагруженных
-    /// колонок не добавляются: на краю загруженного мира течение стоит.
     pub fn block_changed(&mut self, world: &World, pos: IVec3) {
         for cell in std::iter::once(IVec3::ZERO).chain(AROUND) {
             let cell = pos + cell;
@@ -93,10 +80,6 @@ impl Fluid {
         }
     }
 
-    /// Пересчитывает до [`STEP_LIMIT`] клеток с начала очереди и возвращает изменённые
-    /// клетки (в том числе смытые течением блоки). Изменённые клетки и их соседи встают в
-    /// очередь за остальными и в этом шаге не пересчитываются: вода продвигается на
-    /// клетку за шаг.
     pub fn step(&mut self, world: &mut World) -> Vec<IVec3> {
         let mut changed = Vec::new();
         let mut touched = HashSet::new();
@@ -147,7 +130,6 @@ fn update(world: &mut World, pos: IVec3, changed: &mut Vec<IVec3>) {
     spread(world, pos, data, changed);
 }
 
-/// Каким должна быть негустая вода в `pos` по соседям; `None` — воде не от чего питаться.
 fn flowing_state(world: &World, pos: IVec3) -> Option<u8> {
     let mut sources = 0;
     let mut lowest: Option<u8> = None;
@@ -174,8 +156,6 @@ fn flowing_state(world: &World, pos: IVec3) -> Option<u8> {
         .filter(|&level| level <= FLUID_MAX_LEVEL)
 }
 
-/// Вода в `pos` с данными `data` занимает соседние клетки: вниз в первую очередь, в
-/// стороны — если вниз не пошла и не падает в воду.
 fn spread(world: &mut World, pos: IVec3, data: u8, changed: &mut Vec<IVec3>) {
     let source = data == FLUID_SOURCE;
     let below = pos - IVec3::Y;
@@ -215,8 +195,6 @@ fn spread_sides(world: &mut World, pos: IVec3, data: u8, changed: &mut Vec<IVec3
     }
 }
 
-/// Стороны, куда вода из `pos` может течь и откуда ближе всего до обрыва; если обрывов
-/// в [`SLOPE_DISTANCE`] клетках нет, то все свободные.
 fn nearest_slope_dirs(world: &World, pos: IVec3) -> Vec<IVec3> {
     let mut best = u32::MAX;
     let mut dirs = Vec::new();
@@ -241,8 +219,6 @@ fn nearest_slope_dirs(world: &World, pos: IVec3) -> Vec<IVec3> {
     dirs
 }
 
-/// Расстояние от `pos` до ближайшего обрыва, идя по воздуху и негустой воде не дальше
-/// [`SLOPE_DISTANCE`] клеток; `from` — откуда пришли.
 fn slope_distance(world: &World, pos: IVec3, depth: u32, from: IVec3) -> u32 {
     let mut best = NO_SLOPE;
     for dir in SIDES {
@@ -268,7 +244,6 @@ fn slope_distance(world: &World, pos: IVec3, depth: u32, from: IVec3) -> u32 {
     best
 }
 
-/// Под клеткой пустота или вода: вода стремится туда.
 fn is_hole(world: &World, pos: IVec3) -> bool {
     matches!(probe(world, pos - IVec3::Y), Cell::Open | Cell::Water(_))
 }
