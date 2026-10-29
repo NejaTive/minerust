@@ -7,6 +7,7 @@ mod gpu_timer;
 mod layout;
 mod outline;
 mod pipelines;
+mod quad_indices;
 pub mod renderer;
 pub mod shaders;
 mod slots;

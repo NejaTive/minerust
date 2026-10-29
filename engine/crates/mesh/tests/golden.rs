@@ -73,7 +73,7 @@ fn meshes_match_golden() {
                     .expect("column is loaded");
             let mut hash = FNV_START;
             for section in &sections {
-                for data in [&section.solid, &section.water] {
+                for data in [&section.solid, &section.cutout, &section.water] {
                     fnv(&mut hash, &quad_bytes(&data.quads));
                 }
             }
@@ -89,12 +89,14 @@ const GOLDEN_BLOCKS: [u64; 4] = [
     0xe69a701bfc6595d0,
     0x4fe7fff820d365db,
 ];
-/// Хеши записей квадов (`quad_bytes`). Формат поменялся в 20b (вершины → записи по 12 байт);
+/// Хеши записей квадов (`quad_bytes`) по слоям solid, cutout, water. В 20c листва, кресты и
+/// факел ушли из solid в отдельный cutout: у колонок без них (равнина, пустыня) хеш прежний.
+/// Формат поменялся в 20b (вершины → записи по 12 байт);
 /// эквивалентность старого и нового меша один в один до смены была доказана тестом,
 /// который развёртывал записи через шаблоны и сравнивал с прежними вершинами.
 const GOLDEN_MESHES: [u64; 4] = [
     0xf8168e1e2bc0646c,
-    0x0e692c8c9504017e,
+    0x6471aed5fe73aafe,
     0xbb91b5e8a5e32b86,
-    0x68385ff65701513e,
+    0x20f612c7d843cfd2,
 ];

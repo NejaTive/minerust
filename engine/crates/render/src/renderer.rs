@@ -49,6 +49,7 @@ pub struct FrameParams {
 #[derive(Clone, Copy, Default)]
 pub struct FrameCounts {
     pub solid_quads: u32,
+    pub cutout_quads: u32,
     pub water_quads: u32,
     pub draw_calls: u32,
 }
@@ -71,6 +72,8 @@ pub struct Renderer {
     /// Формат view кадра: всегда sRGB, даже если поверхность без него.
     render_format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
+    /// Листва, кресты, факел: `discard`, после `pipeline`.
+    cutout_pipeline: wgpu::RenderPipeline,
     /// Вода: со смешением, без записи глубины, после рамки.
     water_pipeline: wgpu::RenderPipeline,
     outline_pipeline: wgpu::RenderPipeline,
@@ -252,6 +255,13 @@ impl Renderer {
             render_format,
             BlockPass::Solid,
         );
+        let cutout_pipeline = create_block_pipeline(
+            &device,
+            &block_layout,
+            &shader,
+            render_format,
+            BlockPass::Cutout,
+        );
         let water_pipeline = create_block_pipeline(
             &device,
             &block_layout,
@@ -272,6 +282,7 @@ impl Renderer {
             config,
             render_format,
             pipeline,
+            cutout_pipeline,
             water_pipeline,
             outline_pipeline,
             sky_pipeline,
@@ -379,12 +390,13 @@ impl Renderer {
         self.column_meshes.values().flatten().flatten().count()
     }
 
-    /// Память мешей на GPU, байт: арена записей квадов и буфер слотов целиком (с запасом).
+    /// Память мешей на GPU, байт: арена записей квадов, буфер слотов и индексы квадов
+    /// целиком (с запасом).
     pub fn gpu_bytes(&self) -> u64 {
         self.buffers.bytes()
     }
 
-    /// Из [`Renderer::gpu_bytes`] занято мешами и слотами, байт.
+    /// Из [`Renderer::gpu_bytes`] занято мешами, слотами и индексами, байт.
     pub fn gpu_used_bytes(&self) -> u64 {
         self.buffers.used_bytes()
     }
@@ -512,18 +524,40 @@ impl Renderer {
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
             pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
             pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
-            let visible: Vec<&SectionMesh> = self
+            pass.set_index_buffer(
+                self.buffers.indices.buffer().slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            // Спереди назад: ближний рельеф ложится в буфер глубины первым, и дальние
+            // пиксели отсекаются по глубине до шейдера. Сортировка одна на кадр, вода
+            // идёт по ней в обратном порядке.
+            let eye = params.camera_pos;
+            let mut visible: Vec<(f32, &SectionMesh)> = self
                 .column_meshes
                 .values()
                 .flatten()
                 .flatten()
                 .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max))
+                .map(|mesh| (((mesh.min + mesh.max) / 2.0).distance_squared(eye), mesh))
                 .collect();
+            visible.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
             let mut counts = FrameCounts::default();
-            for mesh in visible.iter().filter_map(|section| section.solid.as_ref()) {
-                mesh.draw(&mut pass);
-                counts.solid_quads += mesh.quad_count;
-                counts.draw_calls += 1;
+            for (_, section) in &visible {
+                if let Some(mesh) = &section.solid {
+                    mesh.draw(&mut pass);
+                    counts.solid_quads += mesh.quad_count;
+                    counts.draw_calls += 1;
+                }
+            }
+            // Вырезанное после всего непрозрачного: `discard` у листвы не должен
+            // мешать отсечению скрытых пикселей у рельефа.
+            pass.set_pipeline(&self.cutout_pipeline);
+            for (_, section) in &visible {
+                if let Some(mesh) = &section.cutout {
+                    mesh.draw(&mut pass);
+                    counts.cutout_quads += mesh.quad_count;
+                    counts.draw_calls += 1;
+                }
             }
             self.drawn_sections = visible.len() as u32;
 
@@ -548,21 +582,17 @@ impl Renderer {
             // и смешение верно, только если ближняя вода ложится поверх дальней.
             // Внутри секции грани не сортируются: цвет у воды один, и разница почти
             // не видна.
-            let eye = params.camera_pos;
-            let mut water: Vec<(f32, &GpuMesh)> = visible
+            let water: Vec<&GpuMesh> = visible
                 .iter()
-                .filter_map(|mesh| {
-                    let center = (mesh.min + mesh.max) / 2.0;
-                    Some((center.distance_squared(eye), mesh.water.as_ref()?))
-                })
+                .rev()
+                .filter_map(|(_, mesh)| mesh.water.as_ref())
                 .collect();
             if !water.is_empty() {
-                water.sort_by(|a, b| b.0.total_cmp(&a.0));
                 pass.set_pipeline(&self.water_pipeline);
                 // Рамка заняла вершинный буфер 0, а её layout без арены: ставим всё обратно.
                 pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
                 pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
-                for (_, mesh) in water {
+                for mesh in water {
                     mesh.draw(&mut pass);
                     counts.water_quads += mesh.quad_count;
                     counts.draw_calls += 1;

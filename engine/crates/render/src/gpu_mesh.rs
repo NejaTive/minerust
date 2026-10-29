@@ -5,12 +5,14 @@ use world::column::COLUMN_SECTIONS;
 use world::section::SECTION_SIZE;
 
 use crate::arena::{QuadArena, WORD};
+use crate::quad_indices::{INDICES_PER_QUAD, QuadIndices};
 use crate::slots::SlotBuffer;
 
-/// Общие буферы мешей: записи квадов всех секций и слоты мешей.
+/// Общие буферы мешей: записи квадов всех секций, слоты мешей и индексы квадов.
 pub(crate) struct SceneBuffers {
     pub(crate) arena: QuadArena,
     pub(crate) slots: SlotBuffer,
+    pub(crate) indices: QuadIndices,
 }
 
 impl SceneBuffers {
@@ -18,17 +20,19 @@ impl SceneBuffers {
         SceneBuffers {
             arena: QuadArena::new(device),
             slots: SlotBuffer::new(device),
+            indices: QuadIndices::new(device),
         }
     }
 
     /// Размер буферов на GPU, байт.
     pub(crate) fn bytes(&self) -> u64 {
-        self.arena.capacity() + self.slots.bytes()
+        self.arena.capacity() + self.slots.bytes() + self.indices.bytes()
     }
 
     /// Занято мешами и слотами, байт.
     pub(crate) fn used_bytes(&self) -> u64 {
-        self.arena.used() + self.slots.used_bytes()
+        // Индексный шаблон занят целиком: свободных мест в нём нет.
+        self.arena.used() + self.slots.used_bytes() + self.indices.bytes()
     }
 }
 
@@ -82,17 +86,22 @@ impl GpuMesh {
         buffers.slots.free(self.slot);
     }
 
-    /// Пайплайн, арена (bind group) и буфер слотов уже выставлены. Шесть вершин на квад
-    /// без индексов; слот — `first_instance`, по нему вершинный шейдер берёт угол секции
-    /// и начало записей меша.
+    /// Пайплайн, арена (bind group), буфер слотов и индексы квадов уже выставлены. Индексы
+    /// общие, `base_vertex` нулевой: квады меша нумеруются с нуля; слот — `first_instance`,
+    /// по нему вершинный шейдер берёт угол секции и начало записей меша.
     pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
-        pass.draw(0..6 * self.quad_count, self.slot..self.slot + 1);
+        pass.draw_indexed(
+            0..INDICES_PER_QUAD * self.quad_count,
+            0,
+            self.slot..self.slot + 1,
+        );
     }
 }
 
 /// Меши одной секции на GPU по проходам; хотя бы один не `None`.
 pub(crate) struct SectionMesh {
     pub(crate) solid: Option<GpuMesh>,
+    pub(crate) cutout: Option<GpuMesh>,
     pub(crate) water: Option<GpuMesh>,
     /// Коробка секции целиком в мировых координатах — для отсечения по пирамиде.
     pub(crate) min: Vec3,
@@ -102,7 +111,7 @@ pub(crate) struct SectionMesh {
 impl SectionMesh {
     /// Возвращает диапазоны и слоты секции буферам.
     pub(crate) fn release(self, buffers: &mut SceneBuffers) {
-        for mesh in [self.solid, self.water].into_iter().flatten() {
+        for mesh in [self.solid, self.cutout, self.water].into_iter().flatten() {
             mesh.free(buffers);
         }
     }
@@ -121,21 +130,33 @@ pub(crate) fn upload_section(
     data: &SectionMeshes,
     min: Vec3,
 ) -> Result<Option<SectionMesh>, String> {
-    let solid = GpuMesh::upload(device, queue, buffers, &data.solid, min)?;
-    let water = match GpuMesh::upload(device, queue, buffers, &data.water, min) {
-        Ok(water) => water,
-        Err(e) => {
-            if let Some(solid) = solid {
-                solid.free(buffers);
+    let meshes = [&data.solid, &data.cutout, &data.water];
+    // Индексы сначала: они не привязаны к мешу, и при ошибке откатывать нечего.
+    let most = meshes.iter().map(|m| m.quads.len()).max().unwrap_or(0);
+    buffers.indices.ensure(
+        device,
+        u32::try_from(most).map_err(|_| "mesh has too many quads")?,
+    )?;
+    let mut uploaded: Vec<Option<GpuMesh>> = Vec::with_capacity(meshes.len());
+    for data in meshes {
+        match GpuMesh::upload(device, queue, buffers, data, min) {
+            Ok(mesh) => uploaded.push(mesh),
+            Err(e) => {
+                for mesh in uploaded.into_iter().flatten() {
+                    mesh.free(buffers);
+                }
+                return Err(e);
             }
-            return Err(e);
         }
-    };
-    if solid.is_none() && water.is_none() {
+    }
+    let [solid, cutout, water]: [Option<GpuMesh>; 3] =
+        uploaded.try_into().unwrap_or_else(|_| unreachable!());
+    if solid.is_none() && cutout.is_none() && water.is_none() {
         return Ok(None);
     }
     Ok(Some(SectionMesh {
         solid,
+        cutout,
         water,
         min,
         max: min + SECTION_SIZE as f32,

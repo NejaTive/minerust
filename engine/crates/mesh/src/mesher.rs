@@ -5,7 +5,7 @@ use crate::templates::{
     AO_BRIGHTNESS, CROSS, CUBE_FACE, FACES, Face, TORCH_SIDE, TORCH_TOP, WATER_BOTTOM, WATER_SIDE,
     WATER_SIDE_LOW, WATER_SURFACE_UNITS, WATER_TOP,
 };
-use world::block::{Block, Facing, Shape};
+use world::block::{Block, Facing, RenderLayer, Shape};
 use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
 use world::pos::{ColumnPos, SectionPos};
@@ -180,10 +180,13 @@ impl<'a> Surroundings<'a> {
 
 /// Меши секции по проходам отрисовки.
 pub struct SectionMeshes {
-    /// Непрозрачные блоки и листва (`RenderLayer::Opaque` и `Cutout`): у листвы альфа
-    /// двоичная, ей хватает `discard` без смешения.
+    /// Непрозрачные блоки (`RenderLayer::Opaque`): шейдер без `discard`, поэтому GPU
+    /// может отсекать скрытые пиксели до шейдера.
     pub solid: MeshData,
-    /// Вода (`RenderLayer::Translucent`): рисуется после `solid` со смешением.
+    /// Листва, кресты, факел (`RenderLayer::Cutout`): у них альфа двоичная, хватает
+    /// `discard` без смешения. Рисуется после `solid`.
+    pub cutout: MeshData,
+    /// Вода (`RenderLayer::Translucent`): рисуется после `cutout` со смешением.
     pub water: MeshData,
 }
 
@@ -191,6 +194,7 @@ impl SectionMeshes {
     fn empty() -> Self {
         Self {
             solid: MeshData::new(),
+            cutout: MeshData::new(),
             water: MeshData::new(),
         }
     }
@@ -300,7 +304,7 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
                 if block.shape() != Shape::Cube {
                     let (sky, block_light) = lights.at(index, 0);
                     let light = [sky, block_light].map(|l| half_average(l, 1));
-                    push_shaped(&mut meshes.solid, block, cell, light);
+                    push_shaped(&mut meshes.cutout, block, cell, light);
                     continue;
                 }
                 if block.is_water() {
@@ -380,7 +384,12 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
                     let days =
                         corner_data.map(|(shade, [sun, block], _)| day_shade(shade, sun, block));
                     let layer = tile.layer() as u8;
-                    meshes.solid.quads.push(Quad::new(
+                    let target = if block.render_layer() == RenderLayer::Cutout {
+                        &mut meshes.cutout
+                    } else {
+                        &mut meshes.solid
+                    };
+                    target.quads.push(Quad::new(
                         cell,
                         CUBE_FACE + face_index as u8,
                         flip_diagonal(days),
@@ -398,7 +407,7 @@ fn mesh_cached(blocks: &Neighborhood, lights: &Lights, options: MeshOptions) -> 
 
 /// Записи квадов блока не-куба: крест (две плоскости в обе стороны) или столбик факела.
 /// Без AO, свет — одной клетки блока (`light` в половинках уровня), одинаковый на всех углах.
-/// Всё в слое Cutout вместе с кубами.
+/// Всегда слой Cutout.
 fn push_shaped(mesh: &mut MeshData, block: Block, cell: [u8; 3], light: [u8; 2]) {
     let quad = |template: u8, layer: u8| {
         Quad::new(

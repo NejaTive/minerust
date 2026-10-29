@@ -30,8 +30,9 @@ var block_textures: texture_2d_array<f32>;
 var block_sampler: sampler;
 
 // Квады блоков лежат в одном storage-буфере (арена) по три слова, раскладка — в
-// mesh.rs (`Quad`). Индексов и вершинных буферов нет: на квад идёт 6 вершин
-// (`vertex_index / 6`), угол берётся из таблицы шаблонов `shapes`.
+// mesh.rs (`Quad`). Вершинных буферов нет; общий индексный буфер (quad_indices.rs) даёт на
+// квад 4 вершины (`vertex_index / 4`, угол — `vertex_index % 4`), угол берётся из таблицы
+// шаблонов `shapes`.
 @group(1) @binding(0)
 var<storage, read> quads: array<u32>;
 
@@ -72,18 +73,16 @@ fn vertex_brightness(sun_halves: u32, block_halves: u32) -> f32 {
     return max(pow(LIGHT_BASE, MAX_LIGHT - level), MIN_BRIGHTNESS);
 }
 
-// Углы двух треугольников квада без переворота диагонали; с переворотом все номера
-// сдвигаются на один (`1,2,3, 1,3,0`).
-const TRIANGLE_CORNERS: array<u32, 6> = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
-
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    let at = in.first_word + (in.vertex / 6u) * 3u;
+    let at = in.first_word + (in.vertex / 4u) * 3u;
     let w0 = quads[at];
     let w1 = quads[at + 1u];
     let w2 = quads[at + 2u];
     let flip = (w0 >> 17u) & 1u;
-    let corner = (TRIANGLE_CORNERS[in.vertex % 6u] + flip) & 3u;
+    // Индексы везде `0,1,2, 0,2,3`; переворот диагонали сдвигает номер угла на один и даёт
+    // `1,2,3, 1,3,0`: те же треугольники и обход, что давал прежний путь без индексов.
+    let corner = ((in.vertex % 4u) + flip) & 3u;
     let shape = (w0 >> 12u) & 0x1Fu;
     let packed = table.shapes[shape].corners[corner];
     let cell = vec3<f32>(f32(w0 & 0xFu), f32((w0 >> 4u) & 0xFu), f32((w0 >> 8u) & 0xFu));
@@ -118,11 +117,20 @@ fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
     return mix(color, globals.fog_color, fog);
 }
 
+// Непрозрачное: без `discard`, чтобы GPU мог отсекать скрытые пиксели до шейдера
+// (TBDR отключает это для любого пайплайна с `discard`).
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);
-    // Дырки листвы. Альфа в текстуре двоичная на каждом мип-уровне (texture.rs),
-    // поэтому порог не зависит от расстояния, а смешение пайплайну не нужно.
+    return vec4<f32>(shaded(in, texel.rgb), 1.0);
+}
+
+// Листва, кресты, факел: дырки через `discard`. Альфа в текстуре двоичная на каждом
+// мип-уровне (texture.rs), поэтому порог не зависит от расстояния, а смешение пайплайну
+// не нужно.
+@fragment
+fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);
     if texel.a < 0.5 {
         discard;
     }

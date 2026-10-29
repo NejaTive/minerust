@@ -51,16 +51,19 @@ pub struct WorldStats {
     /// CPU за кадр: `finish`, `submit`, `present`, мкс. Нули без профилирования.
     #[wasm_bindgen(js_name = submitUs)]
     pub submit_us: u32,
-    /// Квады непрозрачных мешей, нарисованные в последнем кадре (вершин в шесть раз больше).
+    /// Квады непрозрачных мешей, нарисованные в последнем кадре (вершин в четыре раза больше).
     #[wasm_bindgen(js_name = solidQuads)]
     pub solid_quads: u32,
+    /// Квады вырезанных мешей (листва, кресты, факел) в последнем кадре.
+    #[wasm_bindgen(js_name = cutoutQuads)]
+    pub cutout_quads: u32,
     /// Квады воды в последнем кадре.
     #[wasm_bindgen(js_name = waterQuads)]
     pub water_quads: u32,
     /// Draw-вызовов в последнем кадре.
     #[wasm_bindgen(js_name = drawCalls)]
     pub draw_calls: u32,
-    /// Буферы мешей на GPU целиком (арена записей квадов и буфер слотов с запасом), КиБ.
+    /// Буферы мешей на GPU целиком (арена записей квадов, буфер слотов и индексы квадов, с запасом), КиБ.
     #[wasm_bindgen(js_name = gpuKib)]
     pub gpu_kib: u32,
     /// Из `gpuKib` занято мешами, КиБ; разница — запас арены.

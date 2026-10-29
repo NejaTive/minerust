@@ -176,6 +176,7 @@ impl Profiler {
             build_us: self.build_frame_time.take_micros(),
             submit_us: self.submit_frame_time.take_micros(),
             solid_quads: counts.solid_quads,
+            cutout_quads: counts.cutout_quads,
             water_quads: counts.water_quads,
             draw_calls: counts.draw_calls,
             gpu_kib: scene.gpu_kib as u32,

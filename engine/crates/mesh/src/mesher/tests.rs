@@ -353,7 +353,16 @@ fn pair(a: Block, b: Block) -> MeshData {
     let mut section = Section::new();
     section.set(IVec3::new(5, 5, 5), a);
     section.set(IVec3::new(6, 5, 5), b);
-    mesh_section(&section, air, full, AO).solid
+    let meshes = mesh_section(&section, air, full, AO);
+    merged(&meshes)
+}
+
+/// Твёрдое и вырезанное одним мешом: тесты граней не различают слой.
+fn merged(meshes: &SectionMeshes) -> MeshData {
+    let mut all = MeshData::new();
+    all.quads.extend(&meshes.solid.quads);
+    all.quads.extend(&meshes.cutout.quads);
+    all
 }
 
 /// Есть ли в меше грань с нормалью `normal` в плоскости x = `x`.
@@ -566,7 +575,10 @@ fn section_origin(origin: IVec3, sy: usize) -> IVec3 {
 /// Грани всех секций колонки (`solid`, `water`).
 fn column_face_count(meshes: &[SectionMeshes]) -> (usize, usize) {
     meshes.iter().fold((0, 0), |(solid, water), m| {
-        (solid + face_count(&m.solid), water + face_count(&m.water))
+        (
+            solid + face_count(&m.solid) + face_count(&m.cutout),
+            water + face_count(&m.water),
+        )
     })
 }
 
@@ -683,10 +695,15 @@ fn tree_on_column_border_matches_whole_world() {
 }
 
 /// Меши секции `key` с соседями из `world`, в сравнимом виде.
-fn world_mesh(world: &World, light: &LightMap, key: SectionPos) -> [(Vec<Vertex>, Vec<u16>); 2] {
-    let SectionMeshes { solid, water } = mesh_world_section(world, light, key, AO).unwrap();
+fn world_mesh(world: &World, light: &LightMap, key: SectionPos) -> [(Vec<Vertex>, Vec<u16>); 3] {
+    let SectionMeshes {
+        solid,
+        cutout,
+        water,
+    } = mesh_world_section(world, light, key, AO).unwrap();
     [
         (vertices(&solid), indices(&solid)),
+        (vertices(&cutout), indices(&cutout)),
         (vertices(&water), indices(&water)),
     ]
 }
@@ -773,7 +790,7 @@ fn quad_normals(mesh: &MeshData) -> Vec<IVec3> {
 fn cross_has_both_sides_of_both_planes() {
     let at = IVec3::new(5, 5, 5);
     for block in [Block::TallGrass, Block::Poppy, Block::Dandelion] {
-        let mesh = section_of(&[(at, block)]).solid;
+        let mesh = section_of(&[(at, block)]).cutout;
         assert_eq!(vertices(&mesh).len(), 16, "{block:?}");
         assert_eq!(indices(&mesh).len(), 24, "{block:?}");
         let normals = quad_normals(&mesh);
@@ -794,7 +811,7 @@ fn cross_has_both_sides_of_both_planes() {
 
 #[test]
 fn cross_has_light_of_its_own_cell_and_full_shade() {
-    let mesh = section_of(&[(IVec3::new(5, 5, 5), Block::Poppy)]).solid;
+    let mesh = section_of(&[(IVec3::new(5, 5, 5), Block::Poppy)]).cutout;
     let first = vertices(&mesh)[0];
     assert!(vertices(&mesh).iter().all(|v| v.shade_byte() == 255
         && v.sun_halves() == first.sun_halves()
@@ -823,7 +840,7 @@ fn cross_does_not_hide_cube_faces_or_shade_corners() {
 #[test]
 fn torch_is_a_narrow_column_with_five_faces() {
     let at = IVec3::new(5, 5, 5);
-    let mesh = section_of(&[(at, Block::Torch)]).solid;
+    let mesh = section_of(&[(at, Block::Torch)]).cutout;
     assert_eq!(vertices(&mesh).len(), 20);
     let normals = quad_normals(&mesh);
     assert!(!normals.contains(&IVec3::NEG_Y), "no bottom face");
@@ -911,7 +928,7 @@ fn water_has_no_face_toward_leaves() {
         (IVec3::new(6, 5, 5), Block::Water),
     ]);
     assert!(
-        has_face_at_x(&mesh.solid, 6.0, IVec3::X),
+        has_face_at_x(&mesh.cutout, 6.0, IVec3::X),
         "leaves toward water"
     );
     assert_eq!(face_count(&mesh.water), 5);
