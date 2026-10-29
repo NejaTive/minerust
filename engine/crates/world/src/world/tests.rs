@@ -1,4 +1,5 @@
 use super::*;
+use crate::block::{ATTACH_FLOOR, ATTACH_NEG_X, ATTACH_NEG_Z, ATTACH_POS_X, ATTACH_POS_Z};
 
 #[test]
 fn negative_coords_land_in_right_column() {
@@ -305,4 +306,150 @@ fn affected_sections_stay_in_height() {
         assert_eq!(keys.len(), 4, "{pos}");
         assert!(keys.iter().all(|k| k.y() == sy), "{pos}: {keys:?}");
     }
+}
+
+/// Мир с одной колонкой, пол из камня на y = 9, в клетке (3, 10, 3) воздух.
+fn floor_world() -> World {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    for x in 0..8 {
+        for z in 0..8 {
+            world.set_block(IVec3::new(x, 9, z), Block::Stone);
+        }
+    }
+    world
+}
+
+#[test]
+fn block_data_follows_the_block() {
+    let mut world = floor_world();
+    let pos = IVec3::new(3, 10, 3);
+    assert!(world.set_block_with_data(pos, Block::Log, 2));
+    assert_eq!(world.block_data(pos), 2);
+    world.set_block(pos, Block::Log);
+    assert_eq!(world.block_data(pos), 0);
+    assert_eq!(world.block_data(IVec3::new(3, -1, 3)), 0);
+    assert_eq!(world.block_data(IVec3::new(100, 10, 3)), 0);
+    assert!(!world.set_block_with_data(IVec3::new(100, 10, 3), Block::Log, 1));
+}
+
+#[test]
+fn wall_torch_needs_solid_opaque_wall() {
+    let mut world = floor_world();
+    let torch = IVec3::new(3, 10, 3);
+    for (wall, data) in [
+        (IVec3::X, ATTACH_POS_X),
+        (IVec3::NEG_X, ATTACH_NEG_X),
+        (IVec3::Z, ATTACH_POS_Z),
+        (IVec3::NEG_Z, ATTACH_NEG_Z),
+    ] {
+        // Опоры нет: воздух.
+        assert!(!world.can_place_with_data(torch, Block::Torch, data));
+        for bad in [Block::Water, Block::Leaves] {
+            world.set_block(torch + wall, bad);
+            assert!(
+                !world.can_place_with_data(torch, Block::Torch, data),
+                "{bad:?}"
+            );
+        }
+        world.set_block(torch + wall, Block::Stone);
+        assert!(world.can_place_with_data(torch, Block::Torch, data));
+        // Стена с другой стороны не подходит.
+        let other = if data == ATTACH_POS_X {
+            ATTACH_NEG_X
+        } else {
+            ATTACH_POS_X
+        };
+        assert!(!world.can_place_with_data(torch, Block::Torch, other));
+        world.set_block(torch + wall, Block::Air);
+    }
+}
+
+#[test]
+fn floor_torch_still_stands_on_floor_and_leaves() {
+    let mut world = floor_world();
+    let pos = IVec3::new(3, 10, 3);
+    assert!(world.can_place(pos, Block::Torch));
+    assert!(world.can_place(pos, Block::Poppy));
+    world.set_block(pos - IVec3::Y, Block::Leaves);
+    assert!(world.can_place(pos, Block::Torch));
+    world.set_block(pos - IVec3::Y, Block::Water);
+    assert!(!world.can_place(pos, Block::Torch));
+}
+
+#[test]
+fn breaking_wall_removes_wall_torch() {
+    let mut world = floor_world();
+    let wall = IVec3::new(4, 10, 3);
+    let torch = IVec3::new(3, 10, 3);
+    world.set_block(wall, Block::Stone);
+    world.set_block_supported_with_data(torch, Block::Torch, ATTACH_POS_X);
+    assert_eq!(world.block(torch), Block::Torch);
+    assert_eq!(world.block_data(torch), ATTACH_POS_X);
+    assert_eq!(
+        world.set_block_supported(wall, Block::Air),
+        vec![wall, torch]
+    );
+    assert_eq!(world.block(torch), Block::Air);
+    assert_eq!(world.block_data(torch), 0);
+}
+
+#[test]
+fn removal_cascades_through_wall_and_floor_dependents() {
+    let mut world = floor_world();
+    // Столбик камня (3, 10..12, 3) с факелом на стене (4, 11, 3) и цветком сверху.
+    for y in 10..12 {
+        world.set_block(IVec3::new(3, y, 3), Block::Stone);
+    }
+    let torch = IVec3::new(4, 11, 3);
+    world.set_block_supported_with_data(torch, Block::Torch, ATTACH_NEG_X);
+    world.set_block(IVec3::new(3, 12, 3), Block::Poppy);
+    // Под факелом ещё один факел, висящий на полу, у которого опора — его клетка.
+    let changed = world.set_block_supported(IVec3::new(3, 11, 3), Block::Air);
+    assert_eq!(changed[0], IVec3::new(3, 11, 3));
+    assert!(changed.contains(&torch));
+    assert!(changed.contains(&IVec3::new(3, 12, 3)));
+    assert_eq!(world.block(torch), Block::Air);
+    assert_eq!(world.block(IVec3::new(3, 12, 3)), Block::Air);
+    // Нижний столбик остался.
+    assert_eq!(world.block(IVec3::new(3, 10, 3)), Block::Stone);
+}
+
+#[test]
+fn replacing_wall_with_solid_opaque_keeps_wall_torch() {
+    let mut world = floor_world();
+    let wall = IVec3::new(4, 10, 3);
+    let torch = IVec3::new(3, 10, 3);
+    world.set_block(wall, Block::Stone);
+    world.set_block_supported_with_data(torch, Block::Torch, ATTACH_POS_X);
+    assert_eq!(world.set_block_supported(wall, Block::Dirt), vec![wall]);
+    assert_eq!(world.block(torch), Block::Torch);
+    // Листва твёрдая, но на ней настенный факел не держится.
+    assert_eq!(
+        world.set_block_supported(wall, Block::Leaves),
+        vec![wall, torch]
+    );
+}
+
+#[test]
+fn placement_data_by_face() {
+    use crate::block::{AXIS_X, AXIS_Y, AXIS_Z};
+    assert_eq!(Block::Stone.placement_data(IVec3::X), Some(0));
+    assert_eq!(Block::Log.placement_data(IVec3::Y), Some(AXIS_Y));
+    assert_eq!(Block::Log.placement_data(IVec3::NEG_Y), Some(AXIS_Y));
+    assert_eq!(Block::Log.placement_data(IVec3::NEG_X), Some(AXIS_X));
+    assert_eq!(Block::Log.placement_data(IVec3::Z), Some(AXIS_Z));
+    assert_eq!(Block::Torch.placement_data(IVec3::Y), Some(ATTACH_FLOOR));
+    assert_eq!(Block::Torch.placement_data(IVec3::NEG_Y), None);
+    // Факел на грани +X блока стоит в клетке к +X от него, а опора — на −X от факела.
+    assert_eq!(Block::Torch.placement_data(IVec3::X), Some(ATTACH_NEG_X));
+    assert_eq!(
+        Block::Torch.placement_data(IVec3::NEG_X),
+        Some(ATTACH_POS_X)
+    );
+    assert_eq!(Block::Torch.placement_data(IVec3::Z), Some(ATTACH_NEG_Z));
+    assert_eq!(
+        Block::Torch.placement_data(IVec3::NEG_Z),
+        Some(ATTACH_POS_Z)
+    );
 }

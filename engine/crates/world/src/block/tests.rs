@@ -90,9 +90,9 @@ fn log_has_rings_on_ends_and_bark_on_sides() {
 
 #[test]
 fn bounds_follow_shape() {
-    assert_eq!(Block::Stone.bounds(), (Vec3::ZERO, Vec3::ONE));
-    assert_eq!(Block::Poppy.bounds(), (Vec3::ZERO, Vec3::ONE));
-    let (lo, hi) = Block::Torch.bounds();
+    assert_eq!(Block::Stone.bounds(0), (Vec3::ZERO, Vec3::ONE));
+    assert_eq!(Block::Poppy.bounds(0), (Vec3::ZERO, Vec3::ONE));
+    let (lo, hi) = Block::Torch.bounds(0);
     assert_eq!((lo.x, hi.x, hi.y), (7.0 / 16.0, 9.0 / 16.0, 10.0 / 16.0));
 }
 
@@ -176,5 +176,43 @@ fn support_is_for_non_solid_blocks() {
             "{}",
             def.name
         );
+    }
+}
+
+#[test]
+fn wall_torch_bounds_lean_away_from_the_wall() {
+    use crate::block::{ATTACH_NEG_X, ATTACH_POS_X, ATTACH_POS_Z};
+    let u = 1.0 / 16.0;
+    let (lo, hi) = Block::Torch.bounds(ATTACH_NEG_X);
+    assert_eq!((lo.x, hi.x, lo.y, hi.y), (0.0, 6.0 * u, 3.0 * u, 13.0 * u));
+    assert_eq!((lo.z, hi.z), (7.0 * u, 9.0 * u));
+    let (lo, hi) = Block::Torch.bounds(ATTACH_POS_X);
+    assert_eq!((lo.x, hi.x), (10.0 * u, 1.0));
+    let (lo, hi) = Block::Torch.bounds(ATTACH_POS_Z);
+    assert_eq!((lo.z, hi.z), (10.0 * u, 1.0));
+    assert_eq!((lo.x, hi.x), (7.0 * u, 9.0 * u));
+    // Неизвестный байт — напольный.
+    assert_eq!(Block::Torch.bounds(77), Block::Torch.bounds(0));
+}
+
+#[test]
+fn support_direction_by_block() {
+    use crate::block::ATTACH_POS_Z;
+    assert_eq!(Block::Stone.support_dir(0), None);
+    assert_eq!(Block::Poppy.support_dir(3), Some(IVec3::NEG_Y));
+    assert_eq!(Block::Torch.support_dir(0), Some(IVec3::NEG_Y));
+    assert_eq!(Block::Torch.support_dir(ATTACH_POS_Z), Some(IVec3::Z));
+    assert_eq!(Block::Torch.support_dir(200), Some(IVec3::NEG_Y));
+}
+
+#[test]
+fn only_log_and_torch_use_data() {
+    for block in ALL {
+        let expected = match block {
+            Block::Log => DataKind::Axis,
+            Block::Torch => DataKind::Attachment,
+            _ => DataKind::None,
+        };
+        assert_eq!(block.data_kind(), expected, "{block:?}");
     }
 }

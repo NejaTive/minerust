@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{IVec3, Vec3};
 
 use crate::tile::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile, tile_pixels};
 
@@ -49,6 +49,40 @@ pub enum Shape {
     Torch,
 }
 
+/// Что значит байт данных блока (`World::block_data`); сам байт хранится в секции и
+/// сохраняется вместе с блоком. Нулевой байт — состояние по умолчанию у всех блоков.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DataKind {
+    /// Блок данных не использует: байт всегда 0.
+    None,
+    /// Ось блока: [`AXIS_Y`] (0, стоячее), [`AXIS_X`] (1), [`AXIS_Z`] (2) — бревно.
+    Axis,
+    /// Куда прикреплён блок: [`ATTACH_FLOOR`] (0, держится за блок снизу) или
+    /// [`ATTACH_POS_X`]..[`ATTACH_NEG_Z`] — за стену в этой стороне от блока (факел).
+    Attachment,
+}
+
+/// Ось бревна в байте данных. Ноль — стоячее: так бревно из генерации и из
+/// сохранений до версии 2 не меняется.
+pub const AXIS_Y: u8 = 0;
+pub const AXIS_X: u8 = 1;
+pub const AXIS_Z: u8 = 2;
+
+/// Крепление в байте данных: направление от блока к опоре. Ноль — опора снизу, как у
+/// любого растения, поэтому сохранённые до версии 2 факелы остаются напольными.
+pub const ATTACH_FLOOR: u8 = 0;
+pub const ATTACH_POS_X: u8 = 1;
+pub const ATTACH_NEG_X: u8 = 2;
+pub const ATTACH_POS_Z: u8 = 3;
+pub const ATTACH_NEG_Z: u8 = 4;
+
+/// Настенный факел в шестнадцатых долях блока, для лежащей у стены в −X и наклонённой в
+/// +X (остальные три стороны — поворотом вокруг центра клетки). Наклон 4/10 ≈ 22°:
+/// шаги позиции целые, и другого угла рядом с 22° из них не собрать. Основание
+/// прижато к стене, а поднят факел, чтобы его низ не висел в углу клетки.
+pub const TORCH_WALL_SHIFT: u32 = 4;
+pub const TORCH_WALL_RISE: u32 = 3;
+
 /// Куда смотрит грань блока; от этого зависит её тайл.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Facing {
@@ -76,8 +110,11 @@ pub struct BlockDef {
     pub targetable: bool,
     /// Можно ли поставить другой блок в клетку с этим: воздух, вода и трава.
     pub replaceable: bool,
-    /// Нужна ли твёрдая опора снизу: без неё блок исчезает и ставится только на неё.
+    /// Нужна ли твёрдая опора (снизу, у факела — и сбоку, см. [`Block::support_dir`]):
+    /// без неё блок исчезает и ставится только на неё.
     pub needs_support: bool,
+    /// Смысл байта данных.
+    pub data: DataKind,
     /// Уровень света блоков, который блок излучает (0 — не светится).
     pub emission: u8,
     /// Проход отрисовки. У воздуха граней нет, для него значение не важно.
@@ -100,6 +137,7 @@ impl BlockDef {
         targetable: true,
         replaceable: false,
         needs_support: false,
+        data: DataKind::None,
         emission: 0,
         layer: RenderLayer::Opaque,
         shape: Shape::Cube,
@@ -164,6 +202,7 @@ pub const BLOCKS: [BlockDef; 13] = [
     BlockDef::uniform("sand", "песок", Tile::Sand),
     // Log
     BlockDef {
+        data: DataKind::Axis,
         top: Some(Tile::LogTop),
         side: Some(Tile::LogSide),
         bottom: Some(Tile::LogTop),
@@ -202,6 +241,7 @@ pub const BLOCKS: [BlockDef; 13] = [
     // Torch: на единицу темнее светокамня.
     BlockDef {
         shape: Shape::Torch,
+        data: DataKind::Attachment,
         emission: 14,
         ..BlockDef::plant("torch", "факел", Tile::Torch)
     },
@@ -244,18 +284,97 @@ impl Block {
 
     /// Бокс блока в долях клетки (min, max) — по нему рисуется рамка выделения. У креста
     /// клетка целиком: бокс по высоте травы вышел бы разным для цветка и травы и
-    /// мерцал бы при наведении на соседние.
-    pub fn bounds(self) -> (Vec3, Vec3) {
+    /// мерцал бы при наведении на соседние. Настенный факел наклонён, и бокс зависит
+    /// от байта данных.
+    pub fn bounds(self, data: u8) -> (Vec3, Vec3) {
         match self.shape() {
             Shape::Torch => {
                 let unit = 1.0 / TILE_SIZE as f32;
                 let (lo, hi) = (TORCH_PIXELS.0 as f32 * unit, TORCH_PIXELS.1 as f32 * unit);
-                (
-                    Vec3::new(lo, 0.0, lo),
-                    Vec3::new(hi, (TILE_SIZE - TORCH_TOP_ROW) as f32 * unit, hi),
-                )
+                let height = (TILE_SIZE - TORCH_TOP_ROW) as f32 * unit;
+                let Some(support) = self.support_dir(data).filter(|dir| dir.y == 0) else {
+                    return (Vec3::new(lo, 0.0, lo), Vec3::new(hi, height, hi));
+                };
+                // Коробка для опоры в −X: основание у стены, верх отклонён в +X.
+                let shift = TORCH_WALL_SHIFT as f32 * unit;
+                let rise = TORCH_WALL_RISE as f32 * unit;
+                let min = Vec3::new(0.0, rise, lo);
+                let max = Vec3::new(hi - lo + shift, rise + height, hi);
+                // Поворот вокруг центра клетки до нужной стены: (dx, dz) → (−dz, dx).
+                let mut turns = 0;
+                let mut dir = IVec3::NEG_X;
+                while dir != support {
+                    dir = IVec3::new(-dir.z, 0, dir.x);
+                    turns += 1;
+                }
+                let rotate = |p: Vec3| {
+                    let mut p = p - Vec3::new(0.5, 0.0, 0.5);
+                    for _ in 0..turns {
+                        p = Vec3::new(-p.z, p.y, p.x);
+                    }
+                    p + Vec3::new(0.5, 0.0, 0.5)
+                };
+                let (a, b) = (rotate(min), rotate(max));
+                (a.min(b), a.max(b))
             }
             _ => (Vec3::ZERO, Vec3::ONE),
+        }
+    }
+
+    pub fn data_kind(self) -> DataKind {
+        self.def().data
+    }
+
+    /// Направление от блока к его опоре; `None` — опора не нужна. Растения держатся за
+    /// блок снизу; факел — за блок снизу или за стену по байту данных. Неизвестный
+    /// байт читается как напольный: сохранение с мусором не должно ронять игру.
+    pub fn support_dir(self, data: u8) -> Option<IVec3> {
+        if !self.needs_support() {
+            return None;
+        }
+        if self.data_kind() != DataKind::Attachment {
+            return Some(IVec3::NEG_Y);
+        }
+        Some(match data {
+            ATTACH_POS_X => IVec3::X,
+            ATTACH_NEG_X => IVec3::NEG_X,
+            ATTACH_POS_Z => IVec3::Z,
+            ATTACH_NEG_Z => IVec3::NEG_Z,
+            _ => IVec3::NEG_Y,
+        })
+    }
+
+    /// Байт данных при установке блока на грань с нормалью `normal` (от блока под
+    /// прицелом к клетке установки). `None` — на эту грань блок не ставится: факел
+    /// не висит на нижней грани.
+    pub fn placement_data(self, normal: IVec3) -> Option<u8> {
+        match self.data_kind() {
+            DataKind::None => Some(0),
+            DataKind::Axis => Some(match normal.abs().max_position() {
+                0 => AXIS_X,
+                1 => AXIS_Y,
+                _ => AXIS_Z,
+            }),
+            // Факел: на пол — как раньше; на стену — опора там, откуда пришёл луч, то есть
+            // против нормали.
+            DataKind::Attachment => match normal {
+                IVec3::Y => Some(ATTACH_FLOOR),
+                IVec3::NEG_Y => None,
+                IVec3::X => Some(ATTACH_NEG_X),
+                IVec3::NEG_X => Some(ATTACH_POS_X),
+                IVec3::Z => Some(ATTACH_NEG_Z),
+                IVec3::NEG_Z => Some(ATTACH_POS_Z),
+                _ => None,
+            },
+        }
+    }
+
+    /// Ось блока с осью в данных: 0 — x, 1 — y, 2 — z; байт вне таблицы — стоячий.
+    pub fn axis(self, data: u8) -> usize {
+        match data {
+            AXIS_X => 0,
+            AXIS_Z => 2,
+            _ => 1,
         }
     }
 

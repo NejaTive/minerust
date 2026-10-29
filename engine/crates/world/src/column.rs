@@ -39,6 +39,17 @@ impl Column {
         self.sections[sy].get(in_section)
     }
 
+    /// Байт данных блока по локальным координатам колонки; за пределами — panic.
+    pub fn get_data(&self, local: IVec3) -> u8 {
+        let (sy, in_section) = Self::split(local);
+        self.sections[sy].get_data(in_section)
+    }
+
+    /// Подменяет байты данных секции `sy` (0..8) целиком; см. [`Section::set_data`].
+    pub fn set_section_data(&mut self, sy: i32, data: Option<Box<[u8; SECTION_VOLUME]>>) {
+        self.sections[sy as usize].set_data(data);
+    }
+
     /// Блок по индексу `x + 16·z + 256·y` в колонке (y до 128): тот же порядок, что
     /// внутри секции, так что секция — это 4096 подряд идущих индексов. Для горячих
     /// циклов (свет), где индекс уже посчитан; за пределами колонки — panic.
@@ -46,10 +57,15 @@ impl Column {
         self.sections[index / SECTION_VOLUME].get_index(index % SECTION_VOLUME)
     }
 
-    /// Ставит блок по локальным координатам колонки; за пределами колонки — panic.
+    /// Ставит блок с нулевыми данными по локальным координатам колонки; за пределами — panic.
     pub fn set(&mut self, local: IVec3, block: Block) {
+        self.set_with_data(local, block, 0);
+    }
+
+    /// Ставит блок и байт данных; за пределами колонки — panic.
+    pub fn set_with_data(&mut self, local: IVec3, block: Block, data: u8) {
         let (sy, in_section) = Self::split(local);
-        self.sections[sy].set(in_section, block);
+        self.sections[sy].set_with_data(in_section, block, data);
     }
 
     /// Локальные координаты колонки → (номер секции, координаты в ней).

@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 use glam::IVec3;
 
 use crate::mesh::POSITION_UNITS;
-use world::block::{Facing, WATER_SURFACE};
+use world::block::{Facing, TORCH_WALL_RISE, TORCH_WALL_SHIFT, WATER_SURFACE};
 use world::tile::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW};
 
 pub(crate) struct Face {
@@ -114,7 +114,17 @@ pub const CROSS: u8 = 16;
 /// Четыре бока факела, порядок — боковых `FACES`.
 pub const TORCH_SIDE: u8 = 20;
 pub const TORCH_TOP: u8 = 24;
-pub const TEMPLATE_COUNT: usize = 25;
+/// Настенный факел: на каждую из четырёх сторон крепления пять шаблонов (четыре бока в
+/// порядке боковых `FACES` и верх), группы идут в порядке байта данных 1..=4
+/// (`ATTACH_POS_X`..`ATTACH_NEG_Z`): номер = `TORCH_WALL + 5 · (данные − 1) + кусок`.
+pub const TORCH_WALL: u8 = 25;
+pub const TORCH_WALL_PARTS: u8 = 5;
+/// Кора бревна, лежащего вдоль X: верх, низ, +Z, −Z (грани `FACES` 0, 1, 4, 5). UV
+/// повёрнута, так что волокна идут вдоль оси.
+pub const LOG_BARK_X: u8 = 45;
+/// То же для оси Z: верх, низ, +X, −X (грани `FACES` 0..=3).
+pub const LOG_BARK_Z: u8 = 49;
+pub const TEMPLATE_COUNT: usize = 53;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Corner {
@@ -198,6 +208,63 @@ fn torch_face(face: &Face) -> Template {
     }
 }
 
+/// Грань куба с UV, повёрнутой на целое число шагов по углам, чтобы вертикаль тайла
+/// (v) шла вдоль `axis` (0 — x, 2 — z). Поворот, а не отражение: рисунок не зеркалится.
+fn bark_face(face: &Face, axis: usize) -> Template {
+    let base = cube_face(face, POSITION_UNITS);
+    // Рёбра грани вдоль оси — пары углов, отличающиеся только по ней: вдоль такого ребра
+    // меняется v и не меняется u.
+    let along = |t: &Template| {
+        (0..4).all(|i| {
+            (0..4).all(|j| {
+                let (p, q) = (face.corners[i], face.corners[j]);
+                let edge = p[axis] != q[axis] && (0..3).all(|k| k == axis || p[k] == q[k]);
+                let (a, b) = (t.corners[i].uv, t.corners[j].uv);
+                !edge || (a[1] != b[1] && a[0] == b[0])
+            })
+        })
+    };
+    (0..4)
+        .map(|turn| {
+            let mut t = base;
+            for i in 0..4 {
+                t.corners[i].uv = CORNER_UVS[(i + turn) % 4];
+            }
+            t
+        })
+        .find(|t| along(t))
+        .expect("bark rotation")
+}
+
+/// Бока и верх факела, наклонённого от стены. `turns` — число поворотов на 90° вокруг
+/// центра клетки от базового положения: стена в −X, верх отклонён в +X.
+fn torch_wall(turns: u32) -> impl Iterator<Item = Template> {
+    let u = POSITION_UNITS;
+    let sides = &FACES[2..];
+    sides
+        .iter()
+        .map(torch_face)
+        .chain(std::iter::once(torch_face(&FACES[0])))
+        .map(move |mut t| {
+            for c in &mut t.corners {
+                let [x, y, z] = c.pos.map(i32::from);
+                // Столбик стоит по центру: сдвиг основания к стене и наклон по высоте.
+                let slant = TORCH_WALL_SHIFT as i32 * y / (TILE_SIZE as i32 - TORCH_TOP_ROW as i32);
+                let mut p = [
+                    x - TORCH_PIXELS.0 as i32 + slant,
+                    y + TORCH_WALL_RISE as i32,
+                    z,
+                ];
+                for _ in 0..turns {
+                    // (x, z) → (16 − z, x): поворот на 90°, обход углов сохраняется.
+                    p = [u - p[2], p[1], p[0]];
+                }
+                c.pos = p.map(|v| v as u8);
+            }
+            t
+        })
+}
+
 fn build() -> [Template; TEMPLATE_COUNT] {
     let mut out = Vec::with_capacity(TEMPLATE_COUNT);
     let sides = &FACES[2..];
@@ -230,6 +297,13 @@ fn build() -> [Template; TEMPLATE_COUNT] {
     }
     out.extend(sides.iter().map(torch_face));
     out.push(torch_face(&FACES[0]));
+    // Данные 1..=4: опора в +X, −X, +Z, −Z, то есть наклон в −X, +X, −Z, +Z. База
+    // наклонена в +X; повороты (x, z) → (−z, x) ведут +X в +Z, −X, −Z.
+    for turns in [2, 0, 3, 1] {
+        out.extend(torch_wall(turns));
+    }
+    out.extend([0, 1, 4, 5].map(|face| bark_face(&FACES[face], 0)));
+    out.extend(FACES[..4].iter().map(|face| bark_face(face, 2)));
     out.try_into().expect("template count")
 }
 

@@ -79,7 +79,12 @@ fn mesh_stages() {
 
                     let start = Instant::now();
                     around.fill(sy, &mut blocks, &mut lights);
-                    let data = mesh_cached(&blocks, &lights, options);
+                    let data = mesh_cached(
+                        &blocks,
+                        &lights,
+                        around.columns[4].unwrap().section(sy).data(),
+                        options,
+                    );
                     total += start.elapsed();
                     meshes.push(black_box(data));
                 }
