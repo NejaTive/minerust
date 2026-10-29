@@ -1,0 +1,230 @@
+use super::*;
+
+fn same_columns(a: &Column, b: &Column) -> bool {
+    (0..WORLD_HEIGHT).all(|y| {
+        (0..SECTION_SIZE).all(|z| {
+            (0..SECTION_SIZE).all(|x| {
+                let p = IVec3::new(x, y, z);
+                a.get(p) == b.get(p)
+            })
+        })
+    })
+}
+
+#[test]
+fn same_seed_same_world() {
+    let (a, b) = (Terrain::new(42), Terrain::new(42));
+    for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
+        assert_eq!(a.surface_height(x, z), b.surface_height(x, z));
+    }
+    for key in [ColumnPos::new(-3, 7), lake_key(&a)] {
+        assert!(same_columns(&a.generate(key), &b.generate(key)));
+    }
+}
+
+#[test]
+fn other_seed_other_world() {
+    let (a, b) = (Terrain::new(42), Terrain::new(43));
+    let differs =
+        (0..64).filter(|&i| a.surface_height(i * 7, i * 3) != b.surface_height(i * 7, i * 3));
+    assert!(differs.count() > 32);
+}
+
+#[test]
+fn surface_stays_in_range() {
+    let terrain = Terrain::new(1337);
+    let (mut min, mut max) = (i32::MAX, i32::MIN);
+    for z in (-2048..2048).step_by(8) {
+        for x in (-2048..2048).step_by(8) {
+            let h = terrain.surface_height(x, z);
+            assert!((1..WORLD_HEIGHT - 1).contains(&h), "{h} at {x}, {z}");
+            min = min.min(h);
+            max = max.max(h);
+        }
+    }
+    // Рельеф не плоский и держится около заданного коридора.
+    assert!(max - min > 30, "{min}..{max}");
+    assert!(min > 20 && max < 110, "{min}..{max}");
+}
+
+/// Первый столбец биома `biome` выше пляжей при обходе от (0, 0) по диагонали с шагом 8.
+fn find_biome(terrain: &Terrain, biome: Biome) -> (i32, i32) {
+    find_column(terrain, |x, z, w| {
+        w.dominant() == biome && terrain.surface(x, z, w) > *BEACH.end()
+    })
+    .unwrap_or_else(|| panic!("no {biome:?}"))
+}
+
+/// Первый столбец при обходе по диагонали с шагом 8, для которого `pred` истинен.
+fn find_column(
+    terrain: &Terrain,
+    pred: impl Fn(i32, i32, BiomeWeights) -> bool,
+) -> Option<(i32, i32)> {
+    (0..8192)
+        .map(|i| (i * 8, i * 3))
+        .find(|&(x, z)| pred(x, z, terrain.biome_weights(x, z)))
+}
+
+#[test]
+fn low_ground_is_under_water() {
+    let terrain = Terrain::new(1337);
+    let (x, z) = find_column(&terrain, |x, z, w| {
+        w.dominant() != Biome::Desert && terrain.surface(x, z, w) < *BEACH.start()
+    })
+    .expect("no deep water");
+    // Проверка воды до WATER_LEVEL и воздуха выше — внутри ground_layers.
+    let (top, layers) = ground_layers(&terrain, x, z);
+    assert!(top < WATER_LEVEL);
+    assert_eq!(layers[0], Block::Dirt, "no grass under water");
+    assert!(layers.iter().all(|&b| b != Block::Water));
+}
+
+#[test]
+fn water_fills_column_up_to_level() {
+    let terrain = Terrain::new(1);
+    let (x, z) = find_column(&terrain, |x, z, w| terrain.surface(x, z, w) == 55)
+        .expect("no column with surface 55");
+    let column = terrain.generate(ColumnPos::new(x.div_euclid(16), z.div_euclid(16)));
+    let at = |y| column.get(IVec3::new(x.rem_euclid(16), y, z.rem_euclid(16)));
+    assert!(at(55).is_solid());
+    assert!((56..=WATER_LEVEL).all(|y| at(y) == Block::Water));
+    assert!((WATER_LEVEL + 1..WORLD_HEIGHT).all(|y| at(y) == Block::Air));
+}
+
+#[test]
+fn beaches_are_sand() {
+    let terrain = Terrain::new(1337);
+    for surface in [WATER_LEVEL - 1, WATER_LEVEL + 1] {
+        let (x, z) = find_column(&terrain, |x, z, w| {
+            w.dominant() != Biome::Desert && terrain.surface(x, z, w) == surface
+        })
+        .unwrap_or_else(|| panic!("no beach at {surface}"));
+        let (_, layers) = ground_layers(&terrain, x, z);
+        let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
+        assert_eq!(sand, BEACH_SAND_DEPTH as usize, "surface {surface}");
+        assert_eq!(layers[sand], Block::Dirt);
+    }
+}
+
+/// Блоки земли столбца (x, z) сверху вниз до камня, без деревьев. Над землёй
+/// проверяет воду до `WATER_LEVEL` и воздух выше.
+fn ground_layers(terrain: &Terrain, x: i32, z: i32) -> (i32, Vec<Block>) {
+    let key = ColumnPos::new(x.div_euclid(16), z.div_euclid(16));
+    let column = terrain.generate_ground(key);
+    let local = |y| IVec3::new(x.rem_euclid(16), y, z.rem_euclid(16));
+    let top = terrain.surface_height(x, z);
+    for y in top + 1..WORLD_HEIGHT {
+        let expected = if y <= WATER_LEVEL {
+            Block::Water
+        } else {
+            Block::Air
+        };
+        assert_eq!(column.get(local(y)), expected, "y {y}");
+    }
+    (top, (0..=top).rev().map(|y| column.get(local(y))).collect())
+}
+
+#[test]
+fn grass_dirt_stone_outside_desert() {
+    let terrain = Terrain::new(1337);
+    for biome in [Biome::Plains, Biome::Forest] {
+        let (x, z) = find_biome(&terrain, biome);
+        let (_, layers) = ground_layers(&terrain, x, z);
+        assert_eq!(layers[0], Block::Grass);
+        assert!(
+            layers[1..=DIRT_DEPTH as usize]
+                .iter()
+                .all(|&b| b == Block::Dirt)
+        );
+        assert!(
+            layers[DIRT_DEPTH as usize + 1..]
+                .iter()
+                .all(|&b| b == Block::Stone)
+        );
+    }
+}
+
+#[test]
+fn sand_over_stone_in_desert() {
+    let terrain = Terrain::new(1337);
+    let (x, z) = find_biome(&terrain, Biome::Desert);
+    let (_, layers) = ground_layers(&terrain, x, z);
+    let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
+    assert!((3..=4).contains(&sand), "{sand} sand blocks");
+    assert!(layers[sand..].iter().all(|&b| b == Block::Stone));
+}
+
+#[test]
+fn biomes_are_deterministic() {
+    let (a, b) = (Terrain::new(42), Terrain::new(42));
+    for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
+        assert_eq!(a.biome_weights(x, z), b.biome_weights(x, z));
+    }
+}
+
+#[test]
+fn weights_sum_to_one() {
+    let terrain = Terrain::new(7);
+    for i in 0..1000 {
+        let w = terrain.biome_weights(i * 13, i * -7);
+        assert!(
+            [w.plains, w.desert, w.forest]
+                .iter()
+                .all(|&v| (0.0..=1.0).contains(&v))
+        );
+        assert!((w.plains + w.desert + w.forest - 1.0).abs() < 1e-5, "{w:?}");
+    }
+}
+
+#[test]
+fn all_biomes_within_2048_blocks() {
+    for seed in [1337, 42, 7] {
+        let terrain = Terrain::new(seed);
+        let mut counts = [0; 3];
+        for z in (0..2048).step_by(16) {
+            for x in (0..2048).step_by(16) {
+                counts[terrain.biome_at(x, z) as usize] += 1;
+            }
+        }
+        // Каждый биом — не меньше 5% площади.
+        let total: i32 = counts.iter().sum();
+        assert!(
+            counts.iter().all(|&c| c * 20 > total),
+            "seed {seed}: {counts:?}"
+        );
+    }
+}
+
+#[test]
+fn biome_borders_have_no_cliffs() {
+    // Перепад высоты между соседними столбцами: в переходной зоне (смешанные веса)
+    // и внутри леса — самого холмистого биома.
+    let terrain = Terrain::new(1337);
+    let pure = |w: BiomeWeights| [w.plains, w.desert, w.forest].contains(&1.0);
+    let (mut border, mut forest, mut border_pairs) = (0, 0, 0);
+    for row in (-2048..2048).step_by(32) {
+        for along_x in [true, false] {
+            let mut prev: Option<(i32, BiomeWeights)> = None;
+            for i in -2048..2048 {
+                let (x, z) = if along_x { (i, row) } else { (row, i) };
+                let w = terrain.biome_weights(x, z);
+                let h = terrain.surface_height(x, z);
+                if let Some((ph, pw)) = prev {
+                    let step = (h - ph).abs();
+                    if !pure(w) || !pure(pw) {
+                        border = border.max(step);
+                        border_pairs += 1;
+                    } else if w.forest == 1.0 && pw.forest == 1.0 {
+                        forest = forest.max(step);
+                    }
+                }
+                prev = Some((h, w));
+            }
+        }
+    }
+    assert!(border_pairs > 1000, "{border_pairs} border pairs");
+    assert!(
+        border <= forest,
+        "border step {border}, forest step {forest}"
+    );
+}

@@ -1,0 +1,173 @@
+import type { Engine, WorldStats } from '@engine'
+import { BENCH_POINTS, BENCH_SEED, BENCH_WORKERS } from './config'
+import { FrameRecorder, frameSummary, round } from './recorder'
+
+/** Сколько секунд стоять на точке после полной загрузки. */
+const STAND_MS = 10_000
+/** Если мир не догрузился за это время, замер прерывается с ошибкой. */
+const LOAD_TIMEOUT_MS = 180_000
+/** Длительность полёта по прямой, мс. */
+const FLIGHT_MS = 20_000
+/** Пауза между нажатиями W двойного тапа: окно игры 0.3 с по времени кадров. */
+const TAP_GAP_MS = 80
+
+function geometry(s: WorldStats) {
+  return {
+    solidQuads: s.solidQuads,
+    cutoutQuads: s.cutoutQuads,
+    waterQuads: s.waterQuads,
+    drawCalls: s.drawCalls,
+    drawnSections: s.drawnSections,
+    meshedSections: s.meshedSections,
+    gpuMiB: round(s.gpuKib / 1024),
+    gpuUsedMiB: round(s.gpuUsedKib / 1024),
+  }
+}
+
+/** Мкс на задание мешера: в воркере, кэш и приём в основном потоке (нули без воркеров). */
+function workerUs(s: WorldStats) {
+  return { worker: s.workerMeshUs, encode: s.encodeUs, apply: s.applyUs }
+}
+
+export interface BenchResult {
+  done: boolean
+  error?: string
+  /** Версия и коммит сборки: замеры разных версий сравниваются по ним. */
+  version: string
+  build: string
+  seed: number
+  /** Меши строят воркеры; иначе основной поток (`?workers=0`). */
+  workers: boolean
+  renderDistance: number
+  ambientOcclusion: boolean
+  canvas: [number, number]
+  points: object[]
+  flight?: object
+}
+
+declare global {
+  interface Window {
+    __benchResult?: BenchResult
+    /** Движок режима `?bench`: для проверки из консоли (время суток, камера). */
+    __benchEngine?: Engine
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Полёт с бегом (16 блоков/с) по прямой через незагруженный мир: подгрузка идёт на ходу,
+ * кадры пишутся всё время. Старт — после загрузки стартового круга, чтобы замер не
+ * смешивался с ней.
+ */
+async function runFlight(current: Engine, recorder: FrameRecorder) {
+  const start = BENCH_POINTS[0].camera
+  current.set_camera_state(Float32Array.from(start))
+  const started = performance.now()
+  while (current.load_ms() === 0) {
+    if (performance.now() - started > LOAD_TIMEOUT_MS) throw new Error('flight: load timeout')
+    await sleep(50)
+  }
+  current.stats()
+  recorder.reset()
+  // Двойной W — бег; клавиша остаётся нажатой до конца полёта.
+  current.set_key('KeyW', true)
+  await sleep(TAP_GAP_MS)
+  current.set_key('KeyW', false)
+  await sleep(TAP_GAP_MS)
+  current.set_key('KeyW', true)
+  await sleep(FLIGHT_MS)
+  current.set_key('KeyW', false)
+  const stats = current.stats()
+  return {
+    name: 'flight',
+    frame: frameSummary(recorder),
+    cpuUs: { stream: stats.streamUs, build: stats.buildUs, submit: stats.submitUs },
+    gpuFrameUs: stats.gpuTimer ? stats.gpuFrameUs : null,
+    perColumnUs: {
+      generate: stats.generateUs,
+      light: stats.lightUs,
+      mesh: stats.meshUs,
+      ...workerUs(stats),
+    },
+    meshJobs: stats.meshJobs,
+    columns: stats.columns,
+    meshedColumns: stats.meshedColumns,
+  }
+}
+
+/**
+ * Две точки подряд: переход → ждём полной загрузки → стоим `STAND_MS` → сводка;
+ * затем полёт ([`runFlight`]).
+ * Сводка пишется в `window.__benchResult` по мере готовности (`done` — после последней точки)
+ * и целиком в `console.log`.
+ */
+export async function runBench(
+  engine: () => Engine,
+  recorder: FrameRecorder,
+  canvas: HTMLCanvasElement,
+  settings: { renderDistance: number; ambientOcclusion: boolean },
+) {
+  const first = engine()
+  const result: BenchResult = {
+    done: false,
+    version: __APP_COMMIT__ ? `${__APP_VERSION__}+${__APP_COMMIT__}` : __APP_VERSION__,
+    build: (first.constructor as typeof Engine).build_profile(),
+    seed: BENCH_SEED,
+    workers: BENCH_WORKERS,
+    renderDistance: settings.renderDistance,
+    ambientOcclusion: settings.ambientOcclusion,
+    canvas: [canvas.width, canvas.height],
+    points: [],
+  }
+  window.__benchResult = result
+  try {
+    for (const point of BENCH_POINTS) {
+      const current = engine()
+      current.set_camera_state(Float32Array.from(point.camera))
+      current.stats() // сбрасывает средние: дальше они относятся только к этой загрузке
+      recorder.reset()
+      const started = performance.now()
+      while (current.load_ms() === 0) {
+        if (performance.now() - started > LOAD_TIMEOUT_MS)
+          throw new Error(`${point.name}: load timeout`)
+        await sleep(50)
+      }
+      const loaded = current.stats()
+      const loading = frameSummary(recorder)
+      recorder.reset()
+      await sleep(STAND_MS)
+      const steady = current.stats()
+      result.points.push({
+        name: point.name,
+        loadMs: loaded.loadMs,
+        loading: {
+          frame: loading,
+          cpuUs: { stream: loaded.streamUs, build: loaded.buildUs, submit: loaded.submitUs },
+          gpuFrameUs: loaded.gpuTimer ? loaded.gpuFrameUs : null,
+        },
+        steady: {
+          frame: frameSummary(recorder),
+          cpuUs: { stream: steady.streamUs, build: steady.buildUs, submit: steady.submitUs },
+          // null — адаптер без timestamp-query; 0 при gpuTimer — замеров ещё нет.
+          gpuFrameUs: steady.gpuTimer ? steady.gpuFrameUs : null,
+          ...geometry(steady),
+        },
+        perColumnUs: {
+          generate: loaded.generateUs,
+          light: loaded.lightUs,
+          mesh: loaded.meshUs,
+          ...workerUs(loaded),
+        },
+        columns: loaded.columns,
+        meshedColumns: loaded.meshedColumns,
+        lightKib: loaded.lightKib,
+      })
+    }
+    result.flight = await runFlight(engine(), recorder)
+  } catch (e) {
+    result.error = String(e)
+  }
+  result.done = true
+  console.log('bench', result)
+}

@@ -1,0 +1,115 @@
+<script setup lang="ts">
+import type { Settings, SettingsLimits } from '../../settings/settings'
+
+defineProps<{ settings: Settings; limits: SettingsLimits }>()
+
+const emit = defineEmits<{ 'update:settings': [patch: Partial<Settings>]; back: [] }>()
+
+const patch = (value: Partial<Settings>) => emit('update:settings', value)
+
+function numberOf(e: Event): number {
+  return (e.target as HTMLInputElement).valueAsNumber
+}
+
+function checkedOf(e: Event): boolean {
+  return (e.target as HTMLInputElement).checked
+}
+</script>
+
+<template>
+  <div class="rows">
+    <label class="row">
+      <span class="name">Дальность прорисовки <kbd>[</kbd><kbd>]</kbd></span>
+      <span class="value">{{ settings.renderDistance }}</span>
+      <input
+        type="range"
+        :min="limits.renderDistanceMin"
+        :max="limits.renderDistanceMax"
+        step="1"
+        :value="settings.renderDistance"
+        @input="patch({ renderDistance: numberOf($event) })"
+      />
+    </label>
+
+    <label class="row toggle">
+      <span class="name">Затенение углов</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.ambientOcclusion"
+        @change="patch({ ambientOcclusion: checkedOf($event) })"
+      />
+    </label>
+
+    <label class="row">
+      <span class="name">Чувствительность мыши</span>
+      <span class="value">×{{ settings.mouseSensitivity.toFixed(2) }}</span>
+      <input
+        type="range"
+        :min="limits.mouseSensitivityMin"
+        :max="limits.mouseSensitivityMax"
+        step="0.05"
+        :value="settings.mouseSensitivity"
+        @input="patch({ mouseSensitivity: numberOf($event) })"
+      />
+    </label>
+
+    <label class="row">
+      <span class="name">Угол обзора</span>
+      <span class="value">{{ settings.fov }}°</span>
+      <input
+        type="range"
+        :min="limits.fovMin"
+        :max="limits.fovMax"
+        step="1"
+        :value="settings.fov"
+        @input="patch({ fov: numberOf($event) })"
+      />
+    </label>
+
+    <label class="row toggle">
+      <span class="name">Отладочная информация</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.showDebug"
+        @change="patch({ showDebug: checkedOf($event) })"
+      />
+    </label>
+  </div>
+  <button @click="emit('back')">Назад</button>
+</template>
+
+<style scoped>
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: center;
+}
+.row input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 0;
+  accent-color: #3f9a64;
+}
+.toggle input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: #3f9a64;
+}
+.value {
+  font-variant-numeric: tabular-nums;
+  color: #b8c0cc;
+}
+.name kbd {
+  margin-left: 4px;
+  color: #b8c0cc;
+}
+</style>

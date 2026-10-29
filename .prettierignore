@@ -1,0 +1,5 @@
+dist
+engine
+node_modules
+package-lock.json
+CHANGELOG.md

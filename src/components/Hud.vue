@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { API_LABELS, BLOCK_LABELS, type BlockName } from '../settings'
-import type { ApiInfo, PlayerInfo, TimeInfo, WorldStats } from './GameCanvas.vue'
+import type { WorldStats } from '@engine'
+import { blockLabel } from '../engine/info'
+import type { PlayerInfo, TimeInfo } from '../engine/types'
 
 defineProps<{
   fps: number
-  api?: ApiInfo
   stats?: WorldStats
   time?: TimeInfo
   /** Блок в выбранном слоте; `null` — слот пуст. */
-  block: BlockName | null
+  block: string | null
   player?: PlayerInfo
   notice?: string
   showDebug: boolean
@@ -32,9 +32,7 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
 <template>
   <div class="hud">
     <div>MineRust · {{ fps }} FPS</div>
-    <div v-if="showDebug && api">
-      {{ API_LABELS[api.backend] }}<template v-if="api.fallback"> (WebGPU недоступен)</template>
-    </div>
+    <div v-if="showDebug">WebGPU</div>
     <div v-if="showDebug && stats">
       Колонки {{ stats.columns }} · с мешем {{ stats.meshedColumns }} · в очереди
       {{ stats.queued }}
@@ -46,25 +44,39 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
       Колонка: генерация {{ ms(stats.generateUs) }} мс · меш {{ ms(stats.meshUs) }} мс
     </div>
     <div v-if="showDebug && stats">
+      Меш в воркерах: в полёте {{ stats.meshJobs }} · в воркере {{ ms(stats.workerMeshUs) }} · кэш
+      {{ ms(stats.encodeUs) }} · приём {{ ms(stats.applyUs) }} мс
+    </div>
+    <div v-if="showDebug && stats">
       Кадр CPU: подгрузка {{ ms(stats.streamUs) }} · сборка {{ ms(stats.buildUs) }} · отправка
       {{ ms(stats.submitUs) }} мс
     </div>
     <div v-if="showDebug && stats">
-      Вершин {{ k(stats.solidVertices + stats.waterVertices) }} (вода
-      {{ k(stats.waterVertices) }}) · индексов {{ k(stats.solidIndices + stats.waterIndices) }} ·
-      draw {{ stats.drawCalls }} · GPU {{ (stats.gpuKib / 1024).toFixed(1) }} МиБ
+      Кадр GPU:
+      <template v-if="!stats.gpuTimer">нет timestamp-query</template
+      ><template v-else-if="stats.gpuFrameUs">{{ ms(stats.gpuFrameUs) }} мс</template
+      ><template v-else>нет данных</template>
+    </div>
+    <div v-if="showDebug && stats">
+      Квадов {{ k(stats.solidQuads + stats.cutoutQuads + stats.waterQuads) }} (вырезано
+      {{ k(stats.cutoutQuads) }}, вода {{ k(stats.waterQuads) }}) · draw {{ stats.drawCalls }} · GPU
+      {{ (stats.gpuKib / 1024).toFixed(1) }} МиБ (занято {{ (stats.gpuUsedKib / 1024).toFixed(1) }})
     </div>
     <div v-if="showDebug && stats">
       Колонка: свет {{ ms(stats.lightUs) }} мс · загрузка мира
       <template v-if="stats.loadMs">{{ stats.loadMs }} мс</template><template v-else>идёт</template>
     </div>
-    <div v-if="showDebug && time">Время: {{ clock(time.time) }} · {{ PHASES[time.phase] ?? time.phase }}</div>
+    <div v-if="showDebug && time">
+      Время: {{ clock(time.time) }} · {{ PHASES[time.phase] ?? time.phase }}
+    </div>
     <div v-if="player">
       <template v-if="player.mode === 'flying'">Режим: полёт</template>
       <template v-else-if="player.mode === 'noclip'">Режим: сквозь блоки</template>
-      <template v-else>Режим: ходьба<template v-if="player.onGround"> · на земле</template></template>
+      <template v-else
+        >Режим: ходьба<template v-if="player.onGround"> · на земле</template></template
+      >
     </div>
-    <div>Блок: {{ block ? BLOCK_LABELS[block] : 'пусто' }}</div>
+    <div>Блок: {{ block ? blockLabel(block) : 'пусто' }}</div>
     <div v-if="notice" class="notice">{{ notice }}</div>
   </div>
 </template>

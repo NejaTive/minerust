@@ -1,77 +1,33 @@
 <script setup lang="ts">
-import { computed, reactive, ref, useTemplateRef, watch } from 'vue'
-import GameCanvas, {
-  type ApiInfo,
-  type PlayerInfo,
-  type TimeInfo,
-  type WorldStats,
-} from './components/GameCanvas.vue'
+import { ref, useTemplateRef, watch } from 'vue'
+import GameCanvas from './components/GameCanvas.vue'
 import Hotbar from './components/Hotbar.vue'
 import Hud from './components/Hud.vue'
-import PauseMenu, { type MenuScreen } from './components/PauseMenu.vue'
-import { BENCH, BENCH_DEBUG, BENCH_RENDER_DISTANCE } from './bench'
-import {
-  HOTBAR,
-  type Settings,
-  loadHotbarSlot,
-  loadSettings,
-  saveHotbarSlot,
-  saveSettings,
-} from './settings'
+import PauseMenu from './components/PauseMenu.vue'
+import type { MenuScreen } from './components/menu/screens'
+import WebGpuRequired from './components/WebGpuRequired.vue'
+import { BENCH } from './bench/config'
+import { useGameState } from './engine/state'
+import { useSettings } from './settings/useSettings'
 
-const NOTICE_MS = 2500
-
-const settings = reactive<Settings>(loadSettings())
-// Режим замера: фиксированные настройки, поверх сохранённых, и в localStorage они не попадают.
-if (BENCH) {
-  Object.assign(settings, {
-    renderDistance: BENCH_RENDER_DISTANCE,
-    ambientOcclusion: true,
-    showDebug: BENCH_DEBUG,
-  })
-}
-const fps = ref(0)
-const api = ref<ApiInfo>()
-const stats = ref<WorldStats>()
-const time = ref<TimeInfo>()
-const notice = ref<string>()
-const slot = ref(loadHotbarSlot())
-const block = computed(() => HOTBAR[slot.value] ?? null)
-const player = ref<PlayerInfo>()
+const state = useGameState()
+const { settings, limits, slot, block, update } = useSettings()
 
 const game = useTemplateRef('game')
 // Меню видно, пока курсор не захвачен: это и есть пауза.
-const locked = ref(false)
-const busy = ref(true)
 const started = ref(false)
 const lockFailed = ref(false)
 const screen = ref<MenuScreen>('main')
 
-let noticeTimer = 0
-
-function showNotice(text: string) {
-  notice.value = text
-  clearTimeout(noticeTimer)
-  noticeTimer = window.setTimeout(() => (notice.value = undefined), NOTICE_MS)
-}
-
-watch(settings, (value) => {
-  if (!BENCH) saveSettings(value)
-})
-watch(slot, saveHotbarSlot)
-
-function updateSettings(patch: Partial<Settings>) {
-  Object.assign(settings, patch)
-}
-
-function onLock(value: boolean) {
-  locked.value = value
-  if (value) {
+watch(
+  () => state.locked,
+  (locked) => {
+    if (!locked) return
     started.value = true
     lockFailed.value = false
     screen.value = 'main'
-  }
-}
+  },
+)
 
 async function play() {
   lockFailed.value = !(await game.value?.requestLock())
@@ -90,43 +46,29 @@ async function newWorld() {
 </script>
 
 <template>
-  <GameCanvas
-    ref="game"
-    v-model:slot="slot"
-    :settings="settings"
-    @fps="fps = $event"
-    @stats="stats = $event"
-    @time="time = $event"
-    @api="api = $event"
-    @notice="showNotice"
-    @render-distance="settings.renderDistance = $event"
-    @player="player = $event"
-    @lock="onLock"
-    @busy="busy = $event"
-    @ask-new-world="askNewWorld"
-  />
+  <GameCanvas ref="game" @ask-new-world="askNewWorld" />
+  <WebGpuRequired v-if="state.noWebGpu !== undefined" :reason="state.noWebGpu" />
   <Hud
-    :fps="fps"
-    :api="api"
-    :stats="stats"
-    :time="time"
+    :fps="state.fps"
+    :stats="state.stats"
+    :time="state.time"
     :block="block"
-    :player="player"
-    :notice="notice"
+    :player="state.player"
+    :notice="state.notice"
     :show-debug="settings.showDebug"
   />
-  <Hotbar v-if="locked && api" :slot-index="slot" />
+  <Hotbar v-if="state.locked && state.ready" :slot-index="slot" />
   <PauseMenu
-    v-if="!locked && !BENCH"
+    v-if="!state.locked && !BENCH"
     v-model:screen="screen"
     :settings="settings"
-    :api="api"
+    :limits="limits"
     :started="started"
-    :busy="busy"
+    :busy="state.busy"
     :lock-failed="lockFailed"
-    @update:settings="updateSettings"
+    :newer-save="state.newerSave"
+    @update:settings="update"
     @play="play"
-    @set-api="game?.switchApi($event)"
     @new-world="newWorld"
   />
 </template>
