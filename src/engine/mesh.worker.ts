@@ -1,7 +1,6 @@
 /// <reference lib="webworker" />
 import init, { init_worker, run_job } from '@engine-worker'
 
-// Воркер грузит свой маленький wasm (`engine/crates/worker`), а не движок: без wgpu и мира.
 const ready = init().then(() => {
   init_worker()
   self.postMessage({ type: 'ready' })

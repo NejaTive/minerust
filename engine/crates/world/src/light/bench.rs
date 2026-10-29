@@ -1,9 +1,6 @@
 use super::*;
 use crate::terrain::Terrain;
 
-/// Среднее время `add_column` на квадрате 12×12 (колонки добавляются по строкам,
-/// как при подгрузке: соседи частью уже есть) и `block_changed`; запуск:
-/// `cargo test --release light_timing -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn light_timing() {
@@ -38,10 +35,6 @@ fn light_timing() {
     );
 }
 
-/// Худший частый случай правки: пробить кровлю тёмного зала (свет заливает зал)
-/// и заложить обратно (свет снимается). Зал найден для сида 838037976: потолок
-/// над (142, −70) — y 61..=64, над ним небо. Запуск:
-/// `cargo test --release cave_edit_timing -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn cave_edit_timing() {

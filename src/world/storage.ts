@@ -1,21 +1,13 @@
-// Сохранение мира в IndexedDB: метаданные мира и байты изменённых колонок
-// (`Engine.export_column`). Без зависимостей: IndexedDB обёрнут в промисы вручную.
-
 const DB_NAME = 'minerust'
-// Версия схемы базы (какие хранилища есть). Формат самих данных — `WorldMeta.version`;
-// при его смене схема не меняется, сохранение просто очищается.
 const DB_VERSION = 1
 const META = 'meta'
 const COLUMNS = 'columns'
 const WORLD_KEY = 'world'
 
 export interface WorldMeta {
-  /** `Engine.format_version()` на момент записи. */
   version: number
   seed: number
-  /** `Engine.camera_state()`: глаза x, y, z, yaw, pitch, режим. */
   player: number[]
-  /** `Engine.time_of_day()`, 0..1; в старых сохранениях нет — начинается утро. */
   time?: number
 }
 
@@ -31,9 +23,7 @@ export interface SavedWorld {
 }
 
 export interface WorldStorage {
-  /** `null` — сохранения нет. */
   load(): Promise<SavedWorld | null>
-  /** Пишет метаданные и колонки одной транзакцией: при сбое не останется половины. */
   save(meta: WorldMeta, columns: SavedColumn[]): Promise<void>
   clear(): Promise<void>
 }
@@ -53,7 +43,6 @@ function completion(tx: IDBTransaction): Promise<void> {
   })
 }
 
-/** `null`, если IndexedDB недоступен: приватный режим, запрет в настройках и т. п. */
 export async function openStorage(): Promise<WorldStorage | null> {
   let db: IDBDatabase
   try {
@@ -80,9 +69,6 @@ export async function openStorage(): Promise<WorldStorage | null> {
       ])
       return meta ? { meta, columns } : null
     },
-    // Транзакция создаётся синхронно, до первого await: так запись из pagehide успевает
-    // начаться, пока страница жива. Пишущие транзакции с общими хранилищами IndexedDB
-    // выполняет строго по очереди создания, поэтому сохранения не накладываются.
     save(meta, columns) {
       const tx = db.transaction([META, COLUMNS], 'readwrite')
       tx.objectStore(META).put(meta, WORLD_KEY)

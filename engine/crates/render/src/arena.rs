@@ -2,9 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use wgpu::util::DeviceExt;
 
-/// Аллокатор диапазонов в байтах без GPU: свободные диапазоны хранятся по смещению (слияние
-/// соседей при освобождении) и по размеру (best fit за O(log n)). Buddy не годится: размеры
-/// мешей секций различаются на порядки, округление до степени двойки съело бы запас.
 pub(crate) struct RangeAllocator {
     capacity: u64,
     used: u64,
@@ -14,7 +11,6 @@ pub(crate) struct RangeAllocator {
 }
 
 impl RangeAllocator {
-    /// `align` — степень двойки; смещения и размеры диапазонов кратны ей.
     pub(crate) fn new(capacity: u64, align: u64) -> Self {
         debug_assert!(align.is_power_of_two() && capacity.is_multiple_of(align));
         let mut allocator = RangeAllocator {
@@ -36,24 +32,20 @@ impl RangeAllocator {
         self.capacity
     }
 
-    /// Занято байт (с округлением диапазонов до `align`).
     pub(crate) fn used(&self) -> u64 {
         self.used
     }
 
-    /// Свободных диапазонов; много — значит арена фрагментирована.
     #[cfg(test)]
     pub(crate) fn free_range_count(&self) -> usize {
         self.by_offset.len()
     }
 
-    /// Наибольший свободный диапазон, байт.
     #[cfg(test)]
     pub(crate) fn largest_free(&self) -> u64 {
         self.by_size.last().map_or(0, |&(size, _)| size)
     }
 
-    /// Смещение диапазона не меньше `size` байт или `None`, если подходящего нет.
     pub(crate) fn alloc(&mut self, size: u64) -> Option<u64> {
         let size = self.round_up(size.max(1));
         let &(free_size, offset) = self.by_size.range((size, 0)..).next()?;
@@ -65,7 +57,6 @@ impl RangeAllocator {
         Some(offset)
     }
 
-    /// Возвращает диапазон, выданный `alloc(size)` по `offset`.
     pub(crate) fn free(&mut self, offset: u64, size: u64) {
         let size = self.round_up(size.max(1));
         debug_assert!(offset + size <= self.capacity);
@@ -85,7 +76,6 @@ impl RangeAllocator {
         self.insert_free(start, len);
     }
 
-    /// Увеличивает ёмкость до `new_capacity`; новый хвост сливается со свободным концом.
     pub(crate) fn grow(&mut self, new_capacity: u64) {
         debug_assert!(new_capacity >= self.capacity && new_capacity.is_multiple_of(self.align));
         let old = self.capacity;
@@ -115,9 +105,6 @@ impl RangeAllocator {
     }
 }
 
-/// Новая ёмкость при росте: +25% (но не меньше `needed`), не выше `max`. Удвоение
-/// оставляло арену на 2× больше занятого после перелётов, а она не сжимается.
-/// `None` — предел достигнут, и `needed` не помещается.
 pub(crate) fn grown_capacity(current: u64, needed: u64, max: u64, align: u64) -> Option<u64> {
     let max = max - max % align;
     let mut capacity = current.max(align);
@@ -128,9 +115,6 @@ pub(crate) fn grown_capacity(current: u64, needed: u64, max: u64, align: u64) ->
     (capacity >= needed && capacity > current).then_some(capacity)
 }
 
-/// Буфер на `capacity` байт с содержимым `old` в начале: рост арены и буфера углов.
-/// Копирование сразу уходит в очередь: записи `write_buffer` после него видят новый буфер,
-/// а кадр, записанный до роста, ссылается на старый, который живёт до конца его выполнения.
 pub(crate) fn grow_buffer(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -152,29 +136,17 @@ pub(crate) fn grow_buffer(
     buffer
 }
 
-/// Один storage-буфер записей квадов на все меши секций: диапазоны выдаёт
-/// [`RangeAllocator`]. Вершинный шейдер читает его как `array<u32>` (запись квада — три
-/// слова, [`mesh::mesh::Quad`]); `array<vec3<u32>>` дал бы шаг 16 байт вместо 12.
 pub(crate) struct QuadArena {
     buffer: wgpu::Buffer,
-    /// Таблица шаблонов квадов ([`mesh::templates::table_bytes`]): живёт столько же, сколько арена.
     table: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     allocator: RangeAllocator,
-    /// Предел размера: шейдер видит буфер целиком, так что действует
-    /// `max_storage_buffer_binding_size` (128 МиБ по умолчанию), а не `max_buffer_size`.
     max_size: u64,
 }
 
-/// Выравнивание диапазонов, байт: слово `u32`. Начало диапазона для шейдера — номер
-/// слова, поэтому кратность записи (12 байт) не нужна, но смещение обязано делиться на 4.
 pub(crate) const WORD: u64 = 4;
 
-/// Начальный размер арены, 16 МиБ. Лес после 20b — около 12 МиБ записей квадов
-/// (дальность 12; 31.7 МиБ при 8-байтных вершинах), так что обычная игра обходится без
-/// роста: он дорогой (копия всего буфера), а +25% от 16 МиБ оставляет запас на
-/// дальность 16 без лишних перевыделений.
 const INITIAL_SIZE: u64 = 16 << 20;
 
 impl QuadArena {
@@ -262,7 +234,6 @@ impl QuadArena {
         &self.bind_group_layout
     }
 
-    /// Группа привязки буфера; после роста арены — новая, её надо ставить заново.
     pub(crate) fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
     }
@@ -275,8 +246,6 @@ impl QuadArena {
         self.allocator.used()
     }
 
-    /// Записывает `bytes` (записи квадов) и возвращает смещение. Нет места — арена растёт
-    /// на 25%; на пределе буфера возвращает ошибку.
     pub(crate) fn write(
         &mut self,
         device: &wgpu::Device,
@@ -287,8 +256,6 @@ impl QuadArena {
         let offset = match self.allocator.alloc(size) {
             Some(offset) => offset,
             None => {
-                // Свободного места в сумме может хватать, но не одним куском; растём
-                // на 25% и не меньше чем на весь меш, а не склеиваем дыры.
                 let needed = self.allocator.capacity() + size;
                 let capacity =
                     grown_capacity(self.allocator.capacity(), needed, self.max_size, WORD)

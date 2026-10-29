@@ -1,6 +1,5 @@
 use super::*;
 
-/// Времена срабатываний при вызове `fire` с шагом `dt` от `from` до `to`.
 fn fires(repeat: &mut Repeat, from: f32, to: f32, dt: f32) -> Vec<f32> {
     // Время кадра — от номера, а не суммой: сумма f32 копит ошибку.
     (0..)
@@ -25,7 +24,6 @@ fn fires_at_once_then_every_interval() {
 
 #[test]
 fn keeps_pace_at_low_frame_rate() {
-    // 60 Гц: интервал не кратен кадру, но за 2 с должно быть ровно 1 + 8 срабатываний.
     let mut repeat = Repeat::new(0.25);
     repeat.set(true);
     assert_eq!(fires(&mut repeat, 0.0, 2.0 + 1e-3, 1.0 / 60.0).len(), 9);

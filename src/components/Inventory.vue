@@ -8,7 +8,6 @@ const { slots, slot, putInSlot, swapSlots, clearSlot } = useSettings()
 
 const root = useTemplateRef<HTMLElement>('root')
 
-/** Размещаемые блоки из движка; воздух и прочее неразмещаемое — вне палитры. */
 const palette = computed(() => engineInfo().blocks.filter((b) => b.placeable))
 
 const paint = () => paintBlockIconsIn(root.value)
@@ -44,7 +43,6 @@ function onHotbarDragStart(e: DragEvent, index: number) {
 function onHotbarDragOver(e: DragEvent) {
   e.preventDefault()
   if (!e.dataTransfer) return
-  // getData в dragover недоступен; effectAllowed выставили в dragstart.
   e.dataTransfer.dropEffect = e.dataTransfer.effectAllowed === 'copy' ? 'copy' : 'move'
 }
 

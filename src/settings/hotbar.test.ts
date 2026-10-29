@@ -18,7 +18,6 @@ import { memoryStore } from './store'
 const known = new Set(blocks.map((b) => b.name))
 const placeable = new Set(blocks.filter((b) => b.placeable).map((b) => b.name))
 
-/** Непустое содержимое только для тестов операций; умолчание игры — пустые слоты. */
 const SAMPLE: (string | null)[] = [
   'grass',
   'dirt',

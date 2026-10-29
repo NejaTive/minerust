@@ -5,15 +5,10 @@ use crate::terrain::{Terrain, lake_key};
 use crate::trees::tree_at;
 
 impl Caves {
-    /// Вырезать ли блок по мировым координатам, без учёта ограничений (дно, вода,
-    /// входы) и ослабления у поверхности — как на большой глубине.
     pub fn is_cave(&self, pos: IVec3) -> bool {
         hollow(self.sample(pos), 1.0)
     }
 
-    /// Шумы в любой точке: билинейно по x, z в двух слоях узлов вокруг неё, потом
-    /// линейно по y. Те же узлы и тот же порядок арифметики, что в [`Caves::carve`],
-    /// поэтому результат совпадает побитно.
     fn sample(&self, pos: IVec3) -> Sample {
         let cell = pos.div_euclid(IVec3::splat(CELL));
         let t = pos - cell * CELL;
@@ -37,12 +32,10 @@ fn keys(center: ColumnPos, radius: i32) -> impl Iterator<Item = ColumnPos> {
     (-radius..=radius).flat_map(move |z| (-radius..=radius).map(move |x| center + IVec2::new(x, z)))
 }
 
-/// Колонка без деревьев до и после пещер.
 fn ground_and_carved(terrain: &Terrain, key: ColumnPos) -> (Column, Column) {
     (terrain.generate_ground(key), terrain.generate_carved(key))
 }
 
-/// Мировые координаты блоков колонки `key`.
 fn blocks(key: ColumnPos) -> impl Iterator<Item = IVec3> {
     let origin = key.origin();
     (0..WORLD_HEIGHT).flat_map(move |y| {
@@ -102,8 +95,6 @@ fn interpolation_hits_nodes_and_stays_between_them() {
 
 #[test]
 fn carve_matches_direct_evaluation_across_borders() {
-    // Сетка в колонке и прямое вычисление по мировым координатам должны совпасть
-    // везде, в том числе в столбцах x = 15 и x = 0 соседних колонок.
     let terrain = Terrain::new(1337);
     let caves = &terrain.caves;
     let surface = |x, z| terrain.surface_height(x, z);
@@ -173,7 +164,6 @@ fn no_air_under_water() {
                 continue;
             }
             water += 1;
-            // Дно и ещё WET_ROOF блоков под ним целы.
             let floor = (0..p.y)
                 .rev()
                 .find(|&y| column.get(p.with_y(y)) != Block::Water);
@@ -247,7 +237,6 @@ fn roof_is_opened_only_in_entrances() {
             }
         }
     }
-    // Входы редкие, но на 17×17 колонок встречаются.
     assert!(openings > 0, "no entrances");
     assert!(openings < 17 * 17 * 256 / 50, "{openings} opened columns");
 }

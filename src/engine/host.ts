@@ -2,19 +2,15 @@ import { Engine, type WorldStats } from '@engine'
 import { NoWebGpuError } from './gpu'
 import type { PlayerInfo, TimeInfo } from './types'
 
-/** Куда кадровый цикл сообщает показания; раз в секунду — fps, статистика и время. */
 export interface FrameSink {
   fps(value: number): void
   stats(value: WorldStats): void
   time(value: TimeInfo): void
   player(value: PlayerInfo): void
-  /** Длительность `render()` в мс; задаётся только в режиме замера. */
   rendered?(now: number, renderMs: number): void
-  /** После каждого кадра: раздать воркерам задания, закодированные в нём. */
   afterRender?(): void
 }
 
-/** Подгоняет размер буфера canvas под экран и сообщает движку (если он уже есть). */
 export function fitCanvas(canvas: HTMLCanvasElement, engine?: Engine) {
   const dpr = window.devicePixelRatio
   canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr))
@@ -22,7 +18,6 @@ export function fitCanvas(canvas: HTMLCanvasElement, engine?: Engine) {
   engine?.resize(canvas.width, canvas.height)
 }
 
-/** Создаёт движок на canvas; нехватка WebGPU превращается в `NoWebGpuError`. */
 export async function createEngine(
   canvas: HTMLCanvasElement,
   seed: number,
@@ -32,13 +27,11 @@ export async function createEngine(
   try {
     return await Engine.create(canvas, camera ? Float32Array.from(camera) : undefined, seed)
   } catch (e) {
-    // Движок сообщает об отсутствии адаптера или устройства текстом с префиксом «WebGPU».
     const text = e instanceof Error ? e.message : String(e)
     throw text.startsWith('WebGPU ') ? new NoWebGpuError(text) : e
   }
 }
 
-/** Кадровый цикл и resize созданного движка. */
 export class FrameLoop {
   private rafId = 0
   private observer: ResizeObserver | undefined
@@ -62,7 +55,6 @@ export class FrameLoop {
       sink.rendered?.(now, performance.now() - renderStart)
       sink.afterRender?.()
       frames++
-      // Читаем каждый кадр, чтобы HUD не отставал, но сообщаем только изменения.
       const mode = engine.player_mode() as PlayerInfo['mode']
       const onGround = engine.on_ground()
       if (player?.mode !== mode || player.onGround !== onGround) {

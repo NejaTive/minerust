@@ -94,7 +94,6 @@ fn grow_from_full_arena() {
     assert_eq!(a.alloc(64), Some(64));
 }
 
-/// Детерминированный xorshift: тест не зависит от внешних крейтов и воспроизводим.
 fn next(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;

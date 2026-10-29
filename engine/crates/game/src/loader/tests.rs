@@ -12,8 +12,6 @@ fn dist2(a: ColumnPos, b: ColumnPos) -> i32 {
     (a - b).length_squared()
 }
 
-/// Один кадр движка: `update`, затем до `steps` шагов `advance`.
-/// Проверяет, что снимаются только мешированные колонки, и ведёт их учёт.
 fn frame(
     loader: &mut Loader,
     world: &mut World,
@@ -38,7 +36,6 @@ fn frame(
     done
 }
 
-/// Гоняет загрузчик в `center`, пока он не закончит всю работу.
 fn settle(
     loader: &mut Loader,
     world: &mut World,
@@ -48,7 +45,6 @@ fn settle(
     while !frame(loader, world, center, meshed, usize::MAX).is_empty() {}
 }
 
-/// Загружен ровно круг `radius + 2`, мешируется ровно круг `radius`.
 fn assert_circles(world: &World, meshed: &HashSet<ColumnPos>, center: ColumnPos, radius: i32) {
     let r = radius + 2;
     for z in -r - 2..=r + 2 {
@@ -89,7 +85,6 @@ fn generates_nearest_first_and_meshes_when_neighbors_ready() {
     let mut loader = Loader::new(ColumnPos::ZERO);
     let mut world = World::new();
     let mut meshed = HashSet::new();
-    // Центр и 8 соседей — квадрат 3×3, после них центр готов к мешу.
     let first = frame(&mut loader, &mut world, ColumnPos::ZERO, &mut meshed, 10);
     assert_eq!(first[0], Progress::Generated(ColumnPos::ZERO));
     assert!(first[..9].iter().all(|p| matches!(
@@ -114,7 +109,6 @@ fn generates_nearest_first_and_meshes_when_neighbors_ready() {
 
 #[test]
 fn column_without_all_neighbors_is_not_meshed() {
-    // Без одного соседа — по грани или по диагонали — колонка ждёт его загрузки.
     for missing in NEIGHBORS {
         let mut loader = Loader::new(ColumnPos::ZERO);
         let mut world = World::new();
@@ -142,8 +136,6 @@ fn unloads_only_beyond_margin() {
     settle(&mut loader, &mut world, ColumnPos::ZERO, &mut meshed);
     let before: HashSet<ColumnPos> = world.keys().collect();
 
-    // Сдвиг на 2 колонки: старые данные дальше radius + 2 от нового центра,
-    // но не дальше radius + 3, должны остаться.
     let center = ColumnPos::new(2, 0);
     let unload = loader.unload_radius();
     for key in loader.update(center, &mut world) {
@@ -160,7 +152,6 @@ fn unloads_only_beyond_margin() {
             .any(|&k| dist2(k, center) > loader.gen_radius().pow(2) && world.column(k).is_some())
     );
 
-    // Далёкий прыжок: всё старое выгружается, загруженное ограничено кругом.
     let far = ColumnPos::new(1000, -1000);
     settle(&mut loader, &mut world, far, &mut meshed);
     assert_circles(&world, &meshed, far, DEFAULT_RADIUS);
@@ -171,7 +162,6 @@ fn meshed_columns_keep_their_neighbors() {
     let mut loader = Loader::new(ColumnPos::ZERO);
     let mut world = World::new();
     let mut meshed: HashSet<ColumnPos> = HashSet::new();
-    // Петляющий путь с шагами разной длины, включая прыжки через несколько колонок.
     let mut center = ColumnPos::ZERO;
     for i in 0..400 {
         let step = match i % 7 {
@@ -233,7 +223,6 @@ fn sharp_shrink_keeps_neighbors_of_meshed_columns() {
             assert_neighbors_loaded(&world, &meshed);
         }
     }
-    // После движения на краю остаётся запас гистерезиса, но не больше него.
     settle(&mut loader, &mut world, center, &mut meshed);
     assert_eq!(loader.pending(), 0);
     let r = MIN_RADIUS;
@@ -280,7 +269,6 @@ fn edited_column_comes_back_without_generator() {
     settle(&mut loader, &mut world, far, &mut meshed);
     assert!(world.column(key).is_none());
 
-    // Обратно: генератор не должен трогать изменённую колонку.
     for key in loader.update(ColumnPos::ZERO, &mut world) {
         meshed.remove(&key);
     }
@@ -297,7 +285,6 @@ fn edited_column_comes_back_without_generator() {
     }
     assert_eq!(world.block(pos), Block::Stone);
 
-    // И после второй выгрузки правка снова сохраняется.
     settle(&mut loader, &mut world, far, &mut meshed);
     assert!(world.is_edited(key));
     settle(&mut loader, &mut world, ColumnPos::ZERO, &mut meshed);
@@ -309,7 +296,6 @@ fn import_into_unloaded_goes_to_loader() {
     let key = ColumnPos::new(0, 1);
     let pos = glam::IVec3::new(5, 60, 20);
     let mut world = World::new();
-    // Правка до импорта: импорт перекрывает и её признак «не сохранено».
     world.insert(key, Column::new());
     world.set_block(pos, world::block::Block::Dirt);
     world.remove(key);

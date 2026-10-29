@@ -4,16 +4,12 @@ use render::FrameParams;
 use render::fog::Fog;
 use world::terrain::WATER_LEVEL;
 
-/// Туман и фон под водой: муть в пару десятков блоков, тёмно-синяя, в линейном цвете.
 const UNDERWATER_FOG: Fog = Fog {
     start: 0.0,
     end: 24.0,
 };
-/// Дневной цвет; ночью его гасит `SkyState::underwater_scale`.
 const UNDERWATER_COLOR: [f32; 3] = [0.02, 0.07, 0.2];
 
-/// Параметры кадра по состоянию игры. `radius` — дальность прорисовки в колонках
-/// (туман и дальняя плоскость), `aspect` — соотношение сторон canvas.
 pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32) -> FrameParams {
     let camera = game.camera();
     let fog = Fog::for_radius(radius);

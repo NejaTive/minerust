@@ -1,6 +1,5 @@
 use super::*;
 
-/// Колонки с доминирующим в центре биомом `biome`, не больше `count`.
 fn columns_of(terrain: &Terrain, biome: Biome, count: usize) -> Vec<ColumnPos> {
     (-40..40)
         .flat_map(|z| (-40..40).map(move |x| ColumnPos::new(x, z)))
@@ -39,7 +38,6 @@ fn plains_have_reasonable_grass_share() {
         let column = terrain.generate(key);
         grass += count(&column, |b| b == Block::TallGrass);
         flowers += count(&column, |b| matches!(b, Block::Poppy | Block::Dandelion));
-        // Подходящие клетки — это те, где что-то выросло, плюс свободная трава.
         for z in 0..16 {
             for x in 0..16 {
                 let top = (0..WORLD_HEIGHT)
@@ -68,7 +66,6 @@ fn desert_has_no_plants() {
             for x in 0..16 {
                 let has_plant =
                     (0..WORLD_HEIGHT).any(|y| column.get([x, y, z].into()).needs_support());
-                // Край пустыни может зайти в равнину, но в самой пустыне пусто.
                 let biome = terrain.biome_at(key.origin().x + x, key.origin().z + z);
                 assert!(!has_plant || biome != Biome::Desert, "{key} {x},{z}");
             }

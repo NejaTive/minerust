@@ -6,31 +6,21 @@ use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
 use crate::terrain::{Biome, Terrain, WATER_LEVEL};
 
-/// Наибольший радиус кроны по x и z. Колонка ищет стволы и в полосе такой ширины у
-/// соседей: их кроны могут нависать над ней.
 pub const CROWN_RADIUS: i32 = 2;
-/// Стволы не ближе этого друг к другу по каждой из осей x, z (расстояние Чебышёва).
 pub const MIN_SPACING: i32 = 3;
-/// Доля столбцов — кандидатов на дерево. В лесу после прореживания по `MIN_SPACING`
-/// остаётся ~8 деревьев на колонку, на равнине — одно на несколько колонок.
 const FOREST_DENSITY: f32 = 0.04;
 const PLAINS_DENSITY: f32 = 0.002;
 const MIN_TRUNK: i32 = 4;
 const MAX_TRUNK: i32 = 6;
 
-// Соли хеша: у каждого решения о дереве свой независимый случайный поток.
 const SALT_SPOT: u64 = 1;
 const SALT_TRUNK: u64 = 2;
 const SALT_CORNERS: u64 = 3;
 
-/// Дерево как у дуба в Minecraft: ствол и крона из четырёх слоёв листвы.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Tree {
-    /// Нижнее бревно, мировые координаты; под ним трава.
     pub base: IVec3,
-    /// Брёвен в стволе, `MIN_TRUNK..=MAX_TRUNK`.
     pub height: i32,
-    /// Случайные биты: какие углы кроны срезаны.
     corners: u32,
 }
 
@@ -39,10 +29,6 @@ impl Tree {
         (0..self.height).map(|dy| self.base + IVec3::Y * dy)
     }
 
-    /// Листва в мировых координатах. Два нижних слоя (от третьего бревна сверху) —
-    /// радиус 2, два верхних — радиус 1, самый верхний над стволом. Углы слоёв срезаны
-    /// случайно, у верхнего всегда: он крестом. Внутри кроны позиции совпадают со
-    /// стволом — их не ставит [`plant`].
     pub fn leaves(&self) -> impl Iterator<Item = IVec3> + '_ {
         let top = self.base.y + self.height - 1;
         let layers: [(i32, i32); 4] = [(top - 2, 2), (top - 1, 2), (top, 1), (top + 1, 1)];
@@ -64,13 +50,8 @@ impl Tree {
     }
 }
 
-/// Дерево со стволом в столбце (x, z), если оно там растёт. Зависит только от сида и
-/// координат, поэтому любая колонка получает один и тот же ответ.
 pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
     let own = candidate(terrain, x, z)?;
-    // Кандидат растёт, если среди кандидатов в квадрате 5×5 вокруг он первый по
-    // приоритету: из двух близких деревьев каждое не может быть первым, так что
-    // расстояние держится без общего состояния и порядка обхода.
     let reach = MIN_SPACING - 1;
     for dz in -reach..=reach {
         for dx in -reach..=reach {
@@ -92,13 +73,9 @@ pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
     })
 }
 
-/// Приоритет кандидата на дерево (меньше — главнее) или `None`, если в столбце дерева
-/// быть не может: по хешу, потому что сверху песок (пустыня, пляж) или вода.
 fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<u32> {
     let h = hash(terrain.seed(), x, z, SALT_SPOT);
-    // 24 старших бита — равномерное число 0..1, точно представимое в f32.
     let roll = (h >> 8) as f32 / (1 << 24) as f32;
-    // Шум биомов дороже хеша: отсекаем заведомо пустые столбцы до него.
     if roll >= FOREST_DENSITY.max(PLAINS_DENSITY) {
         return None;
     }
@@ -107,13 +84,9 @@ fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<u32> {
     if w.dominant() == Biome::Desert || roll >= density {
         return None;
     }
-    // Ниже этой высоты поверхность — пляж или дно.
     (terrain.surface(x, z, w) > WATER_LEVEL + 1).then_some(h)
 }
 
-/// Ставит в колонку `key` её часть деревьев: и своих, и соседских, чьи кроны
-/// заходят в неё. Сначала все брёвна, потом листва только в воздух — так результат не
-/// зависит от порядка деревьев, а листва не затирает ни брёвна, ни землю.
 pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
     let origin = key.origin();
     let range = |start: i32| start - CROWN_RADIUS..start + SECTION_SIZE + CROWN_RADIUS;
@@ -135,7 +108,6 @@ pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
     }
 }
 
-/// Хеш (сид, x, z, соль) через splitmix64: детерминированный и без зависимостей.
 pub(crate) fn hash(seed: i32, x: i32, z: i32, salt: u64) -> u32 {
     let point = (u64::from(x as u32) << 32) | u64::from(z as u32);
     let stream = splitmix64((u64::from(seed as u32) << 8) | salt);
@@ -149,8 +121,6 @@ fn splitmix64(mut v: u64) -> u64 {
     v ^ (v >> 31)
 }
 
-/// Дерево в лесу, крона которого заходит в соседнюю колонку по x: для тестов стыков.
-/// Помощник тестов других крейтов (мешер), см. `terrain::lake_key`.
 #[doc(hidden)]
 pub fn border_tree(terrain: &Terrain) -> Tree {
     (0..4096)
