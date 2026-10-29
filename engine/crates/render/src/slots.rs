@@ -1,4 +1,4 @@
-use mesh::mesh::{ORIGIN_BYTES, origin_bytes};
+use mesh::mesh::{SLOT_BYTES, slot_bytes};
 
 use crate::arena::{grow_buffer, grown_capacity};
 
@@ -48,24 +48,26 @@ impl SlotAllocator {
     }
 }
 
-/// Мировые углы секций одним буфером экземпляров: слот секции — `first_instance`
-/// отрисовки ([`mesh::origin_layout`]), так что буфер ставится раз на проход.
-pub(crate) struct OriginBuffer {
+/// Слоты мешей одним буфером экземпляров: слот меша — `first_instance` отрисовки
+/// ([`slot_layout`](crate::layout::slot_layout)), так что буфер ставится раз на проход. В слоте
+/// мировой угол секции и начало записей квадов меша в арене. Солид и вода одной секции
+/// занимают разные слоты: у каждого своё начало в арене.
+pub(crate) struct SlotBuffer {
     buffer: wgpu::Buffer,
     slots: SlotAllocator,
     max_slots: u32,
 }
 
-/// Секций с мешем при дальности 12 — около 1900, при максимальной — вдвое-втрое больше;
-/// 2048 слотов — 32 КиБ, рост на 25% дешёв.
-const INITIAL_SLOTS: u32 = 2048;
+/// Мешей при дальности 12 — около 2500 (секции с водой дают два), при максимальной —
+/// вдвое-втрое больше; 4096 слотов — 64 КиБ, рост на 25% дешёв.
+const INITIAL_SLOTS: u32 = 4096;
 
-impl OriginBuffer {
+impl SlotBuffer {
     pub(crate) fn new(device: &wgpu::Device) -> Self {
-        let max_slots = (device.limits().max_buffer_size / ORIGIN_BYTES as u64).min(1 << 31) as u32;
+        let max_slots = (device.limits().max_buffer_size / SLOT_BYTES as u64).min(1 << 31) as u32;
         let slots = INITIAL_SLOTS.min(max_slots);
-        OriginBuffer {
-            buffer: Self::create_buffer(device, u64::from(slots) * ORIGIN_BYTES as u64),
+        SlotBuffer {
+            buffer: Self::create_buffer(device, u64::from(slots) * SLOT_BYTES as u64),
             slots: SlotAllocator::new(slots),
             max_slots,
         }
@@ -73,7 +75,7 @@ impl OriginBuffer {
 
     fn create_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("section origins"),
+            label: Some("mesh slots"),
             size,
             usage: wgpu::BufferUsages::VERTEX
                 | wgpu::BufferUsages::COPY_DST
@@ -93,35 +95,36 @@ impl OriginBuffer {
 
     /// Занято байт слотами.
     pub(crate) fn used_bytes(&self) -> u64 {
-        u64::from(self.slots.used()) * ORIGIN_BYTES as u64
+        u64::from(self.slots.used()) * SLOT_BYTES as u64
     }
 
-    /// Слот с записанным углом `origin`.
+    /// Слот с записанными углом `origin` и началом записей `first_word` (в словах `u32`).
     pub(crate) fn write(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         origin: [f32; 3],
+        first_word: u32,
     ) -> Result<u32, String> {
         let slot = match self.slots.alloc() {
             Some(slot) => slot,
             None => {
-                let step = ORIGIN_BYTES as u64;
+                let step = SLOT_BYTES as u64;
                 let needed = (u64::from(self.slots.capacity()) + 1) * step;
                 let bytes =
                     grown_capacity(self.bytes(), needed, u64::from(self.max_slots) * step, step)
-                        .ok_or("section origin buffer is full")?;
-                self.buffer = grow_buffer(device, queue, &self.buffer, bytes, "section origins");
+                        .ok_or("mesh slot buffer is full")?;
+                self.buffer = grow_buffer(device, queue, &self.buffer, bytes, "mesh slots");
                 self.slots.grow((bytes / step) as u32);
                 self.slots
                     .alloc()
-                    .ok_or("section origin buffer: no slot after growth")?
+                    .ok_or("mesh slot buffer: no slot after growth")?
             }
         };
         queue.write_buffer(
             &self.buffer,
-            u64::from(slot) * ORIGIN_BYTES as u64,
-            &origin_bytes(origin),
+            u64::from(slot) * SLOT_BYTES as u64,
+            &slot_bytes(origin, first_word),
         );
         Ok(slot)
     }

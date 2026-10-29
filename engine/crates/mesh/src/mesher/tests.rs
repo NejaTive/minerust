@@ -1,7 +1,9 @@
 use glam::{IVec2, Vec3};
 
+use world::block::WATER_SURFACE;
 use world::light::MAX_LIGHT;
 
+use super::expand::{Vertex, indices, vertices};
 use super::*;
 
 const AO: MeshOptions = MeshOptions {
@@ -39,7 +41,7 @@ fn world_light(world: &World) -> LightMap {
 }
 
 fn face_count(mesh: &MeshData) -> usize {
-    mesh.indices.len() / 6
+    indices(mesh).len() / 6
 }
 
 fn filled(pred: impl Fn(IVec3) -> bool) -> Section {
@@ -61,7 +63,7 @@ fn filled(pred: impl Fn(IVec3) -> bool) -> Section {
 fn empty_section_has_no_faces() {
     let mesh = mesh_section(&Section::new(), air, full, AO).solid;
     assert_eq!(face_count(&mesh), 0);
-    assert!(mesh.vertices.is_empty());
+    assert!(vertices(&mesh).is_empty());
 }
 
 #[test]
@@ -70,7 +72,7 @@ fn single_block_has_six_faces() {
     section.set(IVec3::new(5, 5, 5), Block::Dirt);
     let mesh = mesh_section(&section, air, full, AO).solid;
     assert_eq!(face_count(&mesh), 6);
-    assert_eq!(mesh.vertices.len(), 24);
+    assert_eq!(vertices(&mesh).len(), 24);
 }
 
 #[test]
@@ -79,7 +81,7 @@ fn vertices_are_local_to_section() {
     section.set(IVec3::new(1, 2, 3), Block::Dirt);
     let mesh = mesh_section(&section, air, full, AO).solid;
     let min = Vec3::new(1.0, 2.0, 3.0);
-    for v in &mesh.vertices {
+    for v in &vertices(&mesh) {
         let p = Vec3::from(v.position());
         assert!(p.cmpge(min).all() && p.cmple(min + Vec3::ONE).all(), "{p}");
     }
@@ -134,7 +136,7 @@ fn air_section_does_not_ask_neighbors() {
         AO,
     )
     .solid;
-    assert!(mesh.vertices.is_empty());
+    assert!(vertices(&mesh).is_empty());
 }
 
 #[test]
@@ -142,12 +144,10 @@ fn checkerboard_fits_u16() {
     let section = filled(|p| (p.x + p.y + p.z) % 2 == 0);
     let mesh = mesh_section(&section, air, full, AO).solid;
     assert_eq!(face_count(&mesh), 2048 * 6);
-    assert_eq!(mesh.vertices.len(), 2048 * 24);
-    assert!(
-        mesh.indices
-            .iter()
-            .all(|&i| usize::from(i) < mesh.vertices.len())
-    );
+    assert_eq!(vertices(&mesh).len(), 2048 * 24);
+    // Индексы развёртки (4 вершины и 6 индексов на квад) не выходят за вершины.
+    let count = vertices(&mesh).len();
+    assert!(indices(&mesh).iter().all(|&i| usize::from(i) < count));
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn grass_faces_use_their_tiles() {
     let mut section = Section::new();
     section.set(IVec3::ZERO, Block::Grass);
     let mesh = mesh_section(&section, air, full, AO).solid;
-    for quad in mesh.vertices.chunks(4) {
+    for quad in vertices(&mesh).chunks(4) {
         let ys: Vec<f32> = quad.iter().map(|v| v.position()[1]).collect();
         let expected = if ys.iter().all(|&y| y == 1.0) {
             Tile::GrassTop
@@ -173,7 +173,8 @@ fn side_faces_are_upright() {
     let mut section = Section::new();
     section.set(IVec3::ZERO, Block::Grass);
     let mesh = mesh_section(&section, air, full, AO).solid;
-    let sides = mesh.vertices.chunks(4).filter(|quad| {
+    let verts = vertices(&mesh);
+    let sides = verts.chunks(4).filter(|quad| {
         quad.iter()
             .any(|v| v.position()[1] != quad[0].position()[1])
     });
@@ -198,7 +199,7 @@ fn faces_wind_counter_clockwise_from_outside() {
     let mesh = mesh_section(&section, air, full, AO).solid;
     let center = Vec3::splat(0.5);
     let mut normals = Vec::new();
-    for quad in mesh.vertices.chunks(4) {
+    for quad in vertices(&mesh).chunks(4) {
         let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(quad[i].position()));
         let winding = (b - a).cross(c - b).normalize();
         // Сторону грани берём из геометрии: от центра блока к центру грани.
@@ -283,7 +284,7 @@ fn assert_shades_match(
     pred: impl Fn(Vec3) -> bool,
 ) -> usize {
     let mut shaded = 0;
-    for (q, quad) in mesh.vertices.chunks(4).enumerate() {
+    for (q, quad) in vertices(mesh).chunks(4).enumerate() {
         let expected = world_shades(origin, &block_at, &light_at, quad);
         let side = face_shade(quad_normal(quad));
         for (v, (shade, sun, block)) in quad.iter().zip(expected) {
@@ -295,9 +296,7 @@ fn assert_shades_match(
             }
         }
         let days = expected.map(|(shade, sun, block)| day_shade(quantize_shade(shade), sun, block));
-        let first = (q * 4) as u16;
-        let indices = &mesh.indices[q * 6..q * 6 + 6];
-        assert_eq!(indices, quad_indices(days).map(|i| first + i), "quad {q}");
+        assert_eq!(mesh.quads[q].flipped(), flip_diagonal(days), "quad {q}");
     }
     shaded
 }
@@ -330,8 +329,7 @@ fn floor_with(extra: &[IVec3]) -> Section {
 
 /// Вершины верхней грани блока `block` в порядке `Face::corners` и её индексы.
 fn top_face(mesh: &MeshData, block: IVec3) -> ([Vertex; 4], [u16; 6]) {
-    let q = mesh
-        .vertices
+    let q = vertices(mesh)
         .chunks(4)
         .position(|quad| {
             quad_normal(quad) == IVec3::Y
@@ -339,8 +337,11 @@ fn top_face(mesh: &MeshData, block: IVec3) -> ([Vertex; 4], [u16; 6]) {
         })
         .unwrap_or_else(|| panic!("no top face of {block}"));
     let first = (q * 4) as u16;
-    let indices = std::array::from_fn(|i| mesh.indices[q * 6 + i] - first);
-    (mesh.vertices[q * 4..q * 4 + 4].try_into().unwrap(), indices)
+    let indices = std::array::from_fn(|i| indices(mesh)[q * 6 + i] - first);
+    (
+        vertices(mesh)[q * 4..q * 4 + 4].try_into().unwrap(),
+        indices,
+    )
 }
 
 fn shades(quad: &[Vertex; 4]) -> [f32; 4] {
@@ -357,7 +358,7 @@ fn pair(a: Block, b: Block) -> MeshData {
 
 /// Есть ли в меше грань с нормалью `normal` в плоскости x = `x`.
 fn has_face_at_x(mesh: &MeshData, x: f32, normal: IVec3) -> bool {
-    mesh.vertices
+    vertices(mesh)
         .chunks(4)
         .any(|quad| quad_normal(quad) == normal && quad.iter().all(|v| v.position()[0] == x))
 }
@@ -477,16 +478,16 @@ fn flipped_quads_keep_winding() {
     let section = filled(|p| p.y < 4 + (p.x * 7 + p.z * 13) % 5);
     let mesh = mesh_section(&section, air, full, AO).solid;
     let mut flipped = 0;
-    for (q, quad) in mesh.vertices.chunks(4).enumerate() {
+    let (verts, order) = (vertices(&mesh), indices(&mesh));
+    for (q, quad) in verts.chunks(4).enumerate() {
         let normal = quad_normal(quad).as_vec3();
         let first = (q * 4) as u16;
-        let indices = &mesh.indices[q * 6..q * 6 + 6];
+        let indices = &order[q * 6..q * 6 + 6];
         if indices[0] != first {
             flipped += 1;
         }
         for tri in indices.chunks(3) {
-            let [a, b, c] =
-                [0, 1, 2].map(|i| Vec3::from(mesh.vertices[usize::from(tri[i])].position()));
+            let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(verts[usize::from(tri[i])].position()));
             let winding = (b - a).cross(c - b).normalize();
             assert!(
                 winding.dot(normal) > 0.999,
@@ -506,10 +507,11 @@ fn no_ao_keeps_plain_side_shading() {
     let with = mesh_column(&column, air, full, AO);
     let without = mesh_column(&column, air, full, NO_AO);
     for (with, without) in with.iter().zip(&without) {
-        assert_eq!(with.water.vertices, without.water.vertices);
+        assert_eq!(vertices(&with.water), vertices(&without.water));
         let (with, without) = (&with.solid, &without.solid);
-        assert_eq!(with.vertices.len(), without.vertices.len());
-        for (q, quad) in without.vertices.chunks(4).enumerate() {
+        assert_eq!(vertices(with).len(), vertices(without).len());
+        let order = indices(without);
+        for (q, quad) in vertices(without).chunks(4).enumerate() {
             let shade = face_shade(quad_normal(quad));
             assert!(
                 quad.iter().all(|v| v.shade_byte() == quantize_shade(shade)),
@@ -517,12 +519,12 @@ fn no_ao_keeps_plain_side_shading() {
             );
             let first = (q * 4) as u16;
             assert_eq!(
-                without.indices[q * 6..q * 6 + 6],
+                order[q * 6..q * 6 + 6],
                 [0, 1, 2, 0, 2, 3].map(|i| first + i)
             );
         }
         // Кроме яркости, вершины те же.
-        for (a, b) in with.vertices.iter().zip(&without.vertices) {
+        for (a, b) in vertices(with).iter().zip(&vertices(without)) {
             assert_eq!(
                 (a.position(), a.uv(), a.layer()),
                 (b.position(), b.uv(), b.layer())
@@ -684,8 +686,8 @@ fn tree_on_column_border_matches_whole_world() {
 fn world_mesh(world: &World, light: &LightMap, key: SectionPos) -> [(Vec<Vertex>, Vec<u16>); 2] {
     let SectionMeshes { solid, water } = mesh_world_section(world, light, key, AO).unwrap();
     [
-        (solid.vertices, solid.indices),
-        (water.vertices, water.indices),
+        (vertices(&solid), indices(&solid)),
+        (vertices(&water), indices(&water)),
     ]
 }
 
@@ -764,7 +766,7 @@ fn section_of(blocks: &[(IVec3, Block)]) -> SectionMeshes {
 
 /// Нормали квадов меша по порядку вершин (по четыре на квад).
 fn quad_normals(mesh: &MeshData) -> Vec<IVec3> {
-    mesh.vertices.chunks(4).map(quad_normal).collect()
+    vertices(mesh).chunks(4).map(quad_normal).collect()
 }
 
 #[test]
@@ -772,15 +774,15 @@ fn cross_has_both_sides_of_both_planes() {
     let at = IVec3::new(5, 5, 5);
     for block in [Block::TallGrass, Block::Poppy, Block::Dandelion] {
         let mesh = section_of(&[(at, block)]).solid;
-        assert_eq!(mesh.vertices.len(), 16, "{block:?}");
-        assert_eq!(mesh.indices.len(), 24, "{block:?}");
+        assert_eq!(vertices(&mesh).len(), 16, "{block:?}");
+        assert_eq!(indices(&mesh).len(), 24, "{block:?}");
         let normals = quad_normals(&mesh);
         // Диагонали (±1, 0, ±1): у каждой плоскости обе стороны.
         for n in [(1, -1), (-1, 1), (1, 1), (-1, -1)] {
             let count = normals.iter().filter(|v| v.x == n.0 && v.z == n.1).count();
             assert_eq!(count, 1, "{block:?} normal {n:?}: {normals:?}");
         }
-        for v in &mesh.vertices {
+        for v in &vertices(&mesh) {
             assert_eq!(v.layer(), block.tile(Facing::Side).unwrap().layer() as u8);
             let [x, y, z] = v.position();
             assert!(
@@ -793,8 +795,8 @@ fn cross_has_both_sides_of_both_planes() {
 #[test]
 fn cross_has_light_of_its_own_cell_and_full_shade() {
     let mesh = section_of(&[(IVec3::new(5, 5, 5), Block::Poppy)]).solid;
-    let first = mesh.vertices[0];
-    assert!(mesh.vertices.iter().all(|v| v.shade_byte() == 255
+    let first = vertices(&mesh)[0];
+    assert!(vertices(&mesh).iter().all(|v| v.shade_byte() == 255
         && v.sun_halves() == first.sun_halves()
         && v.block_halves() == first.block_halves()));
 }
@@ -803,7 +805,7 @@ fn cross_has_light_of_its_own_cell_and_full_shade() {
 fn cube_next_to_cross_draws_its_face_toward_it() {
     let mesh = pair(Block::Stone, Block::TallGrass);
     // Камень рисует все шесть граней, трава — свой крест.
-    assert_eq!(mesh.vertices.len(), 24 + 16);
+    assert_eq!(vertices(&mesh).len(), 24 + 16);
 }
 
 #[test]
@@ -812,19 +814,22 @@ fn cross_does_not_hide_cube_faces_or_shade_corners() {
     let plain = section_of(&[(floor, Block::Stone)]).solid;
     let with = section_of(&[(floor, Block::Stone), (floor + IVec3::Y, Block::Torch)]).solid;
     // Верх камня остался, и тени от факела на нём нет: вершины камня те же.
-    assert_eq!(&with.vertices[..plain.vertices.len()], &plain.vertices[..]);
+    assert_eq!(
+        &vertices(&with)[..vertices(&plain).len()],
+        &vertices(&plain)[..]
+    );
 }
 
 #[test]
 fn torch_is_a_narrow_column_with_five_faces() {
     let at = IVec3::new(5, 5, 5);
     let mesh = section_of(&[(at, Block::Torch)]).solid;
-    assert_eq!(mesh.vertices.len(), 20);
+    assert_eq!(vertices(&mesh).len(), 20);
     let normals = quad_normals(&mesh);
     assert!(!normals.contains(&IVec3::NEG_Y), "no bottom face");
     assert!(normals.contains(&IVec3::Y));
     let (mut min, mut max) = (Vec3::MAX, Vec3::MIN);
-    for v in &mesh.vertices {
+    for v in &vertices(&mesh) {
         min = min.min(v.position().into());
         max = max.max(v.position().into());
         assert_eq!(v.layer(), Tile::Torch.layer() as u8);
@@ -840,8 +845,7 @@ fn torch_light_comes_from_its_cell() {
     let (world, light) = small_world(|p| if p == torch { Block::Torch } else { Block::Air });
     let mesh = mesh_world_section(&world, &light, SectionPos::new(0, 1, 0), AO).unwrap();
     assert!(
-        mesh.solid
-            .vertices
+        vertices(&mesh.solid)
             .iter()
             .all(|v| v.block_halves() == 2 * 14)
     );
@@ -853,7 +857,7 @@ fn water_block_in_air_has_six_lowered_faces() {
     assert_eq!(face_count(&mesh.solid), 0);
     assert_eq!(face_count(&mesh.water), 6);
     let top = 5.0 + WATER_SURFACE;
-    for quad in mesh.water.vertices.chunks(4) {
+    for quad in vertices(&mesh.water).chunks(4) {
         assert!(quad.iter().all(|v| v.layer() == Tile::Water.layer() as u8));
         // Без AO: одна яркость стороны на весь квад.
         let shade = face_shade(quad_normal(quad));
@@ -918,9 +922,7 @@ fn water_under_water_is_full_height_without_top() {
     let (low, high) = (IVec3::new(5, 5, 5), IVec3::new(5, 6, 5));
     let mesh = section_of(&[(low, Block::Water), (high, Block::Water)]);
     assert_eq!(face_count(&mesh.water), 10);
-    let tops: Vec<f32> = mesh
-        .water
-        .vertices
+    let tops: Vec<f32> = vertices(&mesh.water)
         .chunks(4)
         .filter(|quad| quad_normal(quad) == IVec3::Y)
         .flat_map(|quad| quad.iter().map(|v| v.position()[1]))
@@ -931,9 +933,8 @@ fn water_under_water_is_full_height_without_top() {
         "only the upper block has a top"
     );
     // Боковые грани нижнего блока — до самого верха, без щели под верхним.
-    let low_sides = mesh
-        .water
-        .vertices
+    let water_vertices = vertices(&mesh.water);
+    let low_sides = water_vertices
         .chunks(4)
         .filter(|quad| quad_normal(quad).y == 0 && quad.iter().any(|v| v.position()[1] == 5.0));
     for quad in low_sides {
@@ -949,9 +950,7 @@ fn water_under_stone_is_lowered_without_top() {
         (IVec3::new(5, 6, 5), Block::Stone),
     ]);
     assert_eq!(face_count(&mesh.water), 5);
-    let max = mesh
-        .water
-        .vertices
+    let max = vertices(&mesh.water)
         .iter()
         .map(|v| v.position()[1])
         .fold(0.0, f32::max);
@@ -1030,13 +1029,16 @@ fn world_cache_matches_closure_cache() {
             AO,
         );
         for (sy, (a, b)) in fast.iter().zip(&slow).enumerate() {
-            assert!(a.solid.vertices == b.solid.vertices, "{key} section {sy}");
-            assert!(a.solid.indices == b.solid.indices, "{key} section {sy}");
-            assert!(a.water.vertices == b.water.vertices, "{key} water {sy}");
-            assert!(a.water.indices == b.water.indices, "{key} water {sy}");
+            assert!(
+                vertices(&a.solid) == vertices(&b.solid),
+                "{key} section {sy}"
+            );
+            assert!(indices(&a.solid) == indices(&b.solid), "{key} section {sy}");
+            assert!(vertices(&a.water) == vertices(&b.water), "{key} water {sy}");
+            assert!(indices(&a.water) == indices(&b.water), "{key} water {sy}");
             let single = mesh_world_section(&world, &light, key.section(sy as i32), AO).unwrap();
             assert!(
-                single.solid.vertices == a.solid.vertices,
+                vertices(&single.solid) == vertices(&a.solid),
                 "{key} single {sy}"
             );
         }
@@ -1050,35 +1052,11 @@ fn world_cache_matches_closure_cache() {
 fn quantization_error_is_below_one_step() {
     let (world, light) = small_world(|p| if p.y < 5 { Block::Stone } else { Block::Air });
     let mesh = mesh_world_section(&world, &light, SectionPos::new(0, 0, 0), AO).unwrap();
-    for v in &mesh.solid.vertices {
+    for v in &vertices(&mesh.solid) {
         let exact = v.shade_byte() as f32 / 255.0;
         assert_eq!(v.shade(), exact);
         assert!(v.position().iter().all(|c| (0.0..=16.0).contains(c)));
     }
-}
-
-/// Вершины для GPU с общими индексами дают те же треугольники, что индексы мешера
-/// (в том же порядке обхода), в том числе у квадов с перевёрнутой диагональю.
-#[test]
-fn gpu_vertex_order_reproduces_mesher_triangles() {
-    use world::terrain::Terrain;
-
-    let column = Terrain::new(7).generate(ColumnPos::new(3, -2));
-    let mut flipped = 0;
-    for meshes in mesh_column(&column, air, full, AO) {
-        let gpu = crate::mesh::gpu_vertices(&meshes.solid.vertices, &meshes.solid.indices);
-        for (q, tris) in meshes.solid.indices.chunks(6).enumerate() {
-            let first = (q * 4) as u16;
-            flipped += usize::from(tris[0] != first);
-            let triangles = |vertices: &[Vertex], indices: [u16; 6], base: u16| {
-                indices.map(|i| vertices[usize::from(i - base)].position().map(f32::to_bits))
-            };
-            let cpu = triangles(&meshes.solid.vertices, tris.try_into().unwrap(), 0);
-            let on_gpu = triangles(&gpu, [0, 1, 2, 0, 2, 3].map(|i| first + i), 0);
-            assert_eq!(cpu, on_gpu, "quad {q}");
-        }
-    }
-    assert!(flipped > 0, "no flipped quads to check");
 }
 
 /// Мир 3×3 колонок вокруг (0, 0) из `block_at` и его свет.
@@ -1125,7 +1103,7 @@ fn glowstone_lights_a_dark_room_by_the_brighter_channel() {
         |_| true,
     );
     let top_of_floor = |x: f32| {
-        mesh.vertices
+        vertices(&mesh)
             .iter()
             .filter(|v| v.position()[1] == 1.0 && v.position()[0] == x && v.position()[2] == 4.0)
             .map(|v| v.brightness(0.0))
@@ -1198,8 +1176,8 @@ fn water_takes_light_of_cell_in_front() {
         .unwrap()
         .water;
     let top_shade = |x: i32| {
-        let quad = water
-            .vertices
+        let water_vertices = vertices(&water);
+        let quad = water_vertices
             .chunks(4)
             .find(|q| {
                 quad_normal(q) == IVec3::Y

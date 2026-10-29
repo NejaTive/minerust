@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use wgpu::util::DeviceExt;
+
 /// Аллокатор диапазонов в байтах без GPU: свободные диапазоны хранятся по смещению (слияние
 /// соседей при освобождении) и по размеру (best fit за O(log n)). Buddy не годится: размеры
 /// мешей секций различаются на порядки, округление до степени двойки съело бы запас.
@@ -150,44 +152,119 @@ pub(crate) fn grow_buffer(
     buffer
 }
 
-/// Один буфер вершин на все меши секций: диапазоны выдаёт [`RangeAllocator`].
-pub(crate) struct VertexArena {
+/// Один storage-буфер записей квадов на все меши секций: диапазоны выдаёт
+/// [`RangeAllocator`]. Вершинный шейдер читает его как `array<u32>` (запись квада — три
+/// слова, [`mesh::mesh::Quad`]); `array<vec3<u32>>` дал бы шаг 16 байт вместо 12.
+pub(crate) struct QuadArena {
     buffer: wgpu::Buffer,
+    /// Таблица шаблонов квадов ([`mesh::templates::table_bytes`]): живёт столько же, сколько арена.
+    table: wgpu::Buffer,
+    bind_group_layout: wgpu::BindGroupLayout,
+    bind_group: wgpu::BindGroup,
     allocator: RangeAllocator,
+    /// Предел размера: шейдер видит буфер целиком, так что действует
+    /// `max_storage_buffer_binding_size` (128 МиБ по умолчанию), а не `max_buffer_size`.
     max_size: u64,
 }
 
-/// Размер вершины, байт: смещение диапазона делится на него в `base_vertex`.
-pub(crate) const VERTEX_SIZE: u64 = size_of::<mesh::mesh::Vertex>() as u64;
+/// Выравнивание диапазонов, байт: слово `u32`. Начало диапазона для шейдера — номер
+/// слова, поэтому кратность записи (12 байт) не нужна, но смещение обязано делиться на 4.
+pub(crate) const WORD: u64 = 4;
 
-/// Начальный размер арены. Лес после 14b — ~31 МиБ мешей (дальность 12), так что
-/// обычная игра обходится без роста: он дорогой (копия всего буфера).
-const INITIAL_SIZE: u64 = 32 << 20;
+/// Начальный размер арены, 16 МиБ. Лес после 20b — около 12 МиБ записей квадов
+/// (дальность 12; 31.7 МиБ при 8-байтных вершинах), так что обычная игра обходится без
+/// роста: он дорогой (копия всего буфера), а +25% от 16 МиБ оставляет запас на
+/// дальность 16 без лишних перевыделений.
+const INITIAL_SIZE: u64 = 16 << 20;
 
-impl VertexArena {
+impl QuadArena {
     pub(crate) fn new(device: &wgpu::Device) -> Self {
-        let max_size = device.limits().max_buffer_size;
-        let size = INITIAL_SIZE.min(max_size - max_size % VERTEX_SIZE);
-        VertexArena {
-            buffer: Self::create_buffer(device, size),
-            allocator: RangeAllocator::new(size, VERTEX_SIZE),
+        let limits = device.limits();
+        let max_size = limits
+            .max_storage_buffer_binding_size
+            .min(limits.max_buffer_size);
+        let size = INITIAL_SIZE.min(max_size - max_size % WORD);
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("quad arena"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let buffer = Self::create_buffer(device, size);
+        let table = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("quad templates"),
+            contents: &mesh::templates::table_bytes(),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        QuadArena {
+            bind_group: Self::create_bind_group(device, &bind_group_layout, &buffer, &table),
+            buffer,
+            table,
+            bind_group_layout,
+            allocator: RangeAllocator::new(size, WORD),
             max_size,
         }
     }
 
     fn create_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vertex arena"),
+            label: Some("quad arena"),
             size,
-            usage: wgpu::BufferUsages::VERTEX
+            usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         })
     }
 
-    pub(crate) fn buffer(&self) -> &wgpu::Buffer {
-        &self.buffer
+    fn create_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        buffer: &wgpu::Buffer,
+        table: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("quad arena"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: table.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    pub(crate) fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
+    }
+
+    /// Группа привязки буфера; после роста арены — новая, её надо ставить заново.
+    pub(crate) fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
     }
 
     pub(crate) fn capacity(&self) -> u64 {
@@ -198,8 +275,8 @@ impl VertexArena {
         self.allocator.used()
     }
 
-    /// Записывает `bytes` (кратно размеру вершины) и возвращает смещение. Нет места —
-    /// арена растёт на 25%; на пределе `max_buffer_size` возвращает ошибку.
+    /// Записывает `bytes` (записи квадов) и возвращает смещение. Нет места — арена растёт
+    /// на 25%; на пределе буфера возвращает ошибку.
     pub(crate) fn write(
         &mut self,
         device: &wgpu::Device,
@@ -213,24 +290,26 @@ impl VertexArena {
                 // Свободного места в сумме может хватать, но не одним куском; растём
                 // на 25% и не меньше чем на весь меш, а не склеиваем дыры.
                 let needed = self.allocator.capacity() + size;
-                let capacity = grown_capacity(
-                    self.allocator.capacity(),
-                    needed,
-                    self.max_size,
-                    VERTEX_SIZE,
-                )
-                .ok_or_else(|| {
-                    format!(
-                        "vertex arena is full: {} MiB used of the {} MiB buffer limit",
-                        self.allocator.used() >> 20,
-                        self.max_size >> 20
-                    )
-                })?;
-                self.buffer = grow_buffer(device, queue, &self.buffer, capacity, "vertex arena");
+                let capacity =
+                    grown_capacity(self.allocator.capacity(), needed, self.max_size, WORD)
+                        .ok_or_else(|| {
+                            format!(
+                                "quad arena is full: {} MiB used of the {} MiB buffer limit",
+                                self.allocator.used() >> 20,
+                                self.max_size >> 20
+                            )
+                        })?;
+                self.buffer = grow_buffer(device, queue, &self.buffer, capacity, "quad arena");
+                self.bind_group = Self::create_bind_group(
+                    device,
+                    &self.bind_group_layout,
+                    &self.buffer,
+                    &self.table,
+                );
                 self.allocator.grow(capacity);
                 self.allocator
                     .alloc(size)
-                    .ok_or("vertex arena: no room after growth")?
+                    .ok_or("quad arena: no room after growth")?
             }
         };
         queue.write_buffer(&self.buffer, offset, bytes);

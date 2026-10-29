@@ -487,6 +487,7 @@ version = "0.20.0"
 dependencies = [
  "glam",
  "mesh",
+ "naga",
  "wgpu",
  "world",
 ]

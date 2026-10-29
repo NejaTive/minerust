@@ -1,4 +1,4 @@
-use crate::layout::{origin_layout, vertex_layout};
+use crate::layout::slot_layout;
 use crate::outline::OUTLINE_VERTEX_SIZE;
 use crate::shaders;
 
@@ -28,7 +28,7 @@ pub(crate) fn create_block_pipeline(
         vertex: wgpu::VertexState {
             module: shader,
             entry_point: Some("vs_main"),
-            buffers: &[Some(vertex_layout()), Some(origin_layout())],
+            buffers: &[Some(slot_layout())],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {

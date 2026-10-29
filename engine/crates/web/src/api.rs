@@ -51,22 +51,16 @@ pub struct WorldStats {
     /// CPU за кадр: `finish`, `submit`, `present`, мкс. Нули без профилирования.
     #[wasm_bindgen(js_name = submitUs)]
     pub submit_us: u32,
-    /// Вершины непрозрачных мешей, нарисованные в последнем кадре.
-    #[wasm_bindgen(js_name = solidVertices)]
-    pub solid_vertices: u32,
-    /// Индексы непрозрачных мешей в последнем кадре.
-    #[wasm_bindgen(js_name = solidIndices)]
-    pub solid_indices: u32,
-    /// Вершины воды в последнем кадре.
-    #[wasm_bindgen(js_name = waterVertices)]
-    pub water_vertices: u32,
-    /// Индексы воды в последнем кадре.
-    #[wasm_bindgen(js_name = waterIndices)]
-    pub water_indices: u32,
+    /// Квады непрозрачных мешей, нарисованные в последнем кадре (вершин в шесть раз больше).
+    #[wasm_bindgen(js_name = solidQuads)]
+    pub solid_quads: u32,
+    /// Квады воды в последнем кадре.
+    #[wasm_bindgen(js_name = waterQuads)]
+    pub water_quads: u32,
     /// Draw-вызовов в последнем кадре.
     #[wasm_bindgen(js_name = drawCalls)]
     pub draw_calls: u32,
-    /// Буферы мешей на GPU целиком (арена вершин и буфер углов с запасом) и общие индексы, КиБ.
+    /// Буферы мешей на GPU целиком (арена записей квадов и буфер слотов с запасом), КиБ.
     #[wasm_bindgen(js_name = gpuKib)]
     pub gpu_kib: u32,
     /// Из `gpuKib` занято мешами, КиБ; разница — запас арены.

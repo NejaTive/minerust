@@ -9,10 +9,8 @@ const LOAD_TIMEOUT_MS = 180_000
 
 function geometry(s: WorldStats) {
   return {
-    solidVertices: s.solidVertices,
-    solidIndices: s.solidIndices,
-    waterVertices: s.waterVertices,
-    waterIndices: s.waterIndices,
+    solidQuads: s.solidQuads,
+    waterQuads: s.waterQuads,
     drawCalls: s.drawCalls,
     drawnSections: s.drawnSections,
     meshedSections: s.meshedSections,
