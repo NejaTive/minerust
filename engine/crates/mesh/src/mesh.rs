@@ -100,6 +100,16 @@ impl Quad {
         ])
     }
 
+    /// Три слова записи: так квад пересекает границу воркера ([`crate::job`]).
+    pub fn words(self) -> [u32; 3] {
+        self.0
+    }
+
+    /// Обратное к [`Quad::words`]; слова должны быть из `words`, не проверяются.
+    pub fn from_words(words: [u32; 3]) -> Self {
+        Self(words)
+    }
+
     pub fn cell(self) -> [u8; 3] {
         let a = self.0[0];
         [a, a >> 4, a >> 8].map(|v| (v & 0xF) as u8)
