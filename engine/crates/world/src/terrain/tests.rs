@@ -71,7 +71,7 @@ fn low_ground_is_under_water() {
     .expect("no deep water");
     let (top, layers) = ground_layers(&terrain, x, z);
     assert!(top < WATER_LEVEL);
-    assert_eq!(layers[0], Block::Dirt, "no grass under water");
+    assert_eq!(layers[0], Block::Gravel, "deep water floor is gravel");
     assert!(layers.iter().all(|&b| b != Block::Water));
 }
 
@@ -218,4 +218,26 @@ fn biome_borders_have_no_cliffs() {
         border <= forest,
         "border step {border}, forest step {forest}"
     );
+}
+
+#[test]
+fn deep_water_floor_is_gravel() {
+    let terrain = Terrain::new(42);
+    let key = lake_key(&terrain);
+    let column = terrain.generate(key);
+    let origin = key.origin();
+    let mut deep = 0;
+    for z in 0..SECTION_SIZE {
+        for x in 0..SECTION_SIZE {
+            let surface = terrain.surface_height(origin.x + x, origin.z + z);
+            let top = column.get(IVec3::new(x, surface, z));
+            if WATER_LEVEL - surface > 2 {
+                deep += 1;
+                assert_eq!(top, Block::Gravel, "({x}, {z})");
+            } else {
+                assert_ne!(top, Block::Gravel, "({x}, {z})");
+            }
+        }
+    }
+    assert!(deep > 0);
 }

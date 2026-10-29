@@ -1,6 +1,6 @@
 use super::*;
 
-const ALL: [Block; 13] = Block::ALL;
+const ALL: [Block; 14] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -8,7 +8,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(13), Err(13));
+    assert_eq!(Block::try_from(14), Err(14));
     assert_eq!(Block::try_from(255), Err(255));
 }
 

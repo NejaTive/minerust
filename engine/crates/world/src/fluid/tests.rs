@@ -2,6 +2,7 @@ use super::*;
 use crate::block::fluid_height_units;
 use crate::column::Column;
 use crate::pos::ColumnPos;
+use crate::updates::STEP_LIMIT;
 
 const FLOOR: i32 = 10;
 const WATER_Y: i32 = FLOOR + 1;

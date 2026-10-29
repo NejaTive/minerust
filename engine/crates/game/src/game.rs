@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use glam::{IVec3, Vec3};
 use world::block::Block;
 use world::column::{Column, WORLD_HEIGHT};
+use world::falling::Falling;
 use world::fluid::Fluid;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
@@ -23,6 +24,7 @@ const DEFAULT_BLOCK: Block = Block::Grass;
 const MAX_DT: f32 = 0.1;
 const DOUBLE_TAP_S: f32 = 0.3;
 const FLUID_STEP_TICKS: u32 = 15;
+const FALL_STEP_TICKS: u32 = 6;
 
 #[derive(Default)]
 pub struct Edits {
@@ -35,8 +37,10 @@ pub struct Game {
     pub light: LightMap,
     fluid: Fluid,
     fluid_ticks: u32,
-    flow_dirty: HashSet<SectionPos>,
-    flow_lit: Vec<SectionPos>,
+    falling: Falling,
+    fall_ticks: u32,
+    pending_dirty: HashSet<SectionPos>,
+    pending_lit: Vec<SectionPos>,
     pub terrain: Terrain,
     seed: i32,
     camera: Camera,
@@ -78,8 +82,10 @@ impl Game {
             light: LightMap::new(),
             fluid: Fluid::new(),
             fluid_ticks: 0,
-            flow_dirty: HashSet::new(),
-            flow_lit: Vec::new(),
+            falling: Falling::new(),
+            fall_ticks: 0,
+            pending_dirty: HashSet::new(),
+            pending_lit: Vec::new(),
             terrain,
             seed,
             camera,
@@ -284,8 +290,8 @@ impl Game {
     }
 
     pub fn interact(&mut self, time: f32) -> Edits {
-        let mut dirty = std::mem::take(&mut self.flow_dirty);
-        let mut lit = std::mem::take(&mut self.flow_lit);
+        let mut dirty = std::mem::take(&mut self.pending_dirty);
+        let mut lit = std::mem::take(&mut self.pending_lit);
         if self.paused {
             return Edits {
                 dirty: dirty.into_iter().collect(),
@@ -353,6 +359,7 @@ impl Game {
     ) {
         for &pos in changed {
             self.fluid.block_changed(&self.world, pos);
+            self.falling.block_changed(&self.world, pos);
             dirty.extend(affected_sections(pos));
             lit.extend(self.light.block_changed(&self.world, pos));
         }
@@ -366,6 +373,7 @@ impl Game {
             self.day.advance(ticks * factor);
         }
         self.advance_fluid(ticks);
+        self.advance_falling(ticks);
         for _ in 0..ticks {
             if !self.body_loaded() {
                 self.clock.reset();
@@ -389,13 +397,29 @@ impl Game {
         while self.fluid_ticks >= FLUID_STEP_TICKS {
             self.fluid_ticks -= FLUID_STEP_TICKS;
             let changed = self.fluid.step(&mut self.world);
-            let (mut dirty, mut lit) = (
-                std::mem::take(&mut self.flow_dirty),
-                std::mem::take(&mut self.flow_lit),
-            );
-            self.apply_edit(&changed, &mut dirty, &mut lit);
-            (self.flow_dirty, self.flow_lit) = (dirty, lit);
+            self.apply_pending(&changed);
         }
+    }
+
+    fn advance_falling(&mut self, ticks: u32) {
+        self.fall_ticks += ticks;
+        while self.fall_ticks >= FALL_STEP_TICKS {
+            self.fall_ticks -= FALL_STEP_TICKS;
+            let player = &self.player;
+            let changed = self
+                .falling
+                .step(&mut self.world, |pos| player.overlaps_block(pos));
+            self.apply_pending(&changed);
+        }
+    }
+
+    fn apply_pending(&mut self, changed: &[IVec3]) {
+        let (mut dirty, mut lit) = (
+            std::mem::take(&mut self.pending_dirty),
+            std::mem::take(&mut self.pending_lit),
+        );
+        self.apply_edit(changed, &mut dirty, &mut lit);
+        (self.pending_dirty, self.pending_lit) = (dirty, lit);
     }
 
     fn input(&self) -> Input {
