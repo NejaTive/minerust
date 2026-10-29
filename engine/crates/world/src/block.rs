@@ -22,9 +22,9 @@ pub enum Block {
     Torch,
 }
 
-/// Высота поверхности воды над низом блока, если над ней не вода: как в Minecraft,
-/// поверхность чуть ниже берега, и кромка воды не сливается с землёй. По ней же
-/// опущены верхние вершины боковых граней и решается, в воде ли глаза.
+/// Высота поверхности воды-источника над низом блока, если над ней не вода: как в
+/// Minecraft, поверхность чуть ниже берега, и кромка воды не сливается с землёй. По ней
+/// же опущены верхние вершины боковых граней и решается, в воде ли глаза.
 pub const WATER_SURFACE: f32 = 0.875;
 
 /// В каком проходе отрисовки рисуются грани блока.
@@ -60,6 +60,10 @@ pub enum DataKind {
     /// Куда прикреплён блок: [`ATTACH_FLOOR`] (0, держится за блок снизу) или
     /// [`ATTACH_POS_X`]..[`ATTACH_NEG_Z`] — за стену в этой стороне от блока (факел).
     Attachment,
+    /// Уровень воды: биты [`FLUID_LEVEL_MASK`] — [`FLUID_SOURCE`] (0, источник) или
+    /// 1..=[`FLUID_MAX_LEVEL`] (растекающаяся, чем дальше от источника, тем больше);
+    /// бит [`FLUID_FALLING`] — падающая вода.
+    Fluid,
 }
 
 /// Ось бревна в байте данных. Ноль — стоячее: так бревно из генерации и из
@@ -75,6 +79,35 @@ pub const ATTACH_POS_X: u8 = 1;
 pub const ATTACH_NEG_X: u8 = 2;
 pub const ATTACH_POS_Z: u8 = 3;
 pub const ATTACH_NEG_Z: u8 = 4;
+
+/// Вода в байте данных. Ноль — источник: вода из генерации и озёра в сохранениях
+/// остаются источниками.
+pub const FLUID_SOURCE: u8 = 0;
+/// Самая растекающаяся вода: дальше неё вода не течёт.
+pub const FLUID_MAX_LEVEL: u8 = 7;
+pub const FLUID_LEVEL_MASK: u8 = 0b111;
+/// Падающая вода: над ней или под ней течёт вода, высота полная. Уровень при этом 0:
+/// у стока вода растекается так же, как от источника.
+pub const FLUID_FALLING: u8 = 0b1000;
+
+/// Высота верха воды по уровню 0..=7, в шестнадцатых долях блока: уровень 0 — как
+/// [`WATER_SURFACE`], дальше линейно до 2/16 на уровне 7, округлённо до шага позиции вершины.
+const FLUID_LEVEL_HEIGHT_UNITS: [u8; 8] = [14, 12, 11, 9, 7, 5, 4, 2];
+
+/// Высота воды с данными `data` над низом клетки в шестнадцатых долях блока; падающая —
+/// полная (16).
+pub fn fluid_height_units(data: u8) -> u8 {
+    if data & FLUID_FALLING != 0 {
+        16
+    } else {
+        FLUID_LEVEL_HEIGHT_UNITS[usize::from(data & FLUID_LEVEL_MASK)]
+    }
+}
+
+/// [`fluid_height_units`] в долях блока.
+pub fn fluid_height(data: u8) -> f32 {
+    f32::from(fluid_height_units(data)) / 16.0
+}
 
 /// Настенный факел в шестнадцатых долях блока, для лежащей у стены в −X и наклонённой в
 /// +X (остальные три стороны — поворотом вокруг центра клетки). Наклон 4/10 ≈ 22°:
@@ -98,7 +131,7 @@ pub struct BlockDef {
     pub name: &'static str,
     /// Подпись для игрока.
     pub label: &'static str,
-    /// Игрок может поставить блок: воздух и вода — нет, у воздуха есть ломание.
+    /// Игрок может поставить блок: воздух — нет, у него есть ломание.
     pub selectable: bool,
     /// Для коллизий, прицела и проверки установки: всё, кроме воздуха, воды и не-кубов.
     pub solid: bool,
@@ -216,11 +249,11 @@ pub const BLOCKS: [BlockDef; 13] = [
     },
     // Water
     BlockDef {
-        selectable: false,
         solid: false,
         opaque: false,
         targetable: false,
         replaceable: true,
+        data: DataKind::Fluid,
         layer: RenderLayer::Translucent,
         ..BlockDef::uniform("water", "вода", Tile::Water)
     },
@@ -349,7 +382,7 @@ impl Block {
     /// не висит на нижней грани.
     pub fn placement_data(self, normal: IVec3) -> Option<u8> {
         match self.data_kind() {
-            DataKind::None => Some(0),
+            DataKind::None | DataKind::Fluid => Some(0),
             DataKind::Axis => Some(match normal.abs().max_position() {
                 0 => AXIS_X,
                 1 => AXIS_Y,
@@ -403,7 +436,7 @@ impl Block {
     }
 
     /// Блок, который игрок может выбрать, по имени из интерфейса (`"grass"`,
-    /// `"tall_grass"`, …). Воздух и вода не выбираются: для воздуха есть ломание.
+    /// `"tall_grass"`, …). Воздух не выбирается: для него есть ломание.
     pub fn from_name(name: &str) -> Option<Block> {
         Block::ALL
             .into_iter()

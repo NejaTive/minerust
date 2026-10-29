@@ -63,7 +63,7 @@ fn mesh_stages() {
     ] {
         let (mut total, mut cache, mut write) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
         let mut quads = 0usize;
-        let (mut blocks, mut lights) = new_caches();
+        let (mut blocks, mut lights, mut datas) = new_caches();
         for _ in 0..REPEATS {
             let mut meshes = Vec::new();
             for &key in &keys {
@@ -73,18 +73,13 @@ fn mesh_stages() {
                         continue;
                     }
                     let start = Instant::now();
-                    around.fill(sy, &mut blocks, &mut lights);
-                    black_box((&blocks, &lights));
+                    around.fill(sy, &mut blocks, &mut lights, &mut datas);
+                    black_box((&blocks, &lights, &datas));
                     cache += start.elapsed();
 
                     let start = Instant::now();
-                    around.fill(sy, &mut blocks, &mut lights);
-                    let data = mesh_cached(
-                        &blocks,
-                        &lights,
-                        around.columns[4].unwrap().section(sy).data(),
-                        options,
-                    );
+                    around.fill(sy, &mut blocks, &mut lights, &mut datas);
+                    let data = mesh_cached(&blocks, &lights, &datas, options);
                     total += start.elapsed();
                     meshes.push(black_box(data));
                 }

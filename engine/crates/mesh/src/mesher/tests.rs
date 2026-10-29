@@ -868,12 +868,40 @@ fn torch_light_comes_from_its_cell() {
     );
 }
 
+/// Высота угла одиночного источника в воздухе: (14·10) / (10 + 3 воздуха) ≈ 10.8 из 16.
+const LONE_SOURCE: f32 = 11.0 / 16.0;
+
+/// Секция из блоков с байтами данных.
+fn section_with_data(blocks: &[(IVec3, Block, u8)]) -> SectionMeshes {
+    let mut section = Section::new();
+    for &(pos, block, data) in blocks {
+        section.set_with_data(pos, block, data);
+    }
+    mesh_section(&section, air, full, AO)
+}
+
+/// Углы верхних граней воды (по четыре, в порядке шаблона) и номера их клеток.
+fn water_tops(mesh: &SectionMeshes) -> Vec<(IVec3, Vec<[f32; 3]>)> {
+    let corners = vertices(&mesh.water);
+    mesh.water
+        .quads
+        .iter()
+        .zip(corners.chunks(4))
+        .filter(|(quad, _)| [WATER_TOP, WATER_TOP_SLOPED].contains(&quad.template()))
+        .map(|(quad, vertices)| {
+            let cell = quad.cell().map(i32::from);
+            let corners = vertices.iter().map(|v| v.position()).collect();
+            (IVec3::from(cell), corners)
+        })
+        .collect()
+}
+
 #[test]
 fn water_block_in_air_has_six_lowered_faces() {
     let mesh = section_of(&[(IVec3::new(5, 5, 5), Block::Water)]);
     assert_eq!(face_count(&mesh.solid), 0);
     assert_eq!(face_count(&mesh.water), 6);
-    let top = 5.0 + WATER_SURFACE;
+    let top = 5.0 + LONE_SOURCE;
     for quad in vertices(&mesh.water).chunks(4) {
         assert!(quad.iter().all(|v| v.layer() == Tile::Water.layer() as u8));
         // Без AO: одна яркость стороны на весь квад.
@@ -946,7 +974,7 @@ fn water_under_water_is_full_height_without_top() {
         .collect();
     assert_eq!(
         tops,
-        [6.0 + WATER_SURFACE; 4],
+        [6.0 + LONE_SOURCE; 4],
         "only the upper block has a top"
     );
     // Боковые грани нижнего блока — до самого верха, без щели под верхним.
@@ -971,7 +999,7 @@ fn water_under_stone_is_lowered_without_top() {
         .iter()
         .map(|v| v.position()[1])
         .fold(0.0, f32::max);
-    assert_eq!(max, 5.0 + WATER_SURFACE);
+    assert_eq!(max, 5.0 + LONE_SOURCE);
     // Низ камня над водой виден.
     assert_eq!(face_count(&mesh.solid), 6);
 }
@@ -1231,5 +1259,110 @@ fn world_section_outside_is_none() {
             some,
             "{key}"
         );
+    }
+}
+
+fn lake(levels: &[(i32, i32, u8)]) -> SectionMeshes {
+    let blocks: Vec<_> = levels
+        .iter()
+        .map(|&(x, z, data)| (IVec3::new(x, 5, z), Block::Water, data))
+        .collect();
+    section_with_data(&blocks)
+}
+
+/// Высоты углов верха клетки `cell` с заданной координатой `x`.
+fn heights_at_x(tops: &[(IVec3, Vec<[f32; 3]>)], cell: IVec3, x: f32) -> Vec<f32> {
+    let (_, corners) = tops
+        .iter()
+        .find(|(c, _)| *c == cell)
+        .expect("top of the cell");
+    let mut ys: Vec<f32> = corners.iter().filter(|p| p[0] == x).map(|p| p[1]).collect();
+    ys.sort_by(f32::total_cmp);
+    ys
+}
+
+#[test]
+fn flat_lake_center_keeps_source_height_and_legacy_template() {
+    let cells: Vec<_> = (4..7)
+        .flat_map(|x| (4..7).map(move |z| (x, z, 0)))
+        .collect();
+    let mesh = lake(&cells);
+    let tops = water_tops(&mesh);
+    assert_eq!(tops.len(), 9);
+    let (_, center) = tops
+        .iter()
+        .find(|(cell, _)| *cell == IVec3::new(5, 5, 5))
+        .unwrap();
+    assert!(
+        center.iter().all(|p| p[1] == 5.0 + WATER_SURFACE),
+        "{center:?}"
+    );
+    let center_quad = mesh
+        .water
+        .quads
+        .iter()
+        .find(|q| q.cell() == [5, 5, 5] && q.template() == WATER_TOP);
+    assert!(center_quad.is_some(), "flat surface keeps the old template");
+}
+
+#[test]
+fn water_top_slopes_by_averaged_corner_heights() {
+    // Источник (14, вес 10) рядом с уровнем 7 (2, вес 1): у общих углов по две воздушные
+    // клетки, (140 + 2) / 13 ≈ 10.9 → 11.
+    let mesh = lake(&[(5, 5, 0), (6, 5, 7)]);
+    let tops = water_tops(&mesh);
+    assert_eq!(tops.len(), 2);
+    let expected = vec![5.0 + 11.0 / 16.0; 2];
+    assert_eq!(heights_at_x(&tops, IVec3::new(5, 5, 5), 6.0), expected);
+    // Общие углы одни и те же у обеих клеток: поверхность без щели.
+    assert_eq!(heights_at_x(&tops, IVec3::new(6, 5, 5), 6.0), expected);
+    // Дальний от источника угол низкой воды — ниже общих.
+    let far = heights_at_x(&tops, IVec3::new(6, 5, 5), 7.0);
+    assert!(far.iter().all(|&y| y < expected[0]), "{far:?}");
+    // Боковой грани между водой нет: у каждой клетки верх, низ и три стороны к воздуху.
+    assert_eq!(face_count(&mesh.water), 10);
+}
+
+#[test]
+fn corner_next_to_water_above_is_full() {
+    let mesh = section_with_data(&[
+        (IVec3::new(5, 5, 5), Block::Water, 0),
+        (IVec3::new(6, 5, 5), Block::Water, 0),
+        (IVec3::new(6, 6, 5), Block::Water, 0),
+    ]);
+    let tops = water_tops(&mesh);
+    // Над (6,5,5) вода: у (5,5,5) общие углы по x = 6 полные, остальные ниже.
+    assert_eq!(heights_at_x(&tops, IVec3::new(5, 5, 5), 6.0), [6.0, 6.0]);
+    assert!(
+        heights_at_x(&tops, IVec3::new(5, 5, 5), 5.0)
+            .iter()
+            .all(|&y| y < 6.0)
+    );
+}
+
+#[test]
+fn falling_water_counts_as_full_height_in_the_average() {
+    use world::block::FLUID_FALLING;
+    let mesh = lake(&[(5, 5, 0), (6, 5, FLUID_FALLING)]);
+    let tops = water_tops(&mesh);
+    // Падающая клетка высотой 16 и источник 14, оба весом 10, плюс два воздуха: 300 / 22.
+    let expected = 5.0 + 14.0 / 16.0;
+    assert_eq!(heights_at_x(&tops, IVec3::new(5, 5, 5), 6.0), [expected; 2]);
+}
+
+#[test]
+fn sloped_quad_heights_survive_the_words_round_trip() {
+    let mesh = lake(&[(5, 5, 0), (6, 5, 3), (7, 5, 6)]);
+    let sloped: Vec<_> = mesh
+        .water
+        .quads
+        .iter()
+        .filter(|q| q.template() >= WATER_TOP_SLOPED)
+        .collect();
+    assert!(!sloped.is_empty());
+    for quad in sloped {
+        let back = crate::mesh::Quad::from_words(quad.words());
+        assert_eq!(back.heights(), quad.heights());
+        assert!(quad.heights().iter().all(|h| (1..=16).contains(h)));
     }
 }

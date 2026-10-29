@@ -1,6 +1,7 @@
 pub mod block;
 mod caves;
 pub mod column;
+pub mod fluid;
 pub mod light;
 mod plants;
 pub mod pos;

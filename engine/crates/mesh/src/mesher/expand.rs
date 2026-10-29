@@ -3,7 +3,7 @@
 
 use crate::mesh::{POSITION_UNITS, light_brightness, quantize_shade};
 use crate::mesher::MeshData;
-use crate::templates::{AO_BRIGHTNESS, templates};
+use crate::templates::{AO_BRIGHTNESS, SIDE_TOP_CORNER, TOP_CORNER, templates};
 
 /// Вершина квада после развёртки. Позиция — шаги 1/16 блока от угла секции.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,10 +63,19 @@ pub fn vertices(data: &MeshData) -> Vec<Vertex> {
             let quad = *quad;
             std::array::from_fn::<_, 4, _>(move |i| {
                 let corner = template.corners[i];
-                let [x, y, z] = corner.pos.map(u16::from);
+                let [x, mut y, z] = corner.pos.map(u16::from);
+                let mut uv = corner.uv;
+                // Как в `vs_main`: высота наклонной воды из записи квада.
+                if y == u16::from(TOP_CORNER) || y == u16::from(SIDE_TOP_CORNER) {
+                    let top = quad.heights()[i];
+                    if y == u16::from(SIDE_TOP_CORNER) {
+                        uv[1] = POSITION_UNITS as u8 - top;
+                    }
+                    y = u16::from(top);
+                }
                 Vertex {
                     position: [cx + x, cy + y, cz + z],
-                    uv: corner.uv,
+                    uv,
                     shade: quantize_shade(
                         template.shade * AO_BRIGHTNESS[usize::from(quad.ao()[i])],
                     ),

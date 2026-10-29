@@ -24,11 +24,8 @@ fn placeable_matches_select_block_names() {
         );
     }
     let placeable: Vec<_> = blocks().into_iter().filter(|b| b.placeable).collect();
-    assert!(
-        placeable
-            .iter()
-            .all(|b| b.name != "air" && b.name != "water")
-    );
+    assert!(placeable.iter().all(|b| b.name != "air"));
+    assert!(placeable.iter().any(|b| b.name == "water"));
     assert!(!placeable.is_empty());
 }
 

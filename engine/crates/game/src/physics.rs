@@ -1,7 +1,5 @@
 use glam::{IVec3, Vec2, Vec3};
 
-use world::block::WATER_SURFACE;
-
 pub const PLAYER_WIDTH: f32 = 0.6;
 pub const PLAYER_HEIGHT: f32 = 1.8;
 pub const EYE_HEIGHT: f32 = 1.62;
@@ -154,9 +152,9 @@ impl Player {
     }
 
     /// На сколько блоков ноги ниже поверхности воды, которой касается тело; 0 — тело
-    /// не в воде. Поверхность — верх самого высокого блока воды в теле, у верхнего
-    /// блока воды — [`WATER_SURFACE`].
-    pub fn water_depth(&self, is_water: impl Fn(IVec3) -> bool) -> f32 {
+    /// не в воде. Поверхность — верх самого высокого блока воды в теле. `water_height` —
+    /// высота воды в клетке над её низом (`World::water_height`), `None` — воды нет.
+    pub fn water_depth(&self, water_height: impl Fn(IVec3) -> Option<f32>) -> f32 {
         let (min, max) = self.aabb();
         let lo = (min + EPS).floor().as_ivec3();
         let hi = (max - EPS).floor().as_ivec3();
@@ -165,8 +163,8 @@ impl Player {
             for z in lo.z..=hi.z {
                 for x in lo.x..=hi.x {
                     let pos = IVec3::new(x, y, z);
-                    if is_water(pos) {
-                        let top = y as f32 + water_height(pos, &is_water);
+                    if let Some(height) = water_height(pos) {
+                        let top = y as f32 + height;
                         surface = Some(surface.map_or(top, |s: f32| s.max(top)));
                     }
                 }
@@ -176,10 +174,10 @@ impl Player {
     }
 
     /// В воде ли глаза: в клетке воды и ниже её поверхности.
-    pub fn eyes_in_water(&self, is_water: impl Fn(IVec3) -> bool) -> bool {
+    pub fn eyes_in_water(&self, water_height: impl Fn(IVec3) -> Option<f32>) -> bool {
         let eye = self.eye();
         let cell = eye.floor().as_ivec3();
-        is_water(cell) && eye.y < cell.y as f32 + water_height(cell, &is_water)
+        water_height(cell).is_some_and(|height| eye.y < cell.y as f32 + height)
     }
 
     /// Один шаг физики длиной [`TICK`]. `yaw` — направление взгляда по горизонтали
@@ -189,7 +187,7 @@ impl Player {
         input: &Input,
         yaw: f32,
         is_solid: impl Fn(IVec3) -> bool,
-        is_water: impl Fn(IVec3) -> bool,
+        water_height: impl Fn(IVec3) -> Option<f32>,
     ) {
         let (sin, cos) = yaw.sin_cos();
         let forward = Vec3::new(cos, 0.0, sin);
@@ -199,7 +197,7 @@ impl Player {
         let vertical = f32::from(u8::from(input.jump)) - f32::from(u8::from(input.descend));
 
         let depth = match self.mode {
-            Mode::Walking => self.water_depth(&is_water),
+            Mode::Walking => self.water_depth(&water_height),
             Mode::Flying | Mode::Noclip => 0.0,
         };
         // В полёте вода не мешает, поэтому и бег в ней не прерывается (depth там 0).
@@ -341,15 +339,6 @@ impl Player {
         }
         self.feet[axis] += delta;
         false
-    }
-}
-
-/// Высота воды в клетке `pos` над её низом: полная, если над ней тоже вода.
-fn water_height(pos: IVec3, is_water: &impl Fn(IVec3) -> bool) -> f32 {
-    if is_water(pos + IVec3::Y) {
-        1.0
-    } else {
-        WATER_SURFACE
     }
 }
 

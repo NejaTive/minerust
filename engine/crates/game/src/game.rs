@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use glam::{IVec3, Vec3};
 use world::block::Block;
 use world::column::{Column, WORLD_HEIGHT};
+use world::fluid::Fluid;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
 use world::terrain::Terrain;
@@ -28,6 +29,9 @@ const DEFAULT_BLOCK: Block = Block::Grass;
 const MAX_DT: f32 = 0.1;
 /// Окно двойного нажатия пробела (полёт ↔ ходьба), с.
 const DOUBLE_TAP_S: f32 = 0.3;
+/// Шагов физики между шагами жидкости: при 60 тиках в секунду это 4 шага в секунду,
+/// вода продвигается на клетку за четверть секунды, как в Minecraft.
+const FLUID_STEP_TICKS: u32 = 15;
 
 /// Что изменила правка блоков за кадр; перестраивает меши тот, кто их держит.
 #[derive(Default)]
@@ -45,6 +49,14 @@ pub struct Game {
     /// Солнечный свет загруженных колонок: колонка попадает сюда сразу после загрузки,
     /// так что к её мешу (после загрузки всех соседей) свет окончателен.
     pub light: LightMap,
+    /// Очередь клеток течения воды.
+    fluid: Fluid,
+    /// Шагов физики с прошлого шага жидкости.
+    fluid_ticks: u32,
+    /// Правки от течения за кадр: уходят вместе с правками игрока в [`Game::interact`],
+    /// потому что мешует их тот же кадр.
+    flow_dirty: HashSet<SectionPos>,
+    flow_lit: Vec<SectionPos>,
     pub terrain: Terrain,
     seed: i32,
     /// Взгляд игрока. Позицию задаёт `player`: каждый кадр камера ставится в его глаза.
@@ -100,6 +112,10 @@ impl Game {
         Ok(Game {
             world: World::new(),
             light: LightMap::new(),
+            fluid: Fluid::new(),
+            fluid_ticks: 0,
+            flow_dirty: HashSet::new(),
+            flow_lit: Vec::new(),
             terrain,
             seed,
             camera,
@@ -223,7 +239,7 @@ impl Game {
     /// Глаза игрока под водой.
     pub fn underwater(&self) -> bool {
         self.player
-            .eyes_in_water(|pos| self.world.block(pos).is_water())
+            .eyes_in_water(|pos| self.world.water_height(pos))
     }
 
     // --- ввод ---
@@ -337,12 +353,15 @@ impl Game {
     /// Ломание и установка по кнопкам мыши. Перестраивать меши задетых секций надо в
     /// этом же кадре — вне бюджета подгрузки, чтобы правка была видна сразу.
     pub fn interact(&mut self, time: f32) -> Edits {
+        let mut dirty = std::mem::take(&mut self.flow_dirty);
+        let mut lit = std::mem::take(&mut self.flow_lit);
         if self.paused {
-            return Edits::default();
+            return Edits {
+                dirty: dirty.into_iter().collect(),
+                lit,
+            };
         }
         let mut target = self.pick();
-        let mut dirty = HashSet::new();
-        let mut lit = Vec::new();
         // `fire` вызывается каждый кадр, даже без цели: так при удержании темп не сбивается.
         if self.breaking.fire(time)
             && let Some(hit) = target
@@ -365,7 +384,7 @@ impl Game {
             // `set_block` сам отказывает вне высоты мира и в незагруженной колонке.
             if let Some(data) = block.placement_data(hit.normal)
                 && self.world.can_place_with_data(pos, block, data)
-                && !self.player.overlaps_block(pos)
+                && (block.is_water() || !self.player.overlaps_block(pos))
             {
                 let changed = self.world.set_block_supported_with_data(pos, block, data);
                 if !changed.is_empty() {
@@ -404,7 +423,8 @@ impl Game {
         })
     }
 
-    /// Собирает секции и свет по клеткам правки (`World::set_block_supported`).
+    /// Собирает секции и свет по клеткам правки (`World::set_block_supported`) и ставит
+    /// клетки в очередь течения.
     fn apply_edit(
         &mut self,
         changed: &[IVec3],
@@ -412,6 +432,7 @@ impl Game {
         lit: &mut Vec<SectionPos>,
     ) {
         for &pos in changed {
+            self.fluid.block_changed(&self.world, pos);
             dirty.extend(affected_sections(pos));
             lit.extend(self.light.block_changed(&self.world, pos));
         }
@@ -425,6 +446,7 @@ impl Game {
             let factor = if self.time_fast { TIME_FAST_FACTOR } else { 1 };
             self.day.advance(ticks * factor);
         }
+        self.advance_fluid(ticks);
         for _ in 0..ticks {
             if !self.body_loaded() {
                 // Под незагруженной колонкой `World::block` — воздух, и игрок провалился
@@ -439,11 +461,26 @@ impl Game {
                 &input,
                 self.camera.yaw,
                 |pos| self.world.block(pos).is_solid(),
-                |pos| self.world.block(pos).is_water(),
+                |pos| self.world.water_height(pos),
             );
         }
         let feet = self.prev_feet.lerp(self.player.feet, self.clock.alpha());
         self.camera.position = feet + Vec3::Y * EYE_HEIGHT;
+    }
+
+    /// Шаги жидкости за `ticks` шагов физики; правки копятся до [`Game::interact`].
+    fn advance_fluid(&mut self, ticks: u32) {
+        self.fluid_ticks += ticks;
+        while self.fluid_ticks >= FLUID_STEP_TICKS {
+            self.fluid_ticks -= FLUID_STEP_TICKS;
+            let changed = self.fluid.step(&mut self.world);
+            let (mut dirty, mut lit) = (
+                std::mem::take(&mut self.flow_dirty),
+                std::mem::take(&mut self.flow_lit),
+            );
+            self.apply_edit(&changed, &mut dirty, &mut lit);
+            (self.flow_dirty, self.flow_lit) = (dirty, lit);
+        }
     }
 
     /// Намерения игрока по зажатым клавишам.

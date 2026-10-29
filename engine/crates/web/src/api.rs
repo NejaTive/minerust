@@ -103,7 +103,7 @@ pub struct BlockInfo {
     /// Русская подпись для игрока.
     #[wasm_bindgen(getter_with_clone)]
     pub label: String,
-    /// Игрок может поставить блок (`select_block` его примет): не воздух и не вода.
+    /// Игрок может поставить блок (`select_block` его примет): всё, кроме воздуха.
     pub placeable: bool,
 }
 

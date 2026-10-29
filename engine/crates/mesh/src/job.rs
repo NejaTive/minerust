@@ -5,21 +5,20 @@
 //! Все числа — little endian.
 //! - Задание: `id: u32`, `ambient_occlusion: u8`, `count: u8`, затем `count` секций:
 //!   `sy: u8`, `has_data: u8`, блоки кэша (`PADDED³` байт), свет кэша (`PADDED³` байт) и,
-//!   если `has_data = 1`, 4096 байт данных блоков самой секции (`x + 16·z + 256·y`).
-//!   Данные соседних секций не нужны мешеру, поэтому задание их не несёт.
+//!   если `has_data = 1`, `PADDED³` байт данных блоков кэша (уровень воды у стыка секций
+//!   зависит от данных соседей). Без данных все нули.
 //! - Результат: `id: u32`, `count: u8`, затем `count` секций: `sy: u8` и три меша
 //!   (`solid`, `cutout`, `water`), у каждого `quads: u32` и столько записей по 12 байт.
 use world::block::Block;
 use world::column::COLUMN_SECTIONS;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
-use world::section::SECTION_VOLUME;
 use world::world::World;
 
 use crate::mesh::{QUAD_BYTES, Quad};
 use crate::mesher::{
-    Lights, MeshData, MeshOptions, Neighborhood, PADDED, SectionMeshes, Surroundings, mesh_cached,
-    new_caches,
+    Datas, Lights, MeshData, MeshOptions, Neighborhood, PADDED, SectionMeshes, Surroundings,
+    mesh_cached, new_caches,
 };
 
 const CACHE_LEN: usize = (PADDED * PADDED * PADDED) as usize;
@@ -68,16 +67,16 @@ fn push_section(
     around: &Surroundings,
     blocks: &mut Neighborhood,
     lights: &mut Lights,
+    datas: &mut Datas,
 ) {
-    around.fill(sy, blocks, lights);
-    let data = around.columns[4].and_then(|column| column.section(sy).data());
+    let has_data = around.fill(sy, blocks, lights, datas);
     bytes.push(sy as u8);
-    bytes.push(u8::from(data.is_some()));
+    bytes.push(u8::from(has_data));
     // `Block` — `repr(u8)`, поэтому побайтовая запись совпадает с номерами блоков.
     bytes.extend(blocks.0.iter().map(|&b| b as u8));
     bytes.extend_from_slice(&lights.0);
-    if let Some(data) = data {
-        bytes.extend_from_slice(data);
+    if has_data {
+        bytes.extend_from_slice(&datas.0);
     }
     bytes[HEADER_LEN - 1] += 1;
 }
@@ -94,10 +93,17 @@ pub fn encode_column_job(
     let around = Surroundings::new(world, light, key)?;
     let column = around.columns[4]?;
     let mut bytes = start_job(id, options);
-    let (mut blocks, mut lights) = new_caches();
+    let (mut blocks, mut lights, mut datas) = new_caches();
     for sy in 0..COLUMN_SECTIONS {
         if !column.section(sy).is_air() {
-            push_section(&mut bytes, sy, &around, &mut blocks, &mut lights);
+            push_section(
+                &mut bytes,
+                sy,
+                &around,
+                &mut blocks,
+                &mut lights,
+                &mut datas,
+            );
         }
     }
     Some(bytes)
@@ -118,8 +124,15 @@ pub fn encode_section_job(
     let around = Surroundings::new(world, light, key.column())?;
     let mut bytes = start_job(id, options);
     if !around.columns[4]?.section(key.y()).is_air() {
-        let (mut blocks, mut lights) = new_caches();
-        push_section(&mut bytes, key.y(), &around, &mut blocks, &mut lights);
+        let (mut blocks, mut lights, mut datas) = new_caches();
+        push_section(
+            &mut bytes,
+            key.y(),
+            &around,
+            &mut blocks,
+            &mut lights,
+            &mut datas,
+        );
     }
     Some(bytes)
 }
@@ -132,8 +145,7 @@ pub fn run_job(job: &[u8]) -> Vec<u8> {
         ambient_occlusion: job[4] != 0,
     };
     let count = usize::from(job[5]);
-    let (mut blocks, mut lights) = new_caches();
-    let mut data = Box::new([0u8; SECTION_VOLUME]);
+    let (mut blocks, mut lights, mut datas) = new_caches();
     let mut out = Vec::new();
     out.extend_from_slice(&id.to_le_bytes());
     out.push(count as u8);
@@ -147,10 +159,12 @@ pub fn run_job(job: &[u8]) -> Vec<u8> {
         lights.0.copy_from_slice(&body[CACHE_LEN..2 * CACHE_LEN]);
         at += SECTION_JOB_LEN;
         if has_data {
-            data.copy_from_slice(&job[at..at + SECTION_VOLUME]);
-            at += SECTION_VOLUME;
+            datas.0.copy_from_slice(&job[at..at + CACHE_LEN]);
+            at += CACHE_LEN;
+        } else {
+            datas.0.fill(0);
         }
-        let meshes = mesh_cached(&blocks, &lights, has_data.then_some(&*data), options);
+        let meshes = mesh_cached(&blocks, &lights, &datas, options);
         out.push(sy);
         for mesh in [&meshes.solid, &meshes.cutout, &meshes.water] {
             out.extend_from_slice(&(mesh.quads.len() as u32).to_le_bytes());

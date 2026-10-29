@@ -57,6 +57,15 @@ impl Section {
         &self.blocks[start..start + SECTION_SIZE as usize]
     }
 
+    /// Байты данных строки по x при заданных y и z (0..16), как [`Section::row`]; `None` —
+    /// все нули.
+    pub fn data_row(&self, y: i32, z: i32) -> Option<&[u8]> {
+        let start = (SECTION_SIZE * z + SECTION_SIZE * SECTION_SIZE * y) as usize;
+        self.data
+            .as_ref()
+            .map(|data| &data[start..start + SECTION_SIZE as usize])
+    }
+
     /// Нет ли в секции ничего, кроме воздуха.
     pub fn is_air(&self) -> bool {
         self.blocks.iter().all(|&b| b == Block::Air)

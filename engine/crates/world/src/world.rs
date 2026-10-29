@@ -4,7 +4,7 @@ use glam::{IVec2, IVec3};
 
 use crate::pos::{ColumnPos, SectionPos};
 
-use crate::block::Block;
+use crate::block::{Block, fluid_height};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::section::SECTION_SIZE;
 
@@ -48,6 +48,23 @@ impl World {
         self.columns
             .get(&key)
             .map_or(Block::Air, |column| column.get(local))
+    }
+
+    /// Загружена ли колонка с клеткой `pos` (высота не проверяется).
+    pub fn is_loaded(&self, pos: IVec3) -> bool {
+        self.columns.contains_key(&ColumnPos::of_block(pos))
+    }
+
+    /// Высота воды в клетке `pos` над её низом; `None` — в клетке не вода. Полная, если
+    /// над ней тоже вода, иначе по уровню (см. [`fluid_height`]).
+    pub fn water_height(&self, pos: IVec3) -> Option<f32> {
+        self.block(pos).is_water().then(|| {
+            if self.block(pos + IVec3::Y).is_water() {
+                1.0
+            } else {
+                fluid_height(self.block_data(pos))
+            }
+        })
     }
 
     /// Колонка `key` и восемь соседей: индекс `dx + 1 + 3·(dz + 1)`, центр — 4;

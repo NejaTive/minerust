@@ -44,7 +44,7 @@ struct Shape {
     shade: vec4<f32>,
 };
 struct ShapeTable {
-    shapes: array<Shape, 53>,
+    shapes: array<Shape, 58>,
     ao: vec4<f32>,
 };
 @group(1) @binding(1)
@@ -86,18 +86,33 @@ fn vs_main(in: VertexIn) -> VertexOut {
     let shape = ((w0 >> 12u) & 0x1Fu) | (((w0 >> 26u) & 1u) << 5u);
     let packed = table.shapes[shape].corners[corner];
     let cell = vec3<f32>(f32(w0 & 0xFu), f32((w0 >> 4u) & 0xFu), f32((w0 >> 8u) & 0xFu));
-    let offset = vec3<f32>(
+    var offset = vec3<f32>(
         f32(packed & 0x1Fu),
         f32((packed >> 5u) & 0x1Fu),
         f32((packed >> 10u) & 0x1Fu),
     );
+    var v = f32((packed >> 20u) & 0x1Fu);
+    // Верх воды с наклоном: у угла `y` = 30 или 31, высота (в 1/16, от 1) лежит в записи
+    // квада у угла `corner`: у нулевого в слове 1, у остальных в слове 2. 30 — верх
+    // боковой грани, у неё ещё и `v` идёт от высоты.
+    if offset.y >= 30.0 {
+        var stored = (w1 >> 28u) & 0xFu;
+        if corner > 0u {
+            stored = (w2 >> (16u + 4u * corner)) & 0xFu;
+        }
+        let top = f32(stored + 1u);
+        if offset.y == 30.0 {
+            v = 16.0 - top;
+        }
+        offset.y = top;
+    }
     let world_pos = in.origin + cell + offset / 16.0;
     let ao = (w1 >> (2u * corner)) & 3u;
     let sun = (w1 >> (8u + 5u * corner)) & 0x1Fu;
     let block = (w2 >> (5u * corner)) & 0x1Fu;
     var out: VertexOut;
     out.position = globals.view_proj * vec4<f32>(world_pos, 1.0);
-    out.uv = vec2<f32>(f32((packed >> 15u) & 0x1Fu), f32((packed >> 20u) & 0x1Fu)) / 16.0;
+    out.uv = vec2<f32>(f32((packed >> 15u) & 0x1Fu), v) / 16.0;
     out.shade = table.shapes[shape].shade.x * table.ao[ao] * vertex_brightness(sun, block);
     out.layer = (w0 >> 18u) & 0xFFu;
     out.world_pos = world_pos;

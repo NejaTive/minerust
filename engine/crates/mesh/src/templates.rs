@@ -124,11 +124,23 @@ pub const TORCH_WALL_PARTS: u8 = 5;
 pub const LOG_BARK_X: u8 = 45;
 /// То же для оси Z: верх, низ, +X, −X (грани `FACES` 0..=3).
 pub const LOG_BARK_Z: u8 = 49;
-pub const TEMPLATE_COUNT: usize = 53;
+/// Верх воды с наклоном: высота каждого угла берётся из записи квада
+/// ([`crate::mesh::Quad::heights`]), в шаблоне там [`TOP_CORNER`].
+pub const WATER_TOP_SLOPED: u8 = 53;
+/// Четыре боковые грани воды с наклонным верхом, порядок — боковых `FACES`; высота верхних
+/// углов (в шаблоне [`SIDE_TOP_CORNER`]) — из записи квада, UV обрезана по ней.
+pub const WATER_SIDE_SLOPED: u8 = 54;
+pub const TEMPLATE_COUNT: usize = 58;
+
+/// Значение `y` угла шаблона, вместо которого шейдер ставит высоту угла из записи квада.
+pub const TOP_CORNER: u8 = 31;
+/// То же для верха боковой грани: ещё и `v` = 16 − высота.
+pub const SIDE_TOP_CORNER: u8 = 30;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Corner {
-    /// Шаги 1/16 блока от угла блока, 0..=16.
+    /// Шаги 1/16 блока от угла блока, 0..=16; `y` может быть [`TOP_CORNER`] или
+    /// [`SIDE_TOP_CORNER`].
     pub pos: [u8; 3],
     /// Шаги 1/16 тайла, 0..=16; v = 0 — верх тайла.
     pub uv: [u8; 2],
@@ -170,6 +182,18 @@ fn cube_face(face: &Face, top: i32) -> Template {
         corners,
         shade: face.shade,
     }
+}
+
+/// Грань воды, верхние углы которой ставит шейдер: у них `y` = `marker`; `v` верха боковой
+/// грани шейдер считает сам.
+fn sloped_water(face: &Face, marker: u8) -> Template {
+    let mut template = cube_face(face, POSITION_UNITS);
+    for (corner, [_, y, _]) in template.corners.iter_mut().zip(face.corners) {
+        if y == 1 {
+            corner.pos[1] = marker;
+        }
+    }
+    template
 }
 
 fn torch_face(face: &Face) -> Template {
@@ -304,6 +328,8 @@ fn build() -> [Template; TEMPLATE_COUNT] {
     }
     out.extend([0, 1, 4, 5].map(|face| bark_face(&FACES[face], 0)));
     out.extend(FACES[..4].iter().map(|face| bark_face(face, 2)));
+    out.push(sloped_water(&FACES[0], TOP_CORNER));
+    out.extend(sides.iter().map(|f| sloped_water(f, SIDE_TOP_CORNER)));
     out.try_into().expect("template count")
 }
 
