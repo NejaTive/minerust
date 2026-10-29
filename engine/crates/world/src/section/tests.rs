@@ -22,7 +22,6 @@ fn section_without_data_allocates_no_array() {
     section.set_with_data(IVec3::new(4, 5, 6), Block::Torch, 0);
     assert!(section.data().is_none());
     assert_eq!(section.get_data(IVec3::new(1, 2, 3)), 0);
-    // Клон тоже без массива: сгенерированные колонки дублируются при выгрузке.
     assert!(section.clone().data().is_none());
 }
 

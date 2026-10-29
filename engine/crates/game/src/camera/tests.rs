@@ -53,8 +53,6 @@ fn sensitivity_scales_rotation() {
 #[test]
 fn fov_changes_projection() {
     let mut c = camera();
-    // Точка сбоку от взгляда: матрица включает поворот, так что по `x_axis.x` угол
-    // обзора не сравнить. Тест раньше шёл только на wasm32 и этого не замечал.
     let right = c.forward().cross(Vec3::Y).normalize();
     let point = (c.position + c.forward() * 10.0 + right * 3.0).extend(1.0);
     let ndc_x = |c: &Camera| {
@@ -65,6 +63,5 @@ fn fov_changes_projection() {
     let narrow = ndc_x(&c);
     c.set_fov(110.0);
     let wide = ndc_x(&c);
-    // Больше угол — меньше масштаб по X/Y.
     assert!(wide < narrow);
 }

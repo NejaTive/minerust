@@ -1,4 +1,3 @@
-//! Разделение граней по слоям: объединение `solid ∪ cutout` — это прежний `solid`.
 use glam::IVec3;
 
 use mesh::mesher::{MeshOptions, SectionMeshes, mesh_world_column};
@@ -9,7 +8,6 @@ use world::section::SECTION_SIZE;
 use world::terrain::Terrain;
 use world::world::World;
 
-/// Равнина, лес у воды, пустыня, пещера — как в golden.
 const KEYS: [(i32, i32); 4] = [(-4, -11), (6, -12), (0, -12), (0, -7)];
 
 fn world_with_meshes() -> (World, Vec<(ColumnPos, Vec<SectionMeshes>)>) {
@@ -68,7 +66,6 @@ fn every_quad_lands_in_the_mesh_of_its_blocks_layer() {
             }
         }
     }
-    // Лес даёт листву и траву, у воды есть берег: ни один слой не пуст.
     assert!(
         solid > 0 && cutout > 0 && water > 0,
         "{solid} {cutout} {water}"

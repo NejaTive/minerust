@@ -1,5 +1,3 @@
-//! Учёт заданий мешера в воркерах: что в полёте и какие результаты ещё годятся.
-//! Без GPU и браузера, чтобы отсев устаревшего проверялся тестами на хосте.
 use std::collections::HashMap;
 
 use mesh::mesher::MeshOptions;
@@ -12,22 +10,14 @@ pub(crate) enum Target {
     Section(SectionPos),
 }
 
-/// Задание в полёте.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Ticket {
     pub target: Target,
-    /// Опции, с которыми построен меш: после смены AO результат всё равно ставится
-    /// (дыра хуже старого AO), но колонку нужно перестроить.
     pub options: MeshOptions,
     column_version: u32,
     section_version: u32,
 }
 
-/// Версии нужны, потому что результат возвращается через пару кадров: за это время
-/// колонку могли выгрузить, правка игрока — обогнать задание, а перестройка колонки —
-/// устареть. Задание годится, только если версии колонки и секции в момент `finish`
-/// те же, что при `begin`. Версии берутся из одного счётчика (общего с номерами заданий),
-/// поэтому после выгрузки и повторной загрузки колонки старые версии не совпадут.
 #[derive(Default)]
 pub(crate) struct MeshJobs {
     counter: u32,
@@ -35,7 +25,6 @@ pub(crate) struct MeshJobs {
     column_version: HashMap<ColumnPos, u32>,
     section_version: HashMap<SectionPos, u32>,
     tickets: HashMap<u32, Ticket>,
-    /// Номер новейшего задания на колонку целиком, пока оно в полёте.
     column_jobs: HashMap<ColumnPos, u32>,
 }
 
@@ -45,7 +34,6 @@ impl MeshJobs {
         self.counter
     }
 
-    /// Сколько заданий можно держать в полёте; 0 — воркеров нет.
     pub(crate) fn set_slots(&mut self, slots: usize) {
         self.slots = slots;
     }
@@ -58,7 +46,6 @@ impl MeshJobs {
         self.slots.saturating_sub(self.tickets.len())
     }
 
-    /// Заданий в полёте, считая не принятые результаты.
     pub(crate) fn len(&self) -> usize {
         self.tickets.len()
     }
@@ -67,14 +54,10 @@ impl MeshJobs {
         self.tickets.is_empty()
     }
 
-    /// Идёт ли задание на колонку целиком. Задания на её секции в это время не
-    /// отдаются: их данные новее, а результат колонки перезаписал бы их.
     pub(crate) fn column_in_flight(&self, key: ColumnPos) -> bool {
         self.column_jobs.contains_key(&key)
     }
 
-    /// Регистрирует задание и возвращает его номер. Задание на колонку снимает все
-    /// старые задания на неё, в том числе на секции: колонка строится по свежим данным.
     pub(crate) fn begin(&mut self, target: Target, options: MeshOptions) -> u32 {
         let id = self.fresh();
         let ticket = match target {
@@ -103,7 +86,6 @@ impl MeshJobs {
         id
     }
 
-    /// Отмена задания, которое не удалось закодировать (колонка уже выгружена).
     pub(crate) fn cancel(&mut self, id: u32) {
         if let Some(ticket) = self.tickets.remove(&id)
             && let Target::Column(key) = ticket.target
@@ -113,7 +95,6 @@ impl MeshJobs {
         }
     }
 
-    /// Закрывает задание `id`; `Some`, если результат годится и его надо поставить.
     pub(crate) fn finish(&mut self, id: u32) -> Option<Ticket> {
         let ticket = self.tickets.remove(&id)?;
         match ticket.target {
@@ -130,7 +111,6 @@ impl MeshJobs {
         }
     }
 
-    /// Блоки секции изменились (правка игрока): задание на неё устарело.
     pub(crate) fn section_changed(&mut self, key: SectionPos) {
         if self.section_version.contains_key(&key) {
             let version = self.fresh();
@@ -138,8 +118,6 @@ impl MeshJobs {
         }
     }
 
-    /// Данные колонки изменились: задание на колонку целиком в полёте устарело.
-    /// `true`, если такое было — тогда колонку нужно поставить на меш заново.
     pub(crate) fn column_changed(&mut self, key: ColumnPos) -> bool {
         if self.column_jobs.remove(&key).is_none() {
             return false;
@@ -149,7 +127,6 @@ impl MeshJobs {
         true
     }
 
-    /// Колонку выгрузили: все её задания в полёте устаревают.
     pub(crate) fn unload(&mut self, key: ColumnPos) {
         self.column_version.remove(&key);
         self.column_jobs.remove(&key);
@@ -158,8 +135,6 @@ impl MeshJobs {
         }
     }
 
-    /// Воркеров больше нет: забывает всё в полёте и отдаёт задания, чтобы их построили
-    /// заново. Опоздавшие результаты отсеются в `finish`: номеров уже нет в таблице.
     pub(crate) fn clear(&mut self) -> Vec<Ticket> {
         self.column_jobs.clear();
         self.tickets.drain().map(|(_, ticket)| ticket).collect()

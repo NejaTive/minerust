@@ -1,5 +1,3 @@
-//! Golden-хеши генерации и мешей: страхуют рефакторинг от тихой смены поведения.
-//! Константы меняются только при намеренной смене генерации, света или формата меша.
 use glam::IVec3;
 
 use mesh::mesh::quad_bytes;
@@ -12,10 +10,8 @@ use world::terrain::Terrain;
 use world::world::World;
 
 const SEED: i32 = 1337;
-/// Равнина, лес у воды, пустыня, пещера.
 const KEYS: [(i32, i32); 4] = [(-4, -11), (6, -12), (0, -12), (0, -7)];
 
-/// FNV-1a, 64 бита.
 fn fnv(hash: &mut u64, bytes: &[u8]) {
     for &b in bytes {
         *hash ^= u64::from(b);
@@ -32,7 +28,6 @@ fn generated_blocks_match_golden() {
         .iter()
         .map(|&(x, z)| {
             let column = terrain.generate(ColumnPos::new(x, z));
-            // Генерация ставит стоячие брёвна: массивов данных нет ни у одной секции.
             assert!((0..COLUMN_SECTIONS).all(|sy| column.section(sy).data().is_none()));
             let mut hash = FNV_START;
             for y in 0..WORLD_HEIGHT {
@@ -86,8 +81,6 @@ fn meshes_match_golden() {
     assert_eq!(hashes, GOLDEN_MESHES, "meshes: {hashes:#x?}");
 }
 
-/// Сцена с ориентированными блоками: каменный пол, лежачие брёвна по X и Z, стоячее
-/// и настенные факелы на всех четырёх сторонах. Хеш — блоки, данные и меши.
 #[test]
 fn oriented_scene_matches_golden() {
     let mut world = World::new();
@@ -109,7 +102,6 @@ fn oriented_scene_matches_golden() {
     }
     world.set_block(IVec3::new(8, 10, 8), Block::Log);
     world.set_block(IVec3::new(8, 11, 8), Block::Log);
-    // Стена из камня и по факелу с каждой стороны.
     for (wall, data) in [
         (IVec3::new(11, 10, 5), ATTACH_NEG_X),
         (IVec3::new(11, 10, 9), ATTACH_POS_X),
@@ -161,11 +153,6 @@ const GOLDEN_BLOCKS: [u64; 4] = [
     0xe69a701bfc6595d0,
     0x4fe7fff820d365db,
 ];
-/// Хеши записей квадов (`quad_bytes`) по слоям solid, cutout, water. В 20c листва, кресты и
-/// факел ушли из solid в отдельный cutout: у колонок без них (равнина, пустыня) хеш прежний.
-/// Формат поменялся в 20b (вершины → записи по 12 байт);
-/// эквивалентность старого и нового меша один в один до смены была доказана тестом,
-/// который развёртывал записи через шаблоны и сравнивал с прежними вершинами.
 const GOLDEN_MESHES: [u64; 4] = [
     0xf8168e1e2bc0646c,
     0x6471aed5fe73aafe,

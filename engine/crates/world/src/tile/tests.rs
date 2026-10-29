@@ -1,6 +1,5 @@
 use super::*;
 
-/// Альфа во всех пикселях `water.png`: дно на глубине пары блоков ещё видно.
 const WATER_ALPHA: u8 = 180;
 
 #[test]
@@ -24,7 +23,6 @@ fn torch_png_is_opaque_exactly_in_torch_geometry() {
 
 #[test]
 fn every_tile_has_a_16x16_png_and_no_extra_files() {
-    // tile_pixels паникует с именем файла, если размер или формат не подходят.
     for tile in Tile::ALL {
         assert_eq!(
             tile_pixels(tile).len(),

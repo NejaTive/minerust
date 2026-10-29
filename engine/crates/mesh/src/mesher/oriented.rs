@@ -1,5 +1,3 @@
-//! Блоки с байтом данных: бревно по оси и факел на стене.
-
 use glam::Vec3;
 
 use super::expand::{Vertex, vertices};
@@ -18,7 +16,6 @@ fn full(_: IVec3) -> u8 {
     MAX_LIGHT
 }
 
-/// Одинокий блок с данными в воздухе, полностью освещённый.
 fn single(block: Block, data: u8) -> SectionMeshes {
     let mut section = Section::new();
     section.set_with_data(AT, block, data);
@@ -67,7 +64,6 @@ fn bark_fibers_run_along_the_axis() {
                 let (pa, pb) = (quad[a].position(), quad[b].position());
                 let along = (0..3).all(|k| k == axis || pa[k] == pb[k]) && pa[axis] != pb[axis];
                 if along {
-                    // Вдоль оси меняется только v: вертикаль тайла (кора) идёт по бревну.
                     let (ua, ub) = (quad[a].uv(), quad[b].uv());
                     assert_eq!(ua[0], ub[0], "axis {axis}");
                     assert_eq!((ua[1] - ub[1]).abs(), 1.0, "axis {axis}");
@@ -75,21 +71,17 @@ fn bark_fibers_run_along_the_axis() {
                 }
             }
         }
-        // У каждой из четырёх коровых граней два ребра вдоль оси.
         assert_eq!(checked, 8, "axis {axis}");
     }
 }
 
 #[test]
 fn bark_uv_is_rotated_not_mirrored() {
-    // Обход углов в UV совпадает с обходом углов грани: определитель одного знака.
     for data in [AXIS_X, AXIS_Z] {
         for quad in vertices(&single(Block::Log, data).solid).chunks(4) {
             let uv = |i: usize| quad[i].uv();
             let det = (uv(1)[0] - uv(0)[0]) * (uv(2)[1] - uv(1)[1])
                 - (uv(1)[1] - uv(0)[1]) * (uv(2)[0] - uv(1)[0]);
-            // На стоячем бревне, которое не зеркалится, определитель отрицателен
-            // (v растёт вниз): значит, и здесь.
             assert!(det < 0.0, "{data} {quad:?}");
         }
     }
@@ -104,15 +96,12 @@ fn standing_log_is_the_same_as_without_data() {
     };
     let standing = single(Block::Log, AXIS_Y);
     assert_eq!(plain.solid.quads, standing.solid.quads);
-    // Мусорный байт читается как стоячее бревно.
     assert_eq!(plain.solid.quads, single(Block::Log, 99).solid.quads);
-    // Стоячее бревно целиком из шаблонов куба.
     assert!(plain.solid.quads.iter().all(|q| q.template() < 6));
 }
 
 #[test]
 fn lying_log_keeps_ao_and_light_like_a_cube() {
-    // Лежачее бревно у стены: AO и свет по тем же углам, что и у стоячего.
     let wall = IVec3::new(6, 5, 5);
     let mesh = |data| {
         let mut section = Section::new();
@@ -130,7 +119,6 @@ fn lying_log_keeps_ao_and_light_like_a_cube() {
         all.sort();
         all
     };
-    // Грани те же (скрытая одна и та же), AO по ним совпадает; различаются шаблоны и тайлы.
     assert_eq!(shades(&standing), shades(&lying));
 }
 
@@ -153,10 +141,8 @@ fn wall_torch_leans_away_from_the_wall_in_its_hitbox() {
             max = max.max(v.position().into());
         }
         let origin = AT.as_vec3();
-        // Рамка выделения совпадает с мешем.
         let (lo, hi) = Block::Torch.bounds(data);
         assert_eq!((min - origin, max - origin), (lo, hi), "{data}");
-        // Основание у стены клетки, верх уходит в сторону наклона на 4/16.
         let toward_wall = -lean.as_vec3();
         let wall_side = if toward_wall.max_element() > 0.0 {
             1.0
@@ -167,7 +153,6 @@ fn wall_torch_leans_away_from_the_wall_in_its_hitbox() {
         let edge = if wall_side == 1.0 { max } else { min } - origin;
         assert_eq!(edge[lean_axis], wall_side, "{data}");
         assert_eq!(((max - min) * 16.0)[lean_axis], 6.0, "{data}");
-        // Верхняя грань горизонтальна и на высоте 13/16; низа нет.
         let normals: Vec<_> = verts.chunks(4).map(normal).collect();
         assert!(normals.iter().all(|n| n.y > -0.5), "no bottom face");
         let top: Vec<_> = verts
@@ -175,7 +160,6 @@ fn wall_torch_leans_away_from_the_wall_in_its_hitbox() {
             .filter(|q| q.iter().all(|v| v.position()[1] == origin.y + 13.0 * u))
             .collect();
         assert_eq!(top.len(), 1, "{data}");
-        // Бока наклонены: ни один не вертикален, кроме двух перпендикулярных наклону.
         let tilted = normals
             .iter()
             .filter(|n| n.y.abs() > 0.1 && n.y.abs() < 0.9)
@@ -209,7 +193,6 @@ fn wall_torch_light_comes_from_its_cell() {
 
 #[test]
 fn neighbor_section_data_does_not_change_the_mesh() {
-    // Мешеру нужны только блоки соседей (непрозрачность), а не их данные.
     let mut world = World::new();
     for x in -1..=1 {
         for z in -1..=1 {

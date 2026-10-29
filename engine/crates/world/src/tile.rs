@@ -1,7 +1,5 @@
-/// Сторона тайла в пикселях.
 pub const TILE_SIZE: u32 = 16;
 
-/// Тайл текстуры блока; значение — номер слоя в массиве текстур.
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tile {
@@ -43,7 +41,6 @@ impl Tile {
         self as u32
     }
 
-    /// Тайл с дырками (двоичная альфа, мипы по большинству): листва, растения, факел.
     pub fn is_cutout(self) -> bool {
         matches!(
             self,
@@ -52,17 +49,12 @@ impl Tile {
     }
 }
 
-/// Сколько слоёв выделить на GPU: по слою на тайл.
 pub const LAYER_COUNT: u32 = Tile::ALL.len() as u32;
 
-/// Столбик факела в тайле: столбцы 7..9, строки 6..16 (10 из 16, как 2×10×2 в мешере).
-/// Договорённость с `torch.png`: мешер строит по ней коробку и верх, картинка обязана
-/// быть непрозрачной именно здесь (проверяет тест).
 pub const TORCH_PIXELS: (u32, u32) = (7, 9);
 pub const TORCH_TOP_ROW: u32 = 6;
 
 impl Tile {
-    /// Имя файла в `engine/crates/world/assets/textures/`.
     fn file_name(self) -> String {
         let name = format!("{self:?}");
         let mut out = String::new();
@@ -75,8 +67,6 @@ impl Tile {
         out
     }
 
-    /// PNG тайла, вшитый в бинарник. Файлы лежат в `engine/crates/world/assets/textures/<имя_в_snake_case>.png`;
-    /// новый тайл — это PNG 16×16 плюс вариант в `Tile` и в `ALL`.
     pub fn png(self) -> &'static [u8] {
         macro_rules! files {
             ($($tile:ident => $file:literal),* $(,)?) => {
@@ -97,12 +87,9 @@ impl Tile {
     }
 }
 
-/// Пиксели тайла 16×16 RGBA (sRGB, строки сверху вниз) — те же, что базовый уровень на GPU.
-/// Байты PNG берутся как есть, цветовые чанки (gAMA, sRGB, iCCP) игнорируются.
 pub fn tile_pixels(tile: Tile) -> Vec<u8> {
     let name = tile.file_name();
     let mut decoder = png::Decoder::new(std::io::Cursor::new(tile.png()));
-    // Палитра, grayscale и 16 бит, которые сохраняют редакторы, приводятся к RGBA8.
     decoder.set_transformations(
         png::Transformations::ALPHA | png::Transformations::EXPAND | png::Transformations::STRIP_16,
     );

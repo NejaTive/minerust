@@ -3,7 +3,6 @@ use world::pos::ColumnPos;
 
 use super::*;
 
-/// Расстояние от точки до квадрата колонки `key` по горизонтали.
 fn distance_to_column(point: Vec2, key: ColumnPos) -> f32 {
     let size = SECTION_SIZE as f32;
     let min = key.0.as_vec2() * size;
@@ -17,8 +16,6 @@ fn mesh_edge_is_fully_fogged_from_any_point_of_camera_column() {
         let fog = Fog::for_radius(radius);
         let reach = radius + 2;
         let mut nearest = f32::INFINITY;
-        // Расстояние до колонки — выпуклая функция точки, так что минимум по
-        // колонке камеры достигается в её углах.
         for corner in [Vec2::ZERO, Vec2::X, Vec2::Y, Vec2::ONE] {
             for z in -reach..=reach {
                 for x in -reach..=reach {
@@ -34,7 +31,6 @@ fn mesh_edge_is_fully_fogged_from_any_point_of_camera_column() {
             "radius {radius}: {} > {nearest}",
             fog.end
         );
-        // Оценка не слишком осторожна: туман не съедает лишнюю колонку.
         assert!(
             nearest - fog.end < size,
             "radius {radius}: {} vs {nearest}",

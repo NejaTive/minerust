@@ -3,14 +3,12 @@ use std::collections::VecDeque;
 use super::*;
 use crate::terrain::Terrain;
 
-/// Ключи квадрата колонок `center ± radius`.
 fn square(center: ColumnPos, radius: i32) -> Vec<ColumnPos> {
     (-radius..=radius)
         .flat_map(|z| (-radius..=radius).map(move |x| center + IVec2::new(x, z)))
         .collect()
 }
 
-/// Мир из колонок `keys`, блок задаёт `block_at` по мировым координатам.
 fn world_of(keys: &[ColumnPos], block_at: impl Fn(IVec3) -> Block) -> World {
     let mut world = World::new();
     for &key in keys {
@@ -46,8 +44,6 @@ fn lit(world: &World, order: &[ColumnPos]) -> LightMap {
     light
 }
 
-/// Эталон: байты света ([`pack_light`]) всех колонок `keys` целиком; клетки без
-/// света в карту не входят.
 fn reference(world: &World, keys: &[ColumnPos]) -> HashMap<IVec3, u8> {
     let mut packed = reference_channel(world, keys, Channel::Sky);
     for (pos, level) in reference_channel(world, keys, Channel::Block) {
@@ -57,9 +53,6 @@ fn reference(world: &World, keys: &[ColumnPos]) -> HashMap<IVec3, u8> {
     packed
 }
 
-/// Эталон одного канала, отдельной простой реализацией — очередь с повторной
-/// постановкой при улучшении, без затравки по столбцам и без окна. Незагруженное —
-/// стена, как и в [`LightMap`].
 fn reference_channel(world: &World, keys: &[ColumnPos], channel: Channel) -> HashMap<IVec3, u8> {
     let loaded: HashSet<ColumnPos> = keys.iter().copied().collect();
     let inside =
@@ -103,7 +96,6 @@ fn reference_channel(world: &World, keys: &[ColumnPos], channel: Channel) -> Has
     light
 }
 
-/// Все клетки колонок `keys` совпадают с эталоном.
 fn assert_matches_reference(light: &LightMap, world: &World, keys: &[ColumnPos], context: &str) {
     let expected = reference(world, keys);
     for &key in keys {
@@ -141,7 +133,6 @@ fn open_sky_is_full_above_ground() {
 #[test]
 fn light_under_canopy_fades_from_edge() {
     let keys = square(ColumnPos::ZERO, 1);
-    // Пол на y = 10, навес на y = 14 над x ≥ 0: под ним свет приходит сбоку от x = −1.
     let world = world_of(&keys, |p| {
         if p.y <= 10 || (p.y == 14 && p.x >= 0) {
             Block::Stone
@@ -163,7 +154,6 @@ fn light_under_canopy_fades_from_edge() {
 #[test]
 fn hole_in_box_lights_and_closing_darkens() {
     let keys = square(ColumnPos::ZERO, 1);
-    // Полая коробка 9×9×9 в центральной колонке, стенки толщиной 1.
     let shell = |p: IVec3| {
         let inner = p - IVec3::new(4, 40, 4);
         inner.cmpge(IVec3::ZERO).all()
@@ -205,7 +195,6 @@ fn water_dims_by_two_and_leaves_by_one() {
     let world = world_of(&keys, |p| match p.y {
         ..=50 => Block::Stone,
         51..=60 => Block::Water,
-        // Листва — только над соседней колонкой, чтобы не затенять воду.
         70..=74 if p.x >= 16 => Block::Leaves,
         _ => Block::Air,
     });
@@ -221,14 +210,11 @@ fn water_dims_by_two_and_leaves_by_one() {
     for depth in 1..=5 {
         assert_eq!(light.sky(IVec3::new(24, 75 - depth, 3)), 15 - depth as u8);
     }
-    // Под листвой свет уже не солнечный и убывает по 1 за блок; сбоку на 9 блоков
-    // от открытого неба пришло бы только 6.
     assert_eq!(light.sky(IVec3::new(24, 69, 3)), 9);
     assert_eq!(light.sky(IVec3::new(24, 68, 3)), 8);
     assert_matches_reference(&light, &world, &keys, "water");
 }
 
-/// Окно 3×3 с пещерами, водой и деревьями: колонки задевают их на стыках.
 const CENTERS: [ColumnPos; 2] = [ColumnPos::new(-1, 2), ColumnPos::new(-6, 6)];
 
 #[test]
@@ -239,7 +225,6 @@ fn order_of_columns_does_not_matter() {
         let forward = lit(&world, &keys);
         let mut backward_order = keys.clone();
         backward_order.reverse();
-        // Центр последним: свет соседей уже есть и должен перетечь в обе стороны.
         backward_order.retain(|&k| k != center);
         backward_order.push(center);
         let backward = lit(&world, &backward_order);
@@ -286,7 +271,6 @@ fn random_edits_match_full_recompute() {
     let terrain = Terrain::new(1337);
     let mut world = terrain_world(&keys);
     let mut light = lit(&world, &keys);
-    // Простой ГПСЧ (xorshift): без зависимостей и одинаково на любой платформе.
     let mut state = 0x9E37_79B9_7F4A_7C15_u64;
     let mut next = move |n: i32| {
         state ^= state << 13;
@@ -336,7 +320,6 @@ fn changed_sections_cover_every_changed_cell() {
     let x = center.origin().x + 15;
     let z = center.origin().z;
     let top = terrain.surface_height(x, z);
-    // Шахта вниз на краю колонки: свет уходит в соседей.
     for y in (top - 12..=top).rev() {
         let before = reference(&world, &keys);
         let pos = IVec3::new(x, y, z);
@@ -352,7 +335,6 @@ fn changed_sections_cover_every_changed_cell() {
     }
 }
 
-/// Закрытый зал 3×3 колонок: камень, внутри воздух от y=10 до y=40.
 fn dark_hall() -> (World, Vec<ColumnPos>) {
     let keys = square(ColumnPos::ZERO, 1);
     let world = world_of(&keys, |p| {
@@ -392,7 +374,6 @@ fn glowstone_fades_by_one_across_column_border() {
     assert_eq!(light.block(source), 15);
     for d in 1..=14 {
         let level = 15 - d as u8;
-        // x = 8 + d пересекает границу колонки на d = 8.
         assert_eq!(light.block(source + IVec3::X * d), level, "x {d}");
         assert_eq!(light.block(source + IVec3::NEG_Z * d), level, "z {d}");
     }
@@ -424,7 +405,6 @@ fn two_sources_do_not_add_up_and_one_can_go() {
     let (a, b) = (IVec3::new(10, 20, 8), IVec3::new(12, 20, 8));
     place(&mut world, &mut light, a, Block::Glowstone);
     place(&mut world, &mut light, b, Block::Glowstone);
-    // Между ними — максимум, а не сумма: 14 от каждого.
     assert_eq!(light.block(IVec3::new(11, 20, 8)), 14);
     assert_eq!(light.block(a), 15);
     place(&mut world, &mut light, a, Block::Air);
@@ -440,7 +420,6 @@ fn opaque_block_shadows_and_removing_wall_lets_light_through() {
     let mut light = lit(&world, &keys);
     let source = IVec3::new(2, 20, 8);
     place(&mut world, &mut light, source, Block::Glowstone);
-    // Стена поперёк зала (x = 4) на всю высоту зала, кроме проёма никакого нет.
     for y in 10..=40 {
         for z in -16..32 {
             world.set_block(IVec3::new(4, y, z), Block::Stone);
@@ -475,7 +454,6 @@ fn glowstone_light_does_not_depend_on_load_order() {
     let b = lit(&world, &reversed);
     assert_matches_reference(&a, &world, &keys, "forward");
     assert_matches_reference(&b, &world, &keys, "reversed");
-    // Вынули и вернули колонку, куда светили соседи.
     let mut c = lit(&world, &keys);
     c.remove_column(&world, ColumnPos::new(1, 1));
     c.add_column(&world, ColumnPos::new(1, 1));
@@ -486,7 +464,6 @@ fn glowstone_light_does_not_depend_on_load_order() {
 fn brightness_is_monotonic_and_bounded() {
     assert_eq!(brightness(MAX_LIGHT), 1.0);
     assert!(brightness(0) >= 0.05);
-    // Внизу 0.8^l упирается в минимум, выше — строго растёт.
     for level in 1..=MAX_LIGHT {
         assert!(brightness(level) >= brightness(level - 1), "{level}");
     }
