@@ -1,11 +1,15 @@
 import type { Engine, WorldStats } from '@engine'
-import { BENCH_POINTS, BENCH_SEED } from './config'
+import { BENCH_POINTS, BENCH_SEED, BENCH_WORKERS } from './config'
 import { FrameRecorder, frameSummary, round } from './recorder'
 
 /** Сколько секунд стоять на точке после полной загрузки. */
 const STAND_MS = 10_000
 /** Если мир не догрузился за это время, замер прерывается с ошибкой. */
 const LOAD_TIMEOUT_MS = 180_000
+/** Длительность полёта по прямой, мс. */
+const FLIGHT_MS = 20_000
+/** Пауза между нажатиями W двойного тапа: окно игры 0.3 с по времени кадров. */
+const TAP_GAP_MS = 80
 
 function geometry(s: WorldStats) {
   return {
@@ -20,6 +24,11 @@ function geometry(s: WorldStats) {
   }
 }
 
+/** Мкс на задание мешера: в воркере, кэш и приём в основном потоке (нули без воркеров). */
+function workerUs(s: WorldStats) {
+  return { worker: s.workerMeshUs, encode: s.encodeUs, apply: s.applyUs }
+}
+
 export interface BenchResult {
   done: boolean
   error?: string
@@ -27,10 +36,13 @@ export interface BenchResult {
   version: string
   build: string
   seed: number
+  /** Меши строят воркеры; иначе основной поток (`?workers=0`). */
+  workers: boolean
   renderDistance: number
   ambientOcclusion: boolean
   canvas: [number, number]
   points: object[]
+  flight?: object
 }
 
 declare global {
@@ -44,7 +56,49 @@ declare global {
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 /**
- * Две точки подряд: переход → ждём полной загрузки → стоим `STAND_MS` → сводка.
+ * Полёт с бегом (16 блоков/с) по прямой через незагруженный мир: подгрузка идёт на ходу,
+ * кадры пишутся всё время. Старт — после загрузки стартового круга, чтобы замер не
+ * смешивался с ней.
+ */
+async function runFlight(current: Engine, recorder: FrameRecorder) {
+  const start = BENCH_POINTS[0].camera
+  current.set_camera_state(Float32Array.from(start))
+  const started = performance.now()
+  while (current.load_ms() === 0) {
+    if (performance.now() - started > LOAD_TIMEOUT_MS) throw new Error('flight: load timeout')
+    await sleep(50)
+  }
+  current.stats()
+  recorder.reset()
+  // Двойной W — бег; клавиша остаётся нажатой до конца полёта.
+  current.set_key('KeyW', true)
+  await sleep(TAP_GAP_MS)
+  current.set_key('KeyW', false)
+  await sleep(TAP_GAP_MS)
+  current.set_key('KeyW', true)
+  await sleep(FLIGHT_MS)
+  current.set_key('KeyW', false)
+  const stats = current.stats()
+  return {
+    name: 'flight',
+    frame: frameSummary(recorder),
+    cpuUs: { stream: stats.streamUs, build: stats.buildUs, submit: stats.submitUs },
+    gpuFrameUs: stats.gpuTimer ? stats.gpuFrameUs : null,
+    perColumnUs: {
+      generate: stats.generateUs,
+      light: stats.lightUs,
+      mesh: stats.meshUs,
+      ...workerUs(stats),
+    },
+    meshJobs: stats.meshJobs,
+    columns: stats.columns,
+    meshedColumns: stats.meshedColumns,
+  }
+}
+
+/**
+ * Две точки подряд: переход → ждём полной загрузки → стоим `STAND_MS` → сводка;
+ * затем полёт ([`runFlight`]).
  * Сводка пишется в `window.__benchResult` по мере готовности (`done` — после последней точки)
  * и целиком в `console.log`.
  */
@@ -60,6 +114,7 @@ export async function runBench(
     version: __APP_COMMIT__ ? `${__APP_VERSION__}+${__APP_COMMIT__}` : __APP_VERSION__,
     build: (first.constructor as typeof Engine).build_profile(),
     seed: BENCH_SEED,
+    workers: BENCH_WORKERS,
     renderDistance: settings.renderDistance,
     ambientOcclusion: settings.ambientOcclusion,
     canvas: [canvas.width, canvas.height],
@@ -98,12 +153,18 @@ export async function runBench(
           gpuFrameUs: steady.gpuTimer ? steady.gpuFrameUs : null,
           ...geometry(steady),
         },
-        perColumnUs: { generate: loaded.generateUs, light: loaded.lightUs, mesh: loaded.meshUs },
+        perColumnUs: {
+          generate: loaded.generateUs,
+          light: loaded.lightUs,
+          mesh: loaded.meshUs,
+          ...workerUs(loaded),
+        },
         columns: loaded.columns,
         meshedColumns: loaded.meshedColumns,
         lightKib: loaded.lightKib,
       })
     }
+    result.flight = await runFlight(engine(), recorder)
   } catch (e) {
     result.error = String(e)
   }

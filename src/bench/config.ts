@@ -3,6 +3,7 @@ import { parseBenchParams } from './params'
 const params = parseBenchParams(location.search)
 export const BENCH = params.enabled
 export const BENCH_DEBUG = params.debug
+export const BENCH_WORKERS = params.workers
 
 /** Сид замера: мир в памяти, IndexedDB не читается и не пишется. Тот же сид — в `bench_points` (terrain.rs). */
 export const BENCH_SEED = 1337

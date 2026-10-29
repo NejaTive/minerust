@@ -10,6 +10,8 @@ export interface FrameSink {
   player(value: PlayerInfo): void
   /** Длительность `render()` в мс; задаётся только в режиме замера. */
   rendered?(now: number, renderMs: number): void
+  /** После каждого кадра: раздать воркерам задания, закодированные в нём. */
+  afterRender?(): void
 }
 
 /** Подгоняет размер буфера canvas под экран и сообщает движку (если он уже есть). */
@@ -58,6 +60,7 @@ export class FrameLoop {
       const renderStart = sink.rendered ? performance.now() : 0
       engine.render(now / 1000)
       sink.rendered?.(now, performance.now() - renderStart)
+      sink.afterRender?.()
       frames++
       // Читаем каждый кадр, чтобы HUD не отставал, но сообщаем только изменения.
       const mode = engine.player_mode() as PlayerInfo['mode']
