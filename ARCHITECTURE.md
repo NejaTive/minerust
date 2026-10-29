@@ -44,8 +44,8 @@ Composables без Pinia — модульные синглтоны: `useSettings
 
 ## Проверки
 
-- Rust (из `engine/`): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo clippy --target wasm32-unknown-unknown -- -D warnings`, `cargo test`.
-- Клиент: `npm run wasm`, затем `npx vue-tsc -b`, `npm run format:check`, `npm run lint`, `npm test`. То же делает CI (задачи `rust` и `web`).
+Команды перед сдачей — в `.claude/rules/code/checks.md` (то же, что CI: задачи `rust` и `web`).
+
 - `src/settings/blocks.fixture.json` — копия `blocks()` для тестов без wasm. Rust-тест `js_fixture_matches_blocks` падает при расхождении; обновить: `UPDATE_FIXTURES=1 cargo test -p engine js_fixture`.
 
 ## Рецепты
