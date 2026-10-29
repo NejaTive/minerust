@@ -2,14 +2,15 @@ use glam::IVec3;
 
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
-    AO_BRIGHTNESS, CROSS, CUBE_FACE, FACES, Face, TORCH_SIDE, TORCH_TOP, WATER_BOTTOM, WATER_SIDE,
-    WATER_SIDE_LOW, WATER_SURFACE_UNITS, WATER_TOP,
+    AO_BRIGHTNESS, CROSS, CUBE_FACE, FACES, Face, LOG_BARK_X, LOG_BARK_Z, TORCH_SIDE, TORCH_TOP,
+    TORCH_WALL, TORCH_WALL_PARTS, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SURFACE_UNITS,
+    WATER_TOP,
 };
-use world::block::{Block, Facing, RenderLayer, Shape};
+use world::block::{ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, RenderLayer, Shape};
 use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
 use world::pos::{ColumnPos, SectionPos};
-use world::section::{SECTION_SIZE, Section};
+use world::section::{SECTION_SIZE, SECTION_VOLUME, Section};
 use world::tile::{LAYER_COUNT, Tile};
 use world::world::World;
 
@@ -264,7 +265,7 @@ pub fn mesh_section(
     let (mut blocks, mut lights) = new_caches();
     fill_blocks(&mut blocks, section);
     fill_halo(&mut blocks, &mut lights, neighbor, light);
-    mesh_cached(&blocks, &lights, options)
+    mesh_cached(&blocks, &lights, section.data(), options)
 }
 
 /// Грань блока рисуется, если сосед в её направлении не непрозрачный: так грани за
@@ -281,9 +282,14 @@ pub fn mesh_section(
 /// солнца и блоков в половинках ([`half_average`]); яркость из них считает шейдер со
 /// тьмой неба. У воды — уровни клетки перед гранью, одни на грань. Диагональ квада
 /// выбирается по дневной яркости ([`day_shade`]).
+///
+/// `data` — байты данных блоков самой секции (индекс `x + 16·z + 256·y`), `None` — все
+/// нули. Данные соседей мешеру не нужны: форма блока зависит только от его байта, а
+/// соседи влияют лишь непрозрачностью, которая от данных не зависит.
 pub(crate) fn mesh_cached(
     blocks: &Neighborhood,
     lights: &Lights,
+    data: Option<&[u8; SECTION_VOLUME]>,
     options: MeshOptions,
 ) -> SectionMeshes {
     let mut meshes = SectionMeshes::empty();
@@ -305,10 +311,12 @@ pub(crate) fn mesh_cached(
                     continue;
                 }
                 let cell = [x as u8, y as u8, z as u8];
+                // Данные есть только у бревна и факела: у остальных блоков байт не читаем.
+                let byte = || data.map_or(0, |d| d[(x + 16 * z + 256 * y) as usize]);
                 if block.shape() != Shape::Cube {
                     let (sky, block_light) = lights.at(index, 0);
                     let light = [sky, block_light].map(|l| half_average(l, 1));
-                    push_shaped(&mut meshes.cutout, block, cell, light);
+                    push_shaped(&mut meshes.cutout, block, byte(), cell, light);
                     continue;
                 }
                 if block.is_water() {
@@ -346,11 +354,19 @@ pub(crate) fn mesh_cached(
                     }
                     continue;
                 }
+                // Лежачее бревно; стоячее рисуется как обычный куб.
+                let lying = (block == Block::Log)
+                    .then(|| block.axis(byte()))
+                    .filter(|&axis| axis != 1);
                 for (face_index, (face, normal, corners)) in faces.iter().enumerate() {
                     if blocks.opaque(index, *normal) {
                         continue;
                     }
-                    let Some(tile) = block.tile(face.facing) else {
+                    let (tile, template) = match lying {
+                        Some(axis) => axis_face(block, axis, face_index, face),
+                        None => (block.tile(face.facing), CUBE_FACE + face_index as u8),
+                    };
+                    let Some(tile) = tile else {
                         continue;
                     };
                     let front = lights.at(index, *normal);
@@ -395,7 +411,7 @@ pub(crate) fn mesh_cached(
                     };
                     target.quads.push(Quad::new(
                         cell,
-                        CUBE_FACE + face_index as u8,
+                        template,
                         flip_diagonal(days),
                         layer,
                         corner_data.map(|c| c.2),
@@ -409,10 +425,26 @@ pub(crate) fn mesh_cached(
     meshes
 }
 
-/// Записи квадов блока не-куба: крест (две плоскости в обе стороны) или столбик факела.
+/// Тайл и шаблон грани блока с осью, лежащего вдоль `axis` (0 — x, 2 — z): торцы на
+/// гранях поперёк оси, на остальных кора с UV, повёрнутой вдоль оси.
+fn axis_face(block: Block, axis: usize, face_index: usize, face: &Face) -> (Option<Tile>, u8) {
+    if face.normal[axis] != 0 {
+        return (block.tile(Facing::Top), CUBE_FACE + face_index as u8);
+    }
+    let template = if axis == 0 {
+        // Кора по оси X — грани 0, 1, 4, 5 из `FACES`.
+        LOG_BARK_X + [0, 1, 0, 0, 2, 3][face_index]
+    } else {
+        LOG_BARK_Z + face_index as u8
+    };
+    (block.tile(Facing::Side), template)
+}
+
+/// Записи квадов блока не-куба: крест (две плоскости в обе стороны) или столбик факела
+/// (стоячий или наклонённый от стены по `data`).
 /// Без AO, свет — одной клетки блока (`light` в половинках уровня), одинаковый на всех углах.
 /// Всегда слой Cutout.
-fn push_shaped(mesh: &mut MeshData, block: Block, cell: [u8; 3], light: [u8; 2]) {
+fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light: [u8; 2]) {
     let quad = |template: u8, layer: u8| {
         Quad::new(
             cell,
@@ -434,6 +466,13 @@ fn push_shaped(mesh: &mut MeshData, block: Block, cell: [u8; 3], light: [u8; 2])
         }
         Shape::Torch => {
             let layer = Tile::Torch.layer() as u8;
+            if (ATTACH_POS_X..=ATTACH_NEG_Z).contains(&data) {
+                let first = TORCH_WALL + TORCH_WALL_PARTS * (data - ATTACH_POS_X);
+                for t in first..first + TORCH_WALL_PARTS {
+                    mesh.quads.push(quad(t, layer));
+                }
+                return;
+            }
             // Верх, затем бока.
             for t in std::iter::once(TORCH_TOP).chain(TORCH_SIDE..TORCH_TOP) {
                 mesh.quads.push(quad(t, layer));
@@ -516,7 +555,7 @@ pub fn mesh_world_column(
                     return SectionMeshes::empty();
                 }
                 around.fill(sy, &mut blocks, &mut lights);
-                mesh_cached(&blocks, &lights, options)
+                mesh_cached(&blocks, &lights, column.section(sy).data(), options)
             })
             .collect(),
     )
@@ -540,12 +579,19 @@ pub fn mesh_world_section(
     }
     let (mut blocks, mut lights) = new_caches();
     around.fill(key.y(), &mut blocks, &mut lights);
-    Some(mesh_cached(&blocks, &lights, options))
+    Some(mesh_cached(
+        &blocks,
+        &lights,
+        around.columns[4]?.section(key.y()).data(),
+        options,
+    ))
 }
 
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
 mod expand;
+#[cfg(test)]
+mod oriented;
 #[cfg(test)]
 mod tests;

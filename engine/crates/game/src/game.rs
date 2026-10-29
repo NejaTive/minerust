@@ -360,9 +360,14 @@ impl Game {
             && let Some(block) = self.selected
         {
             let pos = hit.block + hit.normal;
+            // Данные (ось бревна, сторона факела) выбирает грань, в которую смотрит
+            // прицел; `None` — на такую грань блок не ставится.
             // `set_block` сам отказывает вне высоты мира и в незагруженной колонке.
-            if self.world.can_place(pos, block) && !self.player.overlaps_block(pos) {
-                let changed = self.world.set_block_supported(pos, block);
+            if let Some(data) = block.placement_data(hit.normal)
+                && self.world.can_place_with_data(pos, block, data)
+                && !self.player.overlaps_block(pos)
+            {
+                let changed = self.world.set_block_supported_with_data(pos, block, data);
                 if !changed.is_empty() {
                     self.apply_edit(&changed, &mut dirty, &mut lit);
                     target = self.pick();
@@ -377,9 +382,10 @@ impl Game {
         }
     }
 
-    /// Блок под прицелом и он сам; рамка рисуется вокруг него.
-    pub fn target_block(&self) -> Option<(IVec3, Block)> {
-        self.target.map(|pos| (pos, self.world.block(pos)))
+    /// Клетка под прицелом, блок в ней и его данные; рамка рисуется вокруг него.
+    pub fn target_block(&self) -> Option<(IVec3, Block, u8)> {
+        self.target
+            .map(|pos| (pos, self.world.block(pos), self.world.block_data(pos)))
     }
 
     /// Импорт сохранённой колонки: свет есть только у загруженной колонки, и

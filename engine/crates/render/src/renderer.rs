@@ -81,7 +81,7 @@ pub struct Renderer {
     /// Рёбра рамки вокруг `outline_block`.
     outline_buffer: wgpu::Buffer,
     /// Блок, чья рамка лежит в `outline_buffer` и рисуется; `None` — рамки нет.
-    outline_block: Option<(IVec3, Block)>,
+    outline_block: Option<(IVec3, Block, u8)>,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     /// Меши колонок по ключу колонки, по секции снизу вверх; `None` — пустая секция.
@@ -425,15 +425,15 @@ impl Renderer {
         self.frame_counts
     }
 
-    /// Рамка вокруг блока под прицелом; `None` убирает её. Блок в ключе: на месте
-    /// цветка мог появиться камень, и рамка стала бы другой.
-    pub fn set_outline(&mut self, outline: Option<(IVec3, Block)>) {
+    /// Рамка вокруг блока под прицелом; `None` убирает её. Блок и данные в ключе: на
+    /// месте цветка мог появиться камень, а факел на стене стал бы на полу, и рамка стала бы другой.
+    pub fn set_outline(&mut self, outline: Option<(IVec3, Block, u8)>) {
         if outline != self.outline_block {
-            if let Some((pos, block)) = outline {
+            if let Some((pos, block, data)) = outline {
                 self.queue.write_buffer(
                     &self.outline_buffer,
                     0,
-                    &outline_bytes(pos, block.bounds()),
+                    &outline_bytes(pos, block.bounds(data)),
                 );
             }
             self.outline_block = outline;

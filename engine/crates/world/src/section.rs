@@ -13,6 +13,10 @@ pub struct Section {
     /// Сколько блоков излучает свет: обход 4096 блоков на каждую подгрузку колонки
     /// заметно дороже счётчика, а светящихся блоков почти нет.
     emitters: u16,
+    /// Байт данных на блок (см. [`crate::block::DataKind`]), тот же индекс. Массива нет,
+    /// пока никто не записал ненулевой байт: почти все секции без данных, и 4 КиБ на
+    /// каждую были бы лишними; `None` читается как нули.
+    data: Option<Box<[u8; SECTION_VOLUME]>>,
 }
 
 impl Section {
@@ -21,6 +25,7 @@ impl Section {
         Self {
             blocks: Box::new([Block::Air; SECTION_VOLUME]),
             emitters: 0,
+            data: None,
         }
     }
 
@@ -57,9 +62,38 @@ impl Section {
         self.blocks.iter().all(|&b| b == Block::Air)
     }
 
-    /// Ставит блок по локальным координатам; за пределами 0..16 — panic.
+    /// Байт данных блока по локальным координатам; за пределами 0..16 — panic.
+    pub fn get_data(&self, local: IVec3) -> u8 {
+        let index = Self::index(local);
+        self.data.as_ref().map_or(0, |data| data[index])
+    }
+
+    /// Все байты данных секции; `None` — все нули. Мешеру и сохранению.
+    pub fn data(&self) -> Option<&[u8; SECTION_VOLUME]> {
+        self.data.as_deref()
+    }
+
+    /// Подменяет байты данных целиком (загрузка сохранения). Нулевой массив не хранится.
+    pub fn set_data(&mut self, data: Option<Box<[u8; SECTION_VOLUME]>>) {
+        self.data = data.filter(|data| data.iter().any(|&b| b != 0));
+    }
+
+    /// Ставит блок с нулевыми данными; за пределами 0..16 — panic.
     pub fn set(&mut self, local: IVec3, block: Block) {
-        let slot = &mut self.blocks[Self::index(local)];
+        self.set_with_data(local, block, 0);
+    }
+
+    /// Ставит блок и байт данных. Данные прежнего блока не переживают замену: байт
+    /// значит разное у разных блоков.
+    pub fn set_with_data(&mut self, local: IVec3, block: Block, data: u8) {
+        let index = Self::index(local);
+        match &mut self.data {
+            Some(bytes) => bytes[index] = data,
+            // Массив заводим только под ненулевой байт.
+            None if data != 0 => self.data.insert(Box::new([0; SECTION_VOLUME]))[index] = data,
+            None => {}
+        }
+        let slot = &mut self.blocks[index];
         self.emitters -= u16::from(slot.emission() > 0);
         self.emitters += u16::from(block.emission() > 0);
         *slot = block;

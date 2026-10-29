@@ -44,7 +44,7 @@ struct Shape {
     shade: vec4<f32>,
 };
 struct ShapeTable {
-    shapes: array<Shape, 25>,
+    shapes: array<Shape, 53>,
     ao: vec4<f32>,
 };
 @group(1) @binding(1)
@@ -83,7 +83,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     // Индексы везде `0,1,2, 0,2,3`; переворот диагонали сдвигает номер угла на один и даёт
     // `1,2,3, 1,3,0`: те же треугольники и обход, что давал прежний путь без индексов.
     let corner = ((in.vertex % 4u) + flip) & 3u;
-    let shape = (w0 >> 12u) & 0x1Fu;
+    let shape = ((w0 >> 12u) & 0x1Fu) | (((w0 >> 26u) & 1u) << 5u);
     let packed = table.shapes[shape].corners[corner];
     let cell = vec3<f32>(f32(w0 & 0xFu), f32((w0 >> 4u) & 0xFu), f32((w0 >> 8u) & 0xFu));
     let offset = vec3<f32>(

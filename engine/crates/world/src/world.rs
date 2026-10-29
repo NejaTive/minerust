@@ -56,10 +56,26 @@ impl World {
         std::array::from_fn(|i| self.column(key + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1)))
     }
 
-    /// Ставит блок по мировым координатам. `false` (и ничего не меняет), если y вне
-    /// 0..WORLD_HEIGHT или колонка не загружена. Колонка помечается изменённой и
-    /// несохранённой.
+    /// Байт данных блока по мировым координатам; вне мира и в незагруженной колонке — 0.
+    pub fn block_data(&self, pos: IVec3) -> u8 {
+        if !(0..WORLD_HEIGHT).contains(&pos.y) {
+            return 0;
+        }
+        let (key, local) = split(pos);
+        self.columns
+            .get(&key)
+            .map_or(0, |column| column.get_data(local))
+    }
+
+    /// Ставит блок с нулевыми данными. См. [`World::set_block_with_data`].
     pub fn set_block(&mut self, pos: IVec3, block: Block) -> bool {
+        self.set_block_with_data(pos, block, 0)
+    }
+
+    /// Ставит блок и байт данных по мировым координатам. `false` (и ничего не меняет),
+    /// если y вне 0..WORLD_HEIGHT или колонка не загружена. Колонка помечается
+    /// изменённой и несохранённой.
+    pub fn set_block_with_data(&mut self, pos: IVec3, block: Block, data: u8) -> bool {
         if !(0..WORLD_HEIGHT).contains(&pos.y) {
             return false;
         }
@@ -67,36 +83,76 @@ impl World {
         let Some(column) = self.columns.get_mut(&key) else {
             return false;
         };
-        column.set(local, block);
+        column.set_with_data(local, block, data);
         self.edited.insert(key);
         self.dirty.insert(key);
         true
     }
 
-    /// Можно ли поставить `block` в клетку `pos`: там воздух, вода или трава (она
-    /// заменяется), а растению и факелу снизу нужен твёрдый блок. Игрока не учитывает.
-    pub fn can_place(&self, pos: IVec3, block: Block) -> bool {
-        self.block(pos).is_replaceable()
-            && (!block.needs_support() || self.block(pos - IVec3::Y).is_solid())
+    /// Держится ли `block` с данными `data` в клетке `pos`: опора на месте. Блок без
+    /// опоры держится всегда. Для настенного блока опора ещё и непрозрачная: листва
+    /// «твёрдая» для ног, но факел на ней смотрелся бы висящим в дырках.
+    pub fn is_supported(&self, pos: IVec3, block: Block, data: u8) -> bool {
+        let Some(dir) = block.support_dir(data) else {
+            return true;
+        };
+        let support = self.block(pos + dir);
+        support.is_solid() && (dir.y != 0 || support.is_opaque())
     }
 
-    /// Правка с опорой: ставит `block` и, если клетка перестала быть твёрдой, убирает
-    /// стоящие выше блоки, которым нужна опора (трава, цветы, факел). Возвращает
-    /// изменённые клетки — первой `pos`, затем снятые; пусто, если правка не прошла
-    /// (`set_block`). Одно место для ломания и установки: движок обновляет свет и меши
-    /// по каждой клетке списка.
+    /// Можно ли поставить `block` в клетку `pos`: там воздух, вода или трава (она
+    /// заменяется), а растению и факелу нужна опора. Игрока не учитывает.
+    pub fn can_place(&self, pos: IVec3, block: Block) -> bool {
+        self.can_place_with_data(pos, block, 0)
+    }
+
+    /// [`World::can_place`] для блока с данными (направление крепления берётся из них).
+    pub fn can_place_with_data(&self, pos: IVec3, block: Block, data: u8) -> bool {
+        self.block(pos).is_replaceable() && self.is_supported(pos, block, data)
+    }
+
+    /// Правка с опорой без данных. См. [`World::set_block_supported_with_data`].
     pub fn set_block_supported(&mut self, pos: IVec3, block: Block) -> Vec<IVec3> {
-        if !self.set_block(pos, block) {
+        self.set_block_supported_with_data(pos, block, 0)
+    }
+
+    /// Правка с опорой: ставит `block` и убирает блоки, потерявшие опору (трава, цветы,
+    /// факел на полу и на стене), и так каскадом: у снятого блока тоже могли быть
+    /// зависимые. Возвращает изменённые клетки — первой `pos`, затем снятые в порядке
+    /// снятия; пусто, если правка не прошла (`set_block_with_data`). Одно место для
+    /// ломания и установки: движок обновляет свет и меши по каждой клетке списка.
+    pub fn set_block_supported_with_data(
+        &mut self,
+        pos: IVec3,
+        block: Block,
+        data: u8,
+    ) -> Vec<IVec3> {
+        if !self.set_block_with_data(pos, block, data) {
             return Vec::new();
         }
         let mut changed = vec![pos];
-        let mut cell = pos;
-        while !self.block(cell).is_solid() {
-            cell += IVec3::Y;
-            if !self.block(cell).needs_support() || !self.set_block(cell, Block::Air) {
-                break;
+        let mut next = 0;
+        while next < changed.len() {
+            let cell = changed[next];
+            next += 1;
+            for dir in [
+                IVec3::Y,
+                IVec3::NEG_Y,
+                IVec3::X,
+                IVec3::NEG_X,
+                IVec3::Z,
+                IVec3::NEG_Z,
+            ] {
+                let around = cell + dir;
+                let (neighbor, data) = (self.block(around), self.block_data(around));
+                // Зависимый блок смотрит на `cell` как на опору (она против `dir`).
+                if neighbor.support_dir(data) == Some(-dir)
+                    && !self.is_supported(around, neighbor, data)
+                    && self.set_block(around, Block::Air)
+                {
+                    changed.push(around);
+                }
             }
-            changed.push(cell);
         }
         changed
     }

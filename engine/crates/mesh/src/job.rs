@@ -4,13 +4,16 @@
 //!
 //! Все числа — little endian.
 //! - Задание: `id: u32`, `ambient_occlusion: u8`, `count: u8`, затем `count` секций:
-//!   `sy: u8`, блоки кэша (`PADDED³` байт), свет кэша (`PADDED³` байт).
+//!   `sy: u8`, `has_data: u8`, блоки кэша (`PADDED³` байт), свет кэша (`PADDED³` байт) и,
+//!   если `has_data = 1`, 4096 байт данных блоков самой секции (`x + 16·z + 256·y`).
+//!   Данные соседних секций не нужны мешеру, поэтому задание их не несёт.
 //! - Результат: `id: u32`, `count: u8`, затем `count` секций: `sy: u8` и три меша
 //!   (`solid`, `cutout`, `water`), у каждого `quads: u32` и столько записей по 12 байт.
 use world::block::Block;
 use world::column::COLUMN_SECTIONS;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
+use world::section::SECTION_VOLUME;
 use world::world::World;
 
 use crate::mesh::{QUAD_BYTES, Quad};
@@ -21,7 +24,8 @@ use crate::mesher::{
 
 const CACHE_LEN: usize = (PADDED * PADDED * PADDED) as usize;
 const HEADER_LEN: usize = 6;
-const SECTION_JOB_LEN: usize = 1 + 2 * CACHE_LEN;
+/// Секция без данных: `sy`, флаг данных, блоки и свет.
+const SECTION_JOB_LEN: usize = 2 + 2 * CACHE_LEN;
 
 /// Результат задания: меши непустых секций, снизу вверх.
 pub struct JobResult {
@@ -66,10 +70,15 @@ fn push_section(
     lights: &mut Lights,
 ) {
     around.fill(sy, blocks, lights);
+    let data = around.columns[4].and_then(|column| column.section(sy).data());
     bytes.push(sy as u8);
+    bytes.push(u8::from(data.is_some()));
     // `Block` — `repr(u8)`, поэтому побайтовая запись совпадает с номерами блоков.
     bytes.extend(blocks.0.iter().map(|&b| b as u8));
     bytes.extend_from_slice(&lights.0);
+    if let Some(data) = data {
+        bytes.extend_from_slice(data);
+    }
     bytes[HEADER_LEN - 1] += 1;
 }
 
@@ -123,22 +132,26 @@ pub fn run_job(job: &[u8]) -> Vec<u8> {
         ambient_occlusion: job[4] != 0,
     };
     let count = usize::from(job[5]);
-    assert_eq!(
-        job.len(),
-        HEADER_LEN + count * SECTION_JOB_LEN,
-        "job length"
-    );
     let (mut blocks, mut lights) = new_caches();
+    let mut data = Box::new([0u8; SECTION_VOLUME]);
     let mut out = Vec::new();
     out.extend_from_slice(&id.to_le_bytes());
     out.push(count as u8);
-    for chunk in job[HEADER_LEN..].as_chunks::<SECTION_JOB_LEN>().0 {
-        for (dst, &src) in blocks.0.iter_mut().zip(&chunk[1..1 + CACHE_LEN]) {
+    let mut at = HEADER_LEN;
+    for _ in 0..count {
+        let (sy, has_data) = (job[at], job[at + 1] != 0);
+        let body = &job[at + 2..];
+        for (dst, &src) in blocks.0.iter_mut().zip(&body[..CACHE_LEN]) {
             *dst = Block::try_from(src).expect("job block id");
         }
-        lights.0.copy_from_slice(&chunk[1 + CACHE_LEN..]);
-        let meshes = mesh_cached(&blocks, &lights, options);
-        out.push(chunk[0]);
+        lights.0.copy_from_slice(&body[CACHE_LEN..2 * CACHE_LEN]);
+        at += SECTION_JOB_LEN;
+        if has_data {
+            data.copy_from_slice(&job[at..at + SECTION_VOLUME]);
+            at += SECTION_VOLUME;
+        }
+        let meshes = mesh_cached(&blocks, &lights, has_data.then_some(&*data), options);
+        out.push(sy);
         for mesh in [&meshes.solid, &meshes.cutout, &meshes.water] {
             out.extend_from_slice(&(mesh.quads.len() as u32).to_le_bytes());
             for quad in &mesh.quads {
@@ -146,6 +159,7 @@ pub fn run_job(job: &[u8]) -> Vec<u8> {
             }
         }
     }
+    assert_eq!(at, job.len(), "job length");
     out
 }
 
