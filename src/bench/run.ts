@@ -10,6 +10,7 @@ const LOAD_TIMEOUT_MS = 180_000
 function geometry(s: WorldStats) {
   return {
     solidQuads: s.solidQuads,
+    cutoutQuads: s.cutoutQuads,
     waterQuads: s.waterQuads,
     drawCalls: s.drawCalls,
     drawnSections: s.drawnSections,
