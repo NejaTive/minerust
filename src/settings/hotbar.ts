@@ -5,16 +5,10 @@ const HOTBAR_CONTENTS_KEY = 'minerust.hotbar'
 
 export const HOTBAR_SIZE = 9
 
-/**
- * Умолчание — пустые слоты (первый запуск и битые данные).
- * Пустой хотбар — валидное сохранённое состояние, не «мусор» для отката.
- * Живое состояние — реактивный массив из `useSettings`, не эта константа.
- */
 export const DEFAULT_HOTBAR: (string | null)[] = Array.from({ length: HOTBAR_SIZE }, () => null)
 
 export type HotbarContents = (string | null)[]
 
-/** Выбранный слот хотбара; вне 0..count−1 или не число — первый. */
 export function loadHotbarSlot(store: KeyValueStore, count = HOTBAR_SIZE): number {
   const raw = store.get(HOTBAR_SLOT_KEY)
   const value = raw === null ? Number.NaN : Number(raw)
@@ -25,10 +19,6 @@ export function saveHotbarSlot(store: KeyValueStore, slot: number) {
   store.set(HOTBAR_SLOT_KEY, String(slot))
 }
 
-/**
- * Содержимое слотов из хранилища. Битый JSON, неверная длина или имя вне `known`
- * (имена из `blocks()`) — откат к копии `DEFAULT_HOTBAR`.
- */
 export function loadHotbarContents(
   store: KeyValueStore,
   known: ReadonlySet<string>,
@@ -59,18 +49,15 @@ export function saveHotbarContents(store: KeyValueStore, slots: HotbarContents) 
   store.set(HOTBAR_CONTENTS_KEY, JSON.stringify(slots))
 }
 
-/** Очистить все слоты (например при «Новый мир»). */
 export function clearHotbar(slots: HotbarContents) {
   for (let i = 0; i < slots.length; i++) slots[i] = null
 }
 
-/** Положить блок (или очистить, если `null`) в слот. */
 export function putHotbarSlot(slots: HotbarContents, index: number, name: string | null) {
   if (index < 0 || index >= slots.length) return
   slots[index] = name
 }
 
-/** Поменять два слота местами. */
 export function swapHotbarSlots(slots: HotbarContents, a: number, b: number) {
   if (a < 0 || b < 0 || a >= slots.length || b >= slots.length || a === b) return
   const tmp = slots[a]

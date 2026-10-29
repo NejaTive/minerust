@@ -11,9 +11,7 @@ const root = useTemplateRef<HTMLElement>('root')
 
 const paint = () => paintBlockIconsIn(root.value)
 
-// wasm к этому моменту уже инициализирован: хотбар монтируется после старта движка.
 onMounted(paint)
-// Смена содержимого слота (инвентарь) — перерисовать иконки после обновления DOM.
 watch(
   slots,
   async () => {
@@ -51,7 +49,6 @@ watch(
   background: rgb(0 0 0 / 0.45);
   border-radius: 4px;
   pointer-events: none;
-  /* Под HUD (20) и меню паузы, над canvas. */
   z-index: 10;
 }
 .slot {
@@ -72,7 +69,6 @@ watch(
 canvas {
   width: 32px;
   height: 32px;
-  /* Без сглаживания: иконка — те же пиксели, что у блока в мире. */
   image-rendering: pixelated;
 }
 .number {

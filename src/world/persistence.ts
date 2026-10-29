@@ -1,10 +1,8 @@
 import { checkMeta } from './meta'
 import { type SavedColumn, type WorldMeta, type WorldStorage } from './storage'
 
-/** Сид мира, пока нет сохранения: первый запуск даёт привычный рельеф. */
 export const DEFAULT_SEED = 1337
 
-/** Часть `Engine`, нужная сохранению; в тестах подменяется заглушкой. */
 export interface SaveableEngine {
   drain_dirty(): ArrayLike<number>
   export_column(x: number, z: number): Uint8Array | undefined
@@ -16,10 +14,8 @@ export interface SaveableEngine {
 
 export interface PersistenceDeps {
   open(): Promise<WorldStorage | null>
-  /** `Engine.format_version()`. */
   formatVersion: number
   notify(text: string): void
-  /** В базе мир более новой версии игры: он не загружен и не перезаписывается. */
   setNewerSave(newer: boolean): void
   randomSeed(): number
 }
@@ -32,26 +28,16 @@ export interface WorldStart {
 
 const columnKey = (column: { x: number; z: number }) => `${column.x},${column.z}`
 
-/** Сохранение мира в IndexedDB: колонки, игрок, время; загрузка и сброс для «Нового мира». */
 export class WorldPersistence {
-  // `null` — IndexedDB недоступен, игра идёт без сохранений.
   private storage: WorldStorage | null = null
-  // В базе мир, записанный более новой версией игры: не читаем и не пишем поверх, пока
-  // игрок явно не начнёт новый мир (`reset` сотрёт базу после подтверждения).
   private newerSave = false
-  // Последние байты каждой изменённой колонки текущего мира (и прочитанных из базы).
   private readonly worldColumns = new Map<string, SavedColumn>()
-  // Колонки, снятые с движка, но ещё не записанные. При ошибке записи остаются здесь
-  // и уходят со следующим сохранением: `drain_dirty` второй раз их не отдаст.
   private readonly unsaved = new Map<string, SavedColumn>()
-  // Последнее начатое сохранение; IndexedDB выполняет их по очереди, так что его
-  // завершение означает, что записаны и все предыдущие.
   private saving: Promise<void> = Promise.resolve()
   private saveFailed = false
 
   constructor(private readonly deps: PersistenceDeps) {}
 
-  /** Открывает хранилище и читает сохранённый мир в память. */
   async load(): Promise<WorldStart> {
     this.storage = await this.deps.open()
     if (!this.storage) {
@@ -62,7 +48,6 @@ export class WorldPersistence {
     try {
       saved = await this.storage.load()
     } catch (e) {
-      // Не прочитали — не пишем поверх: в базе мог остаться чужой мир.
       console.warn('world load failed', e)
       this.storage = null
       this.deps.notify('Сохранение не читается — мир не сохранится')
@@ -85,7 +70,6 @@ export class WorldPersistence {
     return saved.meta
   }
 
-  /** Правки — в только что созданный движок, до первого кадра. */
   importInto(engine: SaveableEngine) {
     let broken = 0
     for (const [key, column] of this.worldColumns) {
@@ -102,10 +86,6 @@ export class WorldPersistence {
     if (broken > 0) this.deps.notify(`Повреждённые колонки пропущены: ${broken}`)
   }
 
-  /**
-   * Сохраняет несохранённые колонки и игрока (позицию — каждый раз, даже без правок).
-   * Состояние снимается синхронно, запись идёт в фоне; ошибки не пробрасываются.
-   */
   save(engine: SaveableEngine | undefined): Promise<void> {
     const store = this.storage
     if (!engine || !store || this.newerSave) return this.saving
@@ -120,7 +100,6 @@ export class WorldPersistence {
     this.saving = store.save(meta, columns).then(
       () => {
         this.saveFailed = false
-        // Сравнение по ссылке: пока шла запись, колонку могли снять с движка заново.
         for (const column of columns) {
           if (this.unsaved.get(columnKey(column)) === column) this.unsaved.delete(columnKey(column))
         }
@@ -134,10 +113,6 @@ export class WorldPersistence {
     return this.saving
   }
 
-  /**
-   * Подготовка к новому миру; движок к этому моменту уже остановлен, чтобы автосохранение
-   * не записало старый мир поверх пустой базы. Начатая запись должна закончиться до `clear`.
-   */
   async reset() {
     await this.saving
     this.worldColumns.clear()
@@ -149,7 +124,6 @@ export class WorldPersistence {
     }
   }
 
-  /** Снимает с движка несохранённые колонки в `worldColumns` и `unsaved`. */
   private collectColumns(engine: SaveableEngine) {
     const keys = engine.drain_dirty()
     for (let i = 0; i < keys.length; i += 2) {
@@ -163,10 +137,6 @@ export class WorldPersistence {
     }
   }
 
-  /**
-   * Очищает базу. Если не вышло, сохранения выключаются: иначе старые колонки
-   * подмешались бы к новому миру при следующей загрузке.
-   */
   private async clearStorage() {
     try {
       await this.storage?.clear()

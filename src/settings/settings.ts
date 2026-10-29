@@ -1,6 +1,5 @@
 import type { KeyValueStore } from './store'
 
-// Ключ дальности остался прежним, чтобы обновление не сбросило её у игрока.
 export const KEYS = {
   renderDistance: 'minerust.renderDistance',
   ambientOcclusion: 'minerust.ambientOcclusion',
@@ -11,7 +10,6 @@ export const KEYS = {
 // Ключи убранных настроек (панель управления, выбор графического API): чистим, чтобы не копился мусор.
 const OBSOLETE_KEYS = ['minerust.controlsHidden', 'minerust.graphicsApi']
 
-/** Настройки, которыми управляет движок; пределы и значения по умолчанию даёт он же. */
 export interface EngineSettings {
   renderDistance: number
   ambientOcclusion: boolean
@@ -19,12 +17,10 @@ export interface EngineSettings {
   fov: number
 }
 
-/** Настройки игры. `showDebug` — чисто клиентская, движок о ней не знает. */
 export interface Settings extends EngineSettings {
   showDebug: boolean
 }
 
-/** Пределы из `settings_limits()` движка. */
 export interface SettingsLimits {
   renderDistanceMin: number
   renderDistanceMax: number
@@ -60,7 +56,6 @@ function readBool(store: KeyValueStore, key: string, fallback: boolean): boolean
   return raw === null ? fallback : raw === 'true'
 }
 
-/** Читает настройки; битые и вышедшие за пределы значения заменяются по умолчанию или зажимаются. */
 export function loadSettings(
   store: KeyValueStore,
   limits: SettingsLimits,
@@ -98,7 +93,6 @@ export function saveSettings(store: KeyValueStore, s: Settings) {
   store.set(KEYS.showDebug, String(s.showDebug))
 }
 
-/** Склонение для «Дальность: N колонок». */
 export function columnsWord(n: number): string {
   const mod10 = n % 10
   const mod100 = n % 100

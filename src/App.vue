@@ -15,7 +15,6 @@ const state = useGameState()
 const { settings, limits, slot, block, update } = useSettings()
 
 const game = useTemplateRef('game')
-// Меню видно, пока курсор не захвачен: это и есть пауза.
 const started = ref(false)
 const lockFailed = ref(false)
 const screen = ref<MenuScreen>('main')
@@ -34,13 +33,11 @@ async function play() {
   lockFailed.value = !(await game.value?.requestLock())
 }
 
-/** После закрытия инвентаря без захвата: клик по канвасу возвращает обычный режим. */
 async function resumeFromLockLost() {
   if (!state.lockLost) return
   await game.value?.requestLock()
 }
 
-// N в игре: курсор отпускаем, чтобы подтверждение было видно и доступно мышью.
 function askNewWorld() {
   screen.value = 'confirm'
   game.value?.releaseCursor()
@@ -66,7 +63,6 @@ async function newWorld() {
   />
   <Hotbar v-if="state.locked && state.ready" :slot-index="slot" />
   <Inventory v-if="state.inventoryOpen && state.ready" />
-  <!-- lockLost: без меню, ждём клик; обычный Esc из игры по-прежнему открывает PauseMenu. -->
   <PauseMenu
     v-if="!state.locked && !state.inventoryOpen && !state.lockLost && !BENCH"
     v-model:screen="screen"

@@ -9,7 +9,6 @@ export const round = (value: number, digits = 2) => Number(value.toFixed(digits)
 export const mean = (values: number[]) =>
   values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0) / values.length
 
-/** Время кадров между rAF и время самого `render()` в JS (CPU wasm-вызова). */
 export class FrameRecorder {
   deltas: number[] = []
   renders: number[] = []
