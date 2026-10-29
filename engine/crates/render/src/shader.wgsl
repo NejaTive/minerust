@@ -29,13 +29,32 @@ var block_textures: texture_2d_array<f32>;
 @group(0) @binding(2)
 var block_sampler: sampler;
 
-// Вершина — два u32, раскладка в mesh.rs (`Vertex`): позиция локальная в 1/16 блока,
-// UV в 1/16 тайла, слой и сторона × AO по байту, свет солнца и блоков по 5 бит в
-// половинках уровня. `origin` — мировой угол секции, один на
-// весь вызов (буфер с шагом по экземплярам).
+// Квады блоков лежат в одном storage-буфере (арена) по три слова, раскладка — в
+// mesh.rs (`Quad`). Индексов и вершинных буферов нет: на квад идёт 6 вершин
+// (`vertex_index / 6`), угол берётся из таблицы шаблонов `shapes`.
+@group(1) @binding(0)
+var<storage, read> quads: array<u32>;
+
+// Таблица шаблонов квадов, байты даёт `mesh::templates::table_bytes` (размер сверяет тест
+// рендера): на шаблон четыре упакованных угла (x, y, z, u, v по 5 бит, в 1/16) и яркость
+// стороны в `.x`; ao.x..w — яркость вершины по уровню AO.
+struct Shape {
+    corners: vec4<u32>,
+    shade: vec4<f32>,
+};
+struct ShapeTable {
+    shapes: array<Shape, 25>,
+    ao: vec4<f32>,
+};
+@group(1) @binding(1)
+var<uniform> table: ShapeTable;
+
+// Слот меша — `first_instance`: мировой угол секции и начало записей квадов меша в
+// арене (в словах u32), один на весь вызов (буфер с шагом по экземплярам).
 struct VertexIn {
-    @location(0) packed: vec2<u32>,
-    @location(1) origin: vec3<f32>,
+    @builtin(vertex_index) vertex: u32,
+    @location(0) origin: vec3<f32>,
+    @location(1) first_word: u32,
 };
 
 struct VertexOut {
@@ -53,22 +72,35 @@ fn vertex_brightness(sun_halves: u32, block_halves: u32) -> f32 {
     return max(pow(LIGHT_BASE, MAX_LIGHT - level), MIN_BRIGHTNESS);
 }
 
+// Углы двух треугольников квада без переворота диагонали; с переворотом все номера
+// сдвигаются на один (`1,2,3, 1,3,0`).
+const TRIANGLE_CORNERS: array<u32, 6> = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    let a = in.packed.x;
-    let b = in.packed.y;
-    let local = vec3<f32>(
-        f32(a & 0x1FFu),
-        f32((a >> 9u) & 0x1FFu),
-        f32((a >> 18u) & 0x1FFu),
-    ) / 16.0;
-    let world_pos = in.origin + local;
+    let at = in.first_word + (in.vertex / 6u) * 3u;
+    let w0 = quads[at];
+    let w1 = quads[at + 1u];
+    let w2 = quads[at + 2u];
+    let flip = (w0 >> 17u) & 1u;
+    let corner = (TRIANGLE_CORNERS[in.vertex % 6u] + flip) & 3u;
+    let shape = (w0 >> 12u) & 0x1Fu;
+    let packed = table.shapes[shape].corners[corner];
+    let cell = vec3<f32>(f32(w0 & 0xFu), f32((w0 >> 4u) & 0xFu), f32((w0 >> 8u) & 0xFu));
+    let offset = vec3<f32>(
+        f32(packed & 0x1Fu),
+        f32((packed >> 5u) & 0x1Fu),
+        f32((packed >> 10u) & 0x1Fu),
+    );
+    let world_pos = in.origin + cell + offset / 16.0;
+    let ao = (w1 >> (2u * corner)) & 3u;
+    let sun = (w1 >> (8u + 5u * corner)) & 0x1Fu;
+    let block = (w2 >> (5u * corner)) & 0x1Fu;
     var out: VertexOut;
     out.position = globals.view_proj * vec4<f32>(world_pos, 1.0);
-    out.uv = vec2<f32>(f32(a >> 27u), f32(b & 0x1Fu)) / 16.0;
-    out.shade = f32((b >> 13u) & 0xFFu) / 255.0
-        * vertex_brightness((b >> 21u) & 0x1Fu, (b >> 26u) & 0x1Fu);
-    out.layer = (b >> 5u) & 0xFFu;
+    out.uv = vec2<f32>(f32((packed >> 15u) & 0x1Fu), f32((packed >> 20u) & 0x1Fu)) / 16.0;
+    out.shade = table.shapes[shape].shade.x * table.ao[ao] * vertex_brightness(sun, block);
+    out.layer = (w0 >> 18u) & 0xFFu;
     out.world_pos = world_pos;
     return out;
 }

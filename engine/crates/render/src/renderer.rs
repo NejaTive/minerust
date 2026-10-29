@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use glam::{IVec3, Mat4, Vec2, Vec3};
-use mesh::mesh::quad_index_bytes;
 use mesh::mesher::SectionMeshes;
-use wgpu::util::DeviceExt;
 use world::block::Block;
 use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
@@ -50,10 +48,8 @@ pub struct FrameParams {
 /// Счётчики последнего кадра для `stats()`.
 #[derive(Clone, Copy, Default)]
 pub struct FrameCounts {
-    pub solid_vertices: u32,
-    pub solid_indices: u32,
-    pub water_vertices: u32,
-    pub water_indices: u32,
+    pub solid_quads: u32,
+    pub water_quads: u32,
     pub draw_calls: u32,
 }
 
@@ -81,16 +77,13 @@ pub struct Renderer {
     sky_pipeline: wgpu::RenderPipeline,
     /// Рёбра рамки вокруг `outline_block`.
     outline_buffer: wgpu::Buffer,
-    /// Индексы квадов `0,1,2, 0,2,3` для всех мешей секций ([`quad_index_bytes`]):
-    /// диагональ выбирается порядком вершин, так что своих индексов у секции нет.
-    quad_index_buffer: wgpu::Buffer,
     /// Блок, чья рамка лежит в `outline_buffer` и рисуется; `None` — рамки нет.
     outline_block: Option<(IVec3, Block)>,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     /// Меши колонок по ключу колонки, по секции снизу вверх; `None` — пустая секция.
     column_meshes: HashMap<ColumnPos, ColumnMeshes>,
-    /// Арена вершин и буфер углов всех секций.
+    /// Арена записей квадов и буфер слотов всех мешей.
     buffers: SceneBuffers,
     /// Меши, которые не поместились в буферы (предел `max_buffer_size`): их нет на экране.
     failed_uploads: u32,
@@ -228,9 +221,20 @@ impl Renderer {
         });
 
         let shader = shaders::module(&device, "shader", shaders::BLOCK_SHADER);
+        let buffers = SceneBuffers::new(&device);
+        // У неба и рамки арены нет, поэтому у них свой layout: WebGPU требует ставить все
+        // группы layout'а пайплайна, даже если шейдер их не читает.
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("main"),
             bind_group_layouts: &[Some(&globals_layout)],
+            ..Default::default()
+        });
+        let block_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("blocks"),
+            bind_group_layouts: &[
+                Some(&globals_layout),
+                Some(buffers.arena.bind_group_layout()),
+            ],
             ..Default::default()
         });
         let outline_pipeline = create_outline_pipeline(&device, &pipeline_layout, render_format);
@@ -241,21 +245,16 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let quad_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("quad indices"),
-            contents: &quad_index_bytes(),
-            usage: wgpu::BufferUsages::INDEX,
-        });
         let pipeline = create_block_pipeline(
             &device,
-            &pipeline_layout,
+            &block_layout,
             &shader,
             render_format,
             BlockPass::Solid,
         );
         let water_pipeline = create_block_pipeline(
             &device,
-            &pipeline_layout,
+            &block_layout,
             &shader,
             render_format,
             BlockPass::Water,
@@ -265,7 +264,6 @@ impl Renderer {
             .features()
             .contains(wgpu::Features::TIMESTAMP_QUERY)
             .then(|| GpuTimer::new(&device, &queue));
-        let buffers = SceneBuffers::new(&device);
 
         Ok(Renderer {
             surface,
@@ -278,7 +276,6 @@ impl Renderer {
             outline_pipeline,
             sky_pipeline,
             outline_buffer,
-            quad_index_buffer,
             outline_block: None,
             globals_buffer,
             globals_bind_group,
@@ -382,14 +379,14 @@ impl Renderer {
         self.column_meshes.values().flatten().flatten().count()
     }
 
-    /// Память мешей на GPU, байт: арена вершин и буфер углов целиком (с запасом) и общие индексы.
+    /// Память мешей на GPU, байт: арена записей квадов и буфер слотов целиком (с запасом).
     pub fn gpu_bytes(&self) -> u64 {
-        self.buffers.bytes() + self.quad_index_buffer.size()
+        self.buffers.bytes()
     }
 
-    /// Из [`Renderer::gpu_bytes`] занято мешами и углами, байт.
+    /// Из [`Renderer::gpu_bytes`] занято мешами и слотами, байт.
     pub fn gpu_used_bytes(&self) -> u64 {
-        self.buffers.used_bytes() + self.quad_index_buffer.size()
+        self.buffers.used_bytes()
     }
 
     /// GPU-таймер доступен (адаптер дал `timestamp-query`).
@@ -512,10 +509,9 @@ impl Renderer {
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.buffers.arena.buffer().slice(..));
-            pass.set_vertex_buffer(1, self.buffers.origins.buffer().slice(..));
+            pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
+            pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
             let visible: Vec<&SectionMesh> = self
                 .column_meshes
                 .values()
@@ -524,13 +520,9 @@ impl Renderer {
                 .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max))
                 .collect();
             let mut counts = FrameCounts::default();
-            for (section, mesh) in visible
-                .iter()
-                .filter_map(|section| Some((*section, section.solid.as_ref()?)))
-            {
-                mesh.draw(&mut pass, section.slot);
-                counts.solid_vertices += mesh.vertex_count;
-                counts.solid_indices += mesh.index_count;
+            for mesh in visible.iter().filter_map(|section| section.solid.as_ref()) {
+                mesh.draw(&mut pass);
+                counts.solid_quads += mesh.quad_count;
                 counts.draw_calls += 1;
             }
             self.drawn_sections = visible.len() as u32;
@@ -557,23 +549,22 @@ impl Renderer {
             // Внутри секции грани не сортируются: цвет у воды один, и разница почти
             // не видна.
             let eye = params.camera_pos;
-            let mut water: Vec<(f32, &SectionMesh, &GpuMesh)> = visible
+            let mut water: Vec<(f32, &GpuMesh)> = visible
                 .iter()
                 .filter_map(|mesh| {
                     let center = (mesh.min + mesh.max) / 2.0;
-                    Some((center.distance_squared(eye), *mesh, mesh.water.as_ref()?))
+                    Some((center.distance_squared(eye), mesh.water.as_ref()?))
                 })
                 .collect();
             if !water.is_empty() {
                 water.sort_by(|a, b| b.0.total_cmp(&a.0));
                 pass.set_pipeline(&self.water_pipeline);
-                // Рамка заняла слот 0: арену ставим обратно.
-                pass.set_vertex_buffer(0, self.buffers.arena.buffer().slice(..));
-                pass.set_vertex_buffer(1, self.buffers.origins.buffer().slice(..));
-                for (_, section, mesh) in water {
-                    mesh.draw(&mut pass, section.slot);
-                    counts.water_vertices += mesh.vertex_count;
-                    counts.water_indices += mesh.index_count;
+                // Рамка заняла вершинный буфер 0, а её layout без арены: ставим всё обратно.
+                pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
+                pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
+                for (_, mesh) in water {
+                    mesh.draw(&mut pass);
+                    counts.water_quads += mesh.quad_count;
                     counts.draw_calls += 1;
                 }
             }

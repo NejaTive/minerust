@@ -1,21 +1,17 @@
-use mesh::mesh::{ORIGIN_BYTES, Vertex};
+use mesh::mesh::SLOT_BYTES;
 
-/// Вершина секции — два `u32` ([`mesh::mesh::Vertex`]).
-pub fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
-    wgpu::VertexBufferLayout {
-        array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
-        step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &wgpu::vertex_attr_array![0 => Uint32x2],
-    }
-}
+/// Слот меша на один экземпляр: слот в общем буфере — `first_instance` отрисовки. Так
+/// буфер ставится раз на проход, без push-констант (в WebGPU их нет) и bind group на
+/// секцию. Вершинных буферов у блоков нет: квады шейдер читает из арены по `vertex_index`.
+/// Атрибуты: 0 — мировой угол секции (`vec3<f32>`), 1 — начало записей квадов меша в
+/// арене в словах `u32` (по смещению 12, там у `vec3<f32>` пустовали байты выравнивания).
+const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32];
 
-/// Мировой угол секции (3 × f32, 16 байт с выравниванием) на один экземпляр: слот секции
-/// в общем буфере — `first_instance` отрисовки. Так буфер ставится раз на проход, без
-/// push-констант и bind group на секцию.
-pub fn origin_layout() -> wgpu::VertexBufferLayout<'static> {
+pub fn slot_layout() -> wgpu::VertexBufferLayout<'static> {
     wgpu::VertexBufferLayout {
-        array_stride: ORIGIN_BYTES as wgpu::BufferAddress,
+        array_stride: SLOT_BYTES as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Instance,
-        attributes: &wgpu::vertex_attr_array![1 => Float32x3],
+        attributes: &ATTRIBUTES,
     }
 }

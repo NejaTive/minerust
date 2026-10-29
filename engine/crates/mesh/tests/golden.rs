@@ -2,7 +2,7 @@
 //! Константы меняются только при намеренной смене генерации, света или формата меша.
 use glam::IVec3;
 
-use mesh::mesh::{gpu_vertices, vertex_bytes};
+use mesh::mesh::quad_bytes;
 use mesh::mesher::{MeshOptions, mesh_world_column};
 use world::column::WORLD_HEIGHT;
 use world::light::LightMap;
@@ -74,13 +74,7 @@ fn meshes_match_golden() {
             let mut hash = FNV_START;
             for section in &sections {
                 for data in [&section.solid, &section.water] {
-                    fnv(
-                        &mut hash,
-                        &vertex_bytes(&gpu_vertices(&data.vertices, &data.indices)),
-                    );
-                    for index in &data.indices {
-                        fnv(&mut hash, &index.to_le_bytes());
-                    }
+                    fnv(&mut hash, &quad_bytes(&data.quads));
                 }
             }
             hash
@@ -95,9 +89,12 @@ const GOLDEN_BLOCKS: [u64; 4] = [
     0xe69a701bfc6595d0,
     0x4fe7fff820d365db,
 ];
+/// Хеши записей квадов (`quad_bytes`). Формат поменялся в 20b (вершины → записи по 12 байт);
+/// эквивалентность старого и нового меша один в один до смены была доказана тестом,
+/// который развёртывал записи через шаблоны и сравнивал с прежними вершинами.
 const GOLDEN_MESHES: [u64; 4] = [
-    0xb1cb23063450e4ac,
-    0x6f969d535ff7a4cf,
-    0x1c5b74531c3af7cc,
-    0x77c7989713399e49,
+    0xf8168e1e2bc0646c,
+    0x0e692c8c9504017e,
+    0xbb91b5e8a5e32b86,
+    0x68385ff65701513e,
 ];

@@ -46,8 +46,8 @@ fn mesh_timing() {
 /// Время `mesh_world_column` по этапам, на колонку, при AO и без. Кэш (блоки и свет с
 /// соседями) меряется отдельно через `Surroundings::fill`. Цикл граней (AO, свет
 /// вершин, запись) отдельно не выделить без правки мешера, поэтому его время — это
-/// полный меш минус кэш, а запись вершин оценивается пересборкой готовых мешей
-/// через `push_quad` (те же вызовы, без расчёта AO и света). Расчёт AO и света
+/// полный меш минус кэш, а запись квадов оценивается пересборкой готовых мешей
+/// копированием записей квадов (без расчёта AO и света). Расчёт AO и света
 /// вершин — остаток. Запуск:
 /// `cargo test --release mesh_stages -- --ignored --nocapture`.
 #[test]
@@ -88,8 +88,8 @@ fn mesh_stages() {
             for data in &meshes {
                 for mesh in [&data.solid, &data.water] {
                     let mut copy = MeshData::new();
-                    for quad in mesh.vertices.as_chunks::<4>().0 {
-                        copy.push_quad(quad.iter().copied(), [0, 1, 2, 2, 3, 0]);
+                    for quad in &mesh.quads {
+                        copy.quads.push(*quad);
                         quads += 1;
                     }
                     black_box(copy);

@@ -6,100 +6,10 @@ use world::light::{MAX_LIGHT, level_brightness};
 /// Хватает и для воды (верх на 14/16 = 0.875), и для любой части блока в будущем.
 pub const POSITION_UNITS: i32 = 16;
 
-/// Наибольшее значение координаты вершины в шагах: 16 блоков секции × 16 шагов.
-pub const MAX_POSITION: u16 = 16 * POSITION_UNITS as u16;
-
-/// Вершина секции, 8 байт: два `u32`. Позиция локальная (от угла секции), мировой
-/// угол секции приходит отдельным буфером на отрисовку ([`origin_layout`]).
-///
-/// Раскладка (младший бит первым):
-/// - слово 0: x 0..9, y 9..18, z 18..27 (по 9 бит, 0..=256 шагов по 1/16 блока, то
-///   есть 0..=16 блоков включительно), u 27..32 (5 бит, 0..=16 шестнадцатых тайла);
-/// - слово 1: v 0..5 (так же), слой текстуры 5..13 (8 бит), яркость 13..21
-///   (8 бит, 0..=255 — `/255` в шейдере);
-/// - слово 1: свет солнца 21..26 и свет блоков 26..31 — средний по вершине уровень в
-///   половинках уровня (5 бит, 0..=30, [`MAX_LIGHT_HALVES`]); бит 31 свободен.
-///
-/// Яркость от света шейдер считает сам из этих двух уровней и тьмы неба (`Globals`):
-/// ночью меняется только uniform, меши остаются теми же. Половинки уровня дают
-/// ошибку яркости не больше 0.8^0.25 ≈ 5.5%: «средний» уровень вершины — дробь со
-/// знаменателем 1..4, а бит на точность дороже, чем на неё хватает глазу.
-///
-/// UV хранятся явно, а не выводятся из номера угла: у боковых граней воды под опущенным
-/// верхом v = 1 − y (обрезка тайла), и угла грани для этого мало.
-///
-/// Раскладку знает и `shader.wgsl` (`vs_main`): менять вместе.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Vertex([u32; 2]);
-
-const POSITION_MASK: u32 = 0x1FF;
-const UV_MASK: u32 = 0x1F;
 const LIGHT_MASK: u32 = 0x1F;
 
 /// Наибольшее значение поля света вершины: 15 уровней в половинках.
 pub const MAX_LIGHT_HALVES: u8 = 2 * MAX_LIGHT;
-
-impl Vertex {
-    /// `position` — шаги 1/16 блока от угла секции (0..=[`MAX_POSITION`]), `uv` — шаги
-    /// 1/16 тайла (0..=16, v = 0 — верх тайла), `shade` — сторона × AO, 0..=255,
-    /// `light` — `[солнце, блоки]` в половинках уровня (0..=[`MAX_LIGHT_HALVES`]).
-    pub fn new(position: [u16; 3], uv: [u8; 2], shade: u8, layer: u8, light: [u8; 2]) -> Self {
-        debug_assert!(light.iter().all(|&l| l <= MAX_LIGHT_HALVES), "{light:?}");
-        debug_assert!(position.iter().all(|&p| p <= MAX_POSITION), "{position:?}");
-        debug_assert!(uv.iter().all(|&c| i32::from(c) <= POSITION_UNITS), "{uv:?}");
-        let [x, y, z] = position.map(u32::from);
-        Self([
-            x | y << 9 | z << 18 | u32::from(uv[0]) << 27,
-            u32::from(uv[1])
-                | u32::from(layer) << 5
-                | u32::from(shade) << 13
-                | u32::from(light[0]) << 21
-                | u32::from(light[1]) << 26,
-        ])
-    }
-
-    /// Позиция в блоках от угла секции.
-    pub fn position(self) -> [f32; 3] {
-        let [a, _] = self.0;
-        [a, a >> 9, a >> 18].map(|w| (w & POSITION_MASK) as f32 / POSITION_UNITS as f32)
-    }
-
-    /// UV в долях тайла.
-    pub fn uv(self) -> [f32; 2] {
-        let [a, b] = self.0;
-        [a >> 27, b & UV_MASK].map(|c| c as f32 / POSITION_UNITS as f32)
-    }
-
-    /// Яркость 0..=1 (по квантованному значению).
-    pub fn shade(self) -> f32 {
-        f32::from(self.shade_byte()) / 255.0
-    }
-
-    pub fn shade_byte(self) -> u8 {
-        (self.0[1] >> 13) as u8
-    }
-
-    /// Свет солнца в половинках уровня.
-    pub fn sun_halves(self) -> u8 {
-        (self.0[1] >> 21 & LIGHT_MASK) as u8
-    }
-
-    /// Свет блоков в половинках уровня.
-    pub fn block_halves(self) -> u8 {
-        (self.0[1] >> 26 & LIGHT_MASK) as u8
-    }
-
-    /// Итоговая яркость 0..=1 при тьме неба `darkness` (в уровнях): то же, что считает
-    /// шейдер. Нужна тестам и выбору диагонали квада.
-    pub fn brightness(self, darkness: f32) -> f32 {
-        self.shade() * light_brightness(self.sun_halves(), self.block_halves(), darkness)
-    }
-
-    pub fn layer(self) -> u8 {
-        (self.0[1] >> 5) as u8
-    }
-}
 
 /// Яркость света вершины: `brightness(max(солнце − тьма, блоки))` по уровням, которые
 /// хранятся в половинках. Шейдер (`vertex_brightness`) считает так же.
@@ -124,54 +34,126 @@ pub fn quantize_shade(shade: f32) -> u8 {
     (shade.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
-/// Размер буфера угла секции, байт.
-pub const ORIGIN_BYTES: usize = 16;
+/// Запись квада, 12 байт: три `u32`. Квад — одна грань (куб, вода, плоскость креста или
+/// бок факела); четыре вершины шейдер достраивает по номеру шаблона
+/// ([`crate::templates`]), поэтому в записи только то, что меняется от грани к грани.
+/// Позиция локальная (от угла секции), мировой угол секции приходит отдельно, вместе с
+/// началом записей секции в арене ([`slot_bytes`]).
+///
+/// Раскладка (младший бит первым):
+/// - слово 0: блок в секции x 0..4, y 4..8, z 8..12; шаблон 12..17 (5 бит, 25 шаблонов);
+///   переворот диагонали 17; слой текстуры 18..26 (8 бит); 26..32 свободны;
+/// - слово 1: AO четырёх углов 0..8 (по 2 бита, 0..=3, яркость — [`crate::templates::AO_BRIGHTNESS`]);
+///   свет солнца углов 8..28 (по 5 бит в половинках уровня, 0..=30, [`MAX_LIGHT_HALVES`]);
+///   28..32 свободны;
+/// - слово 2: свет блоков углов 0..20 (так же); 20..32 свободны.
+///
+/// Углы — в порядке углов шаблона. Диагональ квада: без переворота треугольники
+/// `0,1,2` и `0,2,3`, с переворотом — `1,2,3` и `1,3,0`; мешер выбирает её против
+/// анизотропии AO ([`mesher`](crate::mesher)). Яркость стороны хранит шаблон, яркость
+/// от света шейдер считает из уровней и тьмы неба (`Globals`): ночью меняется только
+/// uniform. Половинки уровня дают ошибку яркости не больше 0.8^0.25 ≈ 5.5%: «средний»
+/// уровень вершины — дробь со знаменателем 1..4, а бит на точность дороже, чем на неё
+/// хватает глазу.
+///
+/// Раскладку знает и `shader.wgsl` (`vs_main`): менять вместе.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Quad([u32; 3]);
 
-pub fn origin_bytes(origin: [f32; 3]) -> [u8; ORIGIN_BYTES] {
-    let mut bytes = [0; ORIGIN_BYTES];
-    for (chunk, f) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(origin) {
-        chunk.copy_from_slice(&f.to_le_bytes());
+/// Размер записи квада, байт.
+pub const QUAD_BYTES: usize = size_of::<Quad>();
+
+const _: () = assert!(QUAD_BYTES == 12);
+
+impl Quad {
+    /// `cell` — блок в секции (0..16 по каждой оси), `corner_ao` — уровни AO углов,
+    /// `sun` и `block` — свет углов в половинках уровня.
+    pub fn new(
+        cell: [u8; 3],
+        template: u8,
+        flip: bool,
+        layer: u8,
+        corner_ao: [u8; 4],
+        sun: [u8; 4],
+        block: [u8; 4],
+    ) -> Self {
+        debug_assert!(cell.iter().all(|&c| c < 16), "{cell:?}");
+        debug_assert!(usize::from(template) < crate::templates::TEMPLATE_COUNT);
+        debug_assert!(corner_ao.iter().all(|&a| a < 4), "{corner_ao:?}");
+        debug_assert!(sun.iter().chain(&block).all(|&l| l <= MAX_LIGHT_HALVES));
+        let pack = |values: [u8; 4], bits: u32| {
+            values
+                .iter()
+                .enumerate()
+                .fold(0, |acc, (i, &v)| acc | u32::from(v) << (bits * i as u32))
+        };
+        let [x, y, z] = cell.map(u32::from);
+        Self([
+            x | y << 4
+                | z << 8
+                | u32::from(template) << 12
+                | u32::from(flip) << 17
+                | u32::from(layer) << 18,
+            pack(corner_ao, 2) | pack(sun, 5) << 8,
+            pack(block, 5),
+        ])
     }
-    bytes
+
+    pub fn cell(self) -> [u8; 3] {
+        let a = self.0[0];
+        [a, a >> 4, a >> 8].map(|v| (v & 0xF) as u8)
+    }
+
+    pub fn template(self) -> u8 {
+        (self.0[0] >> 12 & 0x1F) as u8
+    }
+
+    /// Диагональ перевёрнута: треугольники `1,2,3` и `1,3,0`.
+    pub fn flipped(self) -> bool {
+        self.0[0] >> 17 & 1 != 0
+    }
+
+    pub fn layer(self) -> u8 {
+        (self.0[0] >> 18) as u8
+    }
+
+    pub fn ao(self) -> [u8; 4] {
+        std::array::from_fn(|i| (self.0[1] >> (2 * i) & 3) as u8)
+    }
+
+    /// Свет солнца четырёх углов в половинках уровня.
+    pub fn sun_halves(self) -> [u8; 4] {
+        std::array::from_fn(|i| (self.0[1] >> (8 + 5 * i) & LIGHT_MASK) as u8)
+    }
+
+    /// Свет блоков четырёх углов в половинках уровня.
+    pub fn block_halves(self) -> [u8; 4] {
+        std::array::from_fn(|i| (self.0[2] >> (5 * i) & LIGHT_MASK) as u8)
+    }
 }
 
-pub fn vertex_bytes(vertices: &[Vertex]) -> Vec<u8> {
-    vertices
+pub fn quad_bytes(quads: &[Quad]) -> Vec<u8> {
+    quads
         .iter()
-        .flat_map(|v| v.0)
+        .flat_map(|q| q.0)
         .flat_map(u32::to_le_bytes)
         .collect()
 }
 
-/// Квадов в самой большой секции: вершины нумеруются `u16`, 65536 вершин / 4.
-pub const MAX_QUADS: usize = 1 << 14;
+/// Данные секции для отрисовки одного меша, байт.
+pub const SLOT_BYTES: usize = 16;
 
-/// Индексы `0,1,2, 0,2,3` для каждого из [`MAX_QUADS`] квадов подряд: один буфер на все
-/// секции вместо своих индексов у каждой (минус 3 байта на вершину).
-pub fn quad_index_bytes() -> Vec<u8> {
-    (0..MAX_QUADS)
-        .flat_map(|q| {
-            let first = (q * 4) as u16;
-            [0, 1, 2, 0, 2, 3].map(|i| first + i)
-        })
-        .flat_map(u16::to_le_bytes)
-        .collect()
-}
-
-/// Вершины секции в порядке для общих индексов `0,1,2, 0,2,3`: у квада, который
-/// мешер разрезал по другой диагонали (`1,2,3, 1,3,0`), вершины сдвигаются на одну,
-/// и те же индексы дают те же треугольники с тем же обходом.
-pub fn gpu_vertices(vertices: &[Vertex], indices: &[u16]) -> Vec<Vertex> {
-    let mut out = Vec::with_capacity(vertices.len());
-    for (q, quad) in vertices.as_chunks::<4>().0.iter().enumerate() {
-        let first = (q * 4) as u16;
-        match indices[q * 6] - first {
-            0 => out.extend_from_slice(quad),
-            1 => out.extend([quad[1], quad[2], quad[3], quad[0]]),
-            other => unreachable!("quad {q} starts at vertex {other}"),
-        }
+/// Слот меша (`first_instance` отрисовки): мировой угол секции тремя `f32` и начало
+/// записей квадов меша в арене, в словах `u32` (смещение в байтах / 4). Четыре байта
+/// после угла у `vec3<f32>` в шейдере всё равно пустовали.
+pub fn slot_bytes(origin: [f32; 3], first_word: u32) -> [u8; SLOT_BYTES] {
+    let mut bytes = [0; SLOT_BYTES];
+    for (chunk, f) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(origin) {
+        chunk.copy_from_slice(&f.to_le_bytes());
     }
-    out
+    bytes[12..].copy_from_slice(&first_word.to_le_bytes());
+    bytes
 }
 
 #[cfg(test)]

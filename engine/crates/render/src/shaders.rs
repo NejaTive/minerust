@@ -10,3 +10,6 @@ pub fn module(device: &wgpu::Device, label: &str, source: &str) -> wgpu::ShaderM
         source: wgpu::ShaderSource::Wgsl(source.into()),
     })
 }
+
+#[cfg(test)]
+mod tests;
