@@ -240,3 +240,24 @@ fn roof_is_opened_only_in_entrances() {
     assert!(openings > 0, "no entrances");
     assert!(openings < 17 * 17 * 256 / 50, "{openings} opened columns");
 }
+
+#[test]
+fn deep_caves_fill_with_lava_and_higher_ones_stay_air() {
+    let terrain = Terrain::new(1337);
+    let (mut lava, mut high_air) = (0, 0);
+    for key in keys(ColumnPos::ZERO, 4) {
+        let (ground, carved) = ground_and_carved(&terrain, key);
+        for pos in blocks(key) {
+            let (before, after) = (ground.get(local(pos)), carved.get(local(pos)));
+            if after == Block::Lava {
+                assert!(pos.y < LAVA_LEVEL, "{pos}");
+                assert!(carvable(before), "{pos}");
+                lava += 1;
+            } else if carvable(before) && after == Block::Air {
+                assert!(pos.y >= LAVA_LEVEL, "{pos}");
+                high_air += 1;
+            }
+        }
+    }
+    assert!(lava > 0 && high_air > 0, "lava {lava}, air {high_air}");
+}

@@ -1,6 +1,6 @@
 use super::*;
 
-const ALL: [Block; 14] = Block::ALL;
+const ALL: [Block; 17] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -8,7 +8,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(14), Err(14));
+    assert_eq!(Block::try_from(17), Err(17));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -53,9 +53,12 @@ fn solid_and_opaque() {
             block,
             Block::TallGrass | Block::Poppy | Block::Dandelion | Block::Torch
         );
-        let solid = !matches!(block, Block::Air | Block::Water) && !plant;
+        let solid = !matches!(block, Block::Air | Block::Water | Block::Lava) && !plant;
         assert_eq!(block.is_solid(), solid, "{block:?}");
-        let opaque = !matches!(block, Block::Air | Block::Leaves | Block::Water) && !plant;
+        let opaque = !matches!(
+            block,
+            Block::Air | Block::Leaves | Block::Water | Block::Lava
+        ) && !plant;
         assert_eq!(block.is_targetable(), solid || plant, "{block:?}");
         assert_eq!(block.needs_support(), plant, "{block:?}");
         assert_eq!(block.is_opaque(), opaque, "{block:?}");
@@ -98,7 +101,10 @@ fn bounds_follow_shape() {
 #[test]
 fn replaceable_cells() {
     for block in ALL {
-        let expected = matches!(block, Block::Air | Block::Water | Block::TallGrass);
+        let expected = matches!(
+            block,
+            Block::Air | Block::Water | Block::Lava | Block::TallGrass
+        );
         assert_eq!(block.is_replaceable(), expected, "{block:?}");
     }
 }
@@ -208,7 +214,7 @@ fn only_log_torch_and_water_use_data() {
         let expected = match block {
             Block::Log => DataKind::Axis,
             Block::Torch => DataKind::Attachment,
-            Block::Water => DataKind::Fluid,
+            Block::Water | Block::Lava => DataKind::Fluid,
             _ => DataKind::None,
         };
         assert_eq!(block.data_kind(), expected, "{block:?}");
@@ -239,4 +245,20 @@ fn water_is_placed_as_source() {
 fn water_has_icon_for_the_palette() {
     let icon = Block::Water.icon_pixels().expect("water icon");
     assert_eq!(icon.len(), 16 * 16 * 4);
+}
+
+#[test]
+fn lava_is_an_emissive_fluid_and_hardened_blocks_are_cubes() {
+    assert_eq!(Block::Lava.fluid(), Some(FluidKind::Lava));
+    assert_eq!(Block::Water.fluid(), Some(FluidKind::Water));
+    assert_eq!(Block::Stone.fluid(), None);
+    assert_eq!(FluidKind::Lava.block(), Block::Lava);
+    assert_eq!(Block::Lava.emission(), 15);
+    assert!(!Block::Lava.is_solid() && !Block::Lava.is_targetable());
+    for block in [Block::Obsidian, Block::Cobblestone] {
+        assert!(block.is_solid() && block.is_opaque(), "{block:?}");
+    }
+    assert_eq!(Block::from_name("lava"), Some(Block::Lava));
+    assert_eq!(Block::from_name("obsidian"), Some(Block::Obsidian));
+    assert_eq!(Block::from_name("cobblestone"), Some(Block::Cobblestone));
 }

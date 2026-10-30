@@ -151,11 +151,11 @@ const GOLDEN_BLOCKS: [u64; 4] = [
     0xab405e38f0b2b8e5,
     0x828fe77fdb94e88f,
     0xe69a701bfc6595d0,
-    0x4fe7fff820d365db,
+    0x2df855bcc2d3a74d,
 ];
 const GOLDEN_MESHES: [u64; 4] = [
-    0xf8168e1e2bc0646c,
+    0x9ecedc2618908802,
     0xf5f6bb46d1f3581e,
-    0xbb91b5e8a5e32b86,
-    0x20f612c7d843cfd2,
+    0x2f6e2ca0accc1b54,
+    0xbd74114ab349347,
 ];

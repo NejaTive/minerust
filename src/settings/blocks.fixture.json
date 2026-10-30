@@ -12,5 +12,8 @@
   { "name": "poppy", "label": "мак", "placeable": true },
   { "name": "dandelion", "label": "одуванчик", "placeable": true },
   { "name": "torch", "label": "факел", "placeable": true },
-  { "name": "gravel", "label": "гравий", "placeable": true }
+  { "name": "gravel", "label": "гравий", "placeable": true },
+  { "name": "lava", "label": "лава", "placeable": true },
+  { "name": "obsidian", "label": "обсидиан", "placeable": true },
+  { "name": "cobblestone", "label": "булыжник", "placeable": true }
 ]

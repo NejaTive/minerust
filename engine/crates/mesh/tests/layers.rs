@@ -71,3 +71,94 @@ fn every_quad_lands_in_the_mesh_of_its_blocks_layer() {
         "{solid} {cutout} {water}"
     );
 }
+
+fn quads_at(mesh: &mesh::mesher::MeshData, cell: [u8; 3]) -> usize {
+    mesh.quads.iter().filter(|q| q.cell() == cell).count()
+}
+
+#[test]
+fn lava_is_meshed_in_the_opaque_pass_and_exposes_neighbor_faces() {
+    use world::block::Block;
+    use world::column::Column;
+
+    let mut world = World::new();
+    for z in -1..=1 {
+        for x in -1..=1 {
+            let mut column = Column::new();
+            for lz in 0..16 {
+                for lx in 0..16 {
+                    column.set(IVec3::new(lx, 20, lz), Block::Stone);
+                }
+            }
+            world.insert(ColumnPos::new(x, z), column);
+        }
+    }
+    world.set_block_with_data(IVec3::new(5, 21, 5), Block::Lava, 0);
+    world.set_block_with_data(IVec3::new(6, 21, 5), Block::Lava, 2);
+    world.set_block(IVec3::new(4, 21, 5), Block::Stone);
+    let mut light = LightMap::new();
+    let mut keys: Vec<ColumnPos> = world.keys().collect();
+    keys.sort();
+    for key in keys {
+        light.add_column(&world, key);
+    }
+    let sections = mesh_world_column(&world, &light, ColumnPos::ZERO, MeshOptions::default())
+        .expect("column is loaded");
+    let section = &sections[1];
+    assert!(section.water.quads.is_empty());
+    assert_eq!(quads_at(&section.solid, [5, 5, 5]), 3);
+    assert_eq!(quads_at(&section.solid, [6, 5, 5]), 4);
+    assert_eq!(quads_at(&section.solid, [4, 5, 5]), 5);
+}
+
+#[test]
+fn fluid_under_a_block_keeps_its_top_face_at_its_own_height() {
+    use mesh::templates::{WATER_TOP, WATER_TOP_SLOPED};
+    use world::block::{Block, FluidKind};
+    use world::column::Column;
+
+    for kind in [FluidKind::Water, FluidKind::Lava] {
+        let mut world = World::new();
+        for z in -1..=1 {
+            for x in -1..=1 {
+                let mut column = Column::new();
+                for lz in 0..16 {
+                    for lx in 0..16 {
+                        column.set(IVec3::new(lx, 20, lz), Block::Stone);
+                    }
+                }
+                world.insert(ColumnPos::new(x, z), column);
+            }
+        }
+        for x in 4..9 {
+            for z in 4..9 {
+                world.set_block_with_data(IVec3::new(x, 21, z), kind.block(), 0);
+            }
+        }
+        world.set_block(IVec3::new(6, 22, 6), Block::Stone);
+        world.set_block_with_data(IVec3::new(6, 22, 7), kind.block(), 0);
+        let mut light = LightMap::new();
+        let mut keys: Vec<ColumnPos> = world.keys().collect();
+        keys.sort();
+        for key in keys {
+            light.add_column(&world, key);
+        }
+        let sections = mesh_world_column(&world, &light, ColumnPos::ZERO, MeshOptions::default())
+            .expect("column is loaded");
+        let mesh = match kind {
+            FluidKind::Water => &sections[1].water,
+            FluidKind::Lava => &sections[1].solid,
+        };
+        let top = |x, z| {
+            mesh.quads
+                .iter()
+                .filter(|q| {
+                    q.cell() == [x, 5, z] && [WATER_TOP, WATER_TOP_SLOPED].contains(&q.template())
+                })
+                .count()
+        };
+        assert_eq!(top(6, 6), 1, "{kind:?} under stone");
+        assert_eq!(top(6, 7), 0, "{kind:?} under the same fluid");
+        assert_eq!(top(5, 6), 1, "{kind:?} open");
+    }
+}

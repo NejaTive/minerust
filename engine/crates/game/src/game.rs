@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use glam::{IVec3, Vec3};
-use world::block::Block;
+use world::block::{Block, FLUID_SOURCE, FluidKind};
 use world::column::{Column, WORLD_HEIGHT};
 use world::falling::Falling;
 use world::fluid::Fluid;
@@ -24,6 +24,7 @@ const DEFAULT_BLOCK: Block = Block::Grass;
 const MAX_DT: f32 = 0.1;
 const DOUBLE_TAP_S: f32 = 0.3;
 const FLUID_STEP_TICKS: u32 = 15;
+const LAVA_STEP_TICKS: u32 = 30;
 const FALL_STEP_TICKS: u32 = 6;
 
 #[derive(Default)]
@@ -37,6 +38,8 @@ pub struct Game {
     pub light: LightMap,
     fluid: Fluid,
     fluid_ticks: u32,
+    lava: Fluid,
+    lava_ticks: u32,
     falling: Falling,
     fall_ticks: u32,
     pending_dirty: HashSet<SectionPos>,
@@ -82,6 +85,8 @@ impl Game {
             light: LightMap::new(),
             fluid: Fluid::new(),
             fluid_ticks: 0,
+            lava: Fluid::of(FluidKind::Lava),
+            lava_ticks: 0,
             falling: Falling::new(),
             fall_ticks: 0,
             pending_dirty: HashSet::new(),
@@ -198,9 +203,8 @@ impl Game {
         daytime::star_rotation(self.day.fraction())
     }
 
-    pub fn underwater(&self) -> bool {
-        self.player
-            .eyes_in_water(|pos| self.world.water_height(pos))
+    pub fn eye_fluid(&self) -> Option<FluidKind> {
+        self.player.eye_fluid(|pos| self.world.fluid_height(pos))
     }
 
     pub fn set_paused(&mut self, paused: bool) {
@@ -309,19 +313,16 @@ impl Game {
             target = self.pick();
         }
         if self.placing.fire(time)
-            && let Some(hit) = target
             && let Some(block) = self.selected
+            && let Some((hit, pos)) = self.placement_hit(target, block)
+            && let Some(data) = block.placement_data(hit.normal)
+            && self.world.can_place_with_data(pos, block, data)
+            && (block.fluid().is_some() || !self.player.overlaps_block(pos))
         {
-            let pos = hit.block + hit.normal;
-            if let Some(data) = block.placement_data(hit.normal)
-                && self.world.can_place_with_data(pos, block, data)
-                && (block.is_water() || !self.player.overlaps_block(pos))
-            {
-                let changed = self.world.set_block_supported_with_data(pos, block, data);
-                if !changed.is_empty() {
-                    self.apply_edit(&changed, &mut dirty, &mut lit);
-                    target = self.pick();
-                }
+            let changed = self.world.set_block_supported_with_data(pos, block, data);
+            if !changed.is_empty() {
+                self.apply_edit(&changed, &mut dirty, &mut lit);
+                target = self.pick();
             }
         }
         self.target = target.map(|hit| hit.block);
@@ -345,6 +346,23 @@ impl Game {
         }
     }
 
+    fn placement_hit(&self, solid: Option<Hit>, block: Block) -> Option<(Hit, IVec3)> {
+        let held = block.fluid();
+        let refills = |pos: IVec3| {
+            held.is_some()
+                && self.world.block(pos).fluid() == held
+                && self.world.block_data(pos) != FLUID_SOURCE
+        };
+        let fluid = raycast(self.camera.position, self.camera.forward(), REACH, refills)
+            .map(|hit| (hit, hit.block));
+        let solid = solid.map(|hit| (hit, hit.block + hit.normal));
+        match (solid, fluid) {
+            (Some(solid), Some(fluid)) if fluid.0.distance < solid.0.distance => Some(fluid),
+            (Some(solid), _) => Some(solid),
+            (None, fluid) => fluid,
+        }
+    }
+
     fn pick(&self) -> Option<Hit> {
         raycast(self.camera.position, self.camera.forward(), REACH, |pos| {
             self.world.block(pos).is_targetable()
@@ -359,6 +377,7 @@ impl Game {
     ) {
         for &pos in changed {
             self.fluid.block_changed(&self.world, pos);
+            self.lava.block_changed(&self.world, pos);
             self.falling.block_changed(&self.world, pos);
             dirty.extend(affected_sections(pos));
             lit.extend(self.light.block_changed(&self.world, pos));
@@ -373,6 +392,7 @@ impl Game {
             self.day.advance(ticks * factor);
         }
         self.advance_fluid(ticks);
+        self.advance_lava(ticks);
         self.advance_falling(ticks);
         for _ in 0..ticks {
             if !self.body_loaded() {
@@ -385,7 +405,7 @@ impl Game {
                 &input,
                 self.camera.yaw,
                 |pos| self.world.block(pos).is_solid(),
-                |pos| self.world.water_height(pos),
+                |pos| self.world.fluid_height(pos),
             );
         }
         let feet = self.prev_feet.lerp(self.player.feet, self.clock.alpha());
@@ -397,6 +417,15 @@ impl Game {
         while self.fluid_ticks >= FLUID_STEP_TICKS {
             self.fluid_ticks -= FLUID_STEP_TICKS;
             let changed = self.fluid.step(&mut self.world);
+            self.apply_pending(&changed);
+        }
+    }
+
+    fn advance_lava(&mut self, ticks: u32) {
+        self.lava_ticks += ticks;
+        while self.lava_ticks >= LAVA_STEP_TICKS {
+            self.lava_ticks -= LAVA_STEP_TICKS;
+            let changed = self.lava.step(&mut self.world);
             self.apply_pending(&changed);
         }
     }

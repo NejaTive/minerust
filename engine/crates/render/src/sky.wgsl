@@ -5,7 +5,7 @@ struct Globals {
     fog_start: f32,
     fog_color: vec3<f32>,
     fog_end: f32,
-    underwater: f32,
+    eye_fluid: f32,
     darkness: f32,
     view_dir: mat4x4<f32>,
     sun_dir: vec3<f32>,

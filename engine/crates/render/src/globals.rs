@@ -7,8 +7,8 @@ pub struct Globals {
     pub fog_start: f32,
     pub fog_color: Vec3,
     pub fog_end: f32,
-    /// bool: bool в uniform WGSL запрещён.
-    pub underwater: f32,
+    /// 0 — воздух, 1 — вода, 2 — лава; enum в uniform WGSL запрещён.
+    pub eye_fluid: f32,
     pub darkness: f32,
     pub view_dir: Mat4,
     pub sun_dir: Vec3,
@@ -42,7 +42,7 @@ impl Globals {
             .chain(self.camera_pos.to_array())
             .chain([self.fog_start])
             .chain(self.fog_color.to_array())
-            .chain([self.fog_end, self.underwater, self.darkness, 0.0, 0.0])
+            .chain([self.fog_end, self.eye_fluid, self.darkness, 0.0, 0.0])
             .chain(self.view_dir.to_cols_array())
             .chain(self.sun_dir.to_array())
             .chain([self.night])

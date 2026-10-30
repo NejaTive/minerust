@@ -20,6 +20,24 @@ pub enum Block {
     Dandelion,
     Torch,
     Gravel,
+    Lava,
+    Obsidian,
+    Cobblestone,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum FluidKind {
+    Water,
+    Lava,
+}
+
+impl FluidKind {
+    pub fn block(self) -> Block {
+        match self {
+            FluidKind::Water => Block::Water,
+            FluidKind::Lava => Block::Lava,
+        }
+    }
 }
 
 pub const WATER_SURFACE: f32 = 0.875;
@@ -98,6 +116,7 @@ pub struct BlockDef {
     pub needs_support: bool,
     pub falls: bool,
     pub data: DataKind,
+    pub fluid: Option<FluidKind>,
     pub emission: u8,
     pub layer: RenderLayer,
     pub shape: Shape,
@@ -118,6 +137,7 @@ impl BlockDef {
         needs_support: false,
         falls: false,
         data: DataKind::None,
+        fluid: None,
         emission: 0,
         layer: RenderLayer::Opaque,
         shape: Shape::Cube,
@@ -151,7 +171,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 14] = [
+pub const BLOCKS: [BlockDef; 17] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -192,6 +212,7 @@ pub const BLOCKS: [BlockDef; 14] = [
         targetable: false,
         replaceable: true,
         data: DataKind::Fluid,
+        fluid: Some(FluidKind::Water),
         layer: RenderLayer::Translucent,
         ..BlockDef::uniform("water", "вода", Tile::Water)
     },
@@ -215,10 +236,22 @@ pub const BLOCKS: [BlockDef; 14] = [
         falls: true,
         ..BlockDef::uniform("gravel", "гравий", Tile::Gravel)
     },
+    BlockDef {
+        solid: false,
+        opaque: false,
+        targetable: false,
+        replaceable: true,
+        data: DataKind::Fluid,
+        fluid: Some(FluidKind::Lava),
+        emission: 15,
+        ..BlockDef::uniform("lava", "лава", Tile::Lava)
+    },
+    BlockDef::uniform("obsidian", "обсидиан", Tile::Obsidian),
+    BlockDef::uniform("cobblestone", "булыжник", Tile::Cobblestone),
 ];
 
 impl Block {
-    pub const ALL: [Block; 14] = [
+    pub const ALL: [Block; 17] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -233,6 +266,9 @@ impl Block {
         Block::Dandelion,
         Block::Torch,
         Block::Gravel,
+        Block::Lava,
+        Block::Obsidian,
+        Block::Cobblestone,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -350,6 +386,10 @@ impl Block {
 
     pub fn falls(self) -> bool {
         self.def().falls
+    }
+
+    pub fn fluid(self) -> Option<FluidKind> {
+        self.def().fluid
     }
 
     pub fn is_water(self) -> bool {
