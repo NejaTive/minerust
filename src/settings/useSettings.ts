@@ -23,6 +23,7 @@ function create() {
     Object.assign(settings, {
       renderDistance: BENCH_RENDER_DISTANCE,
       ambientOcclusion: true,
+      clouds: true,
       showDebug: BENCH_DEBUG,
     })
   }

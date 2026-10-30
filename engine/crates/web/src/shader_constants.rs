@@ -1,5 +1,6 @@
 use game::daytime::DUSK_SKY;
-use render::shaders::{BLOCK_SHADER, SKY_SHADER};
+use render::shaders::{BLOCK_SHADER, CLOUDS_SHADER, SKY_SHADER};
+use world::clouds::{CLOUD_CELL, CLOUD_HEIGHT, CLOUD_MAP, CLOUD_Y};
 use world::light::MAX_LIGHT;
 use world::light::level_brightness;
 
@@ -20,4 +21,14 @@ fn shader_constants_match_cpu() {
     assert!(BLOCK_SHADER.contains("const MAX_LIGHT: f32 = 15.0;"));
     assert_eq!(MAX_LIGHT, 15);
     assert_eq!(level_brightness(0.0), 0.8f32.powi(15).max(0.05));
+}
+
+#[test]
+fn cloud_shader_constants_match_cpu() {
+    assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_MAP: i32 = {CLOUD_MAP};")));
+    assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_CELL: f32 = {CLOUD_CELL}.0;")));
+    assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_Y: f32 = {CLOUD_Y}.0;")));
+    assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_HEIGHT: f32 = {CLOUD_HEIGHT}.0;")));
+    assert!(CLOUDS_SHADER.contains("const GRID_RADIUS: i32 = 32;"));
+    assert!(CLOUDS_SHADER.contains("const GRID_SIZE: u32 = 64u;"));
 }

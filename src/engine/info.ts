@@ -35,6 +35,7 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
     defaults: {
       renderDistance: defaults.renderDistance,
       ambientOcclusion: defaults.ambientOcclusion,
+      clouds: defaults.clouds,
       mouseSensitivity: defaults.mouseSensitivity,
       fov: defaults.fov,
     },

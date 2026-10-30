@@ -11,6 +11,7 @@ pub struct Globals {
     pub eye_fluid: f32,
     pub darkness: f32,
     pub anim_time: f32,
+    pub cloud_drift: f32,
     pub view_dir: Mat4,
     pub sun_dir: Vec3,
     pub night: f32,
@@ -18,6 +19,7 @@ pub struct Globals {
     pub warm: f32,
     pub horizon_tilt: f32,
     pub star_rotation: Vec2,
+    pub cloud_color: Vec3,
 }
 
 pub fn view_dir_matrix(view_proj: Mat4) -> Mat4 {
@@ -33,7 +35,7 @@ pub fn view_dir_matrix(view_proj: Mat4) -> Mat4 {
 }
 
 impl Globals {
-    pub const SIZE: usize = 224;
+    pub const SIZE: usize = 240;
 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let floats = self
@@ -48,14 +50,16 @@ impl Globals {
                 self.eye_fluid,
                 self.darkness,
                 self.anim_time,
-                0.0,
+                self.cloud_drift,
             ])
             .chain(self.view_dir.to_cols_array())
             .chain(self.sun_dir.to_array())
             .chain([self.night])
             .chain(self.zenith.to_array())
             .chain([self.warm, self.horizon_tilt])
-            .chain(self.star_rotation.to_array());
+            .chain(self.star_rotation.to_array())
+            .chain([0.0])
+            .chain(self.cloud_color.to_array());
         let mut bytes = [0; Self::SIZE];
         for (chunk, f) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(floats) {
             *chunk = f.to_le_bytes();

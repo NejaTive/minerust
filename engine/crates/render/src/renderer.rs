@@ -3,17 +3,21 @@ use std::collections::HashMap;
 use glam::{IVec3, Mat4, Vec2, Vec3};
 use mesh::mesher::SectionMeshes;
 use world::block::{Block, FluidKind};
+use world::clouds::CloudMask;
 use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 
+use crate::clouds::{
+    CLOUD_INSTANCES, CLOUD_VERTICES, cloud_color, create_cloud_texture, upload_cloud_mask,
+};
 use crate::frustum::Frustum;
 use crate::globals::{Globals, view_dir_matrix};
 use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_section};
 use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::pipelines::{
-    BlockPass, create_block_pipeline, create_depth_view, create_outline_pipeline,
-    create_sky_pipeline,
+    BlockPass, create_block_pipeline, create_cloud_pipeline, create_depth_view,
+    create_outline_pipeline, create_sky_pipeline,
 };
 use crate::shaders;
 use crate::texture::{create_animation_table, create_block_textures};
@@ -27,12 +31,14 @@ pub struct FrameParams {
     pub eye_fluid: Option<FluidKind>,
     pub darkness: f32,
     pub anim_time: f32,
+    pub cloud_drift: f32,
     pub sun_dir: Vec3,
     pub night: f32,
     pub zenith: Vec3,
     pub warm: f32,
     pub horizon_tilt: f32,
     pub star_rotation: Vec2,
+    pub clouds: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -60,6 +66,8 @@ pub struct Renderer {
     water_pipeline: wgpu::RenderPipeline,
     outline_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
+    cloud_pipeline: wgpu::RenderPipeline,
+    cloud_texture: wgpu::Texture,
     outline_buffer: wgpu::Buffer,
     outline_block: Option<(IVec3, Block, u8)>,
     globals_buffer: wgpu::Buffer,
@@ -175,8 +183,20 @@ impl Renderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
+        let cloud_texture = create_cloud_texture(&device);
+        let cloud_view = cloud_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals"),
             layout: &globals_layout,
@@ -196,6 +216,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: animation_table.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&cloud_view),
                 },
             ],
         });
@@ -217,6 +241,7 @@ impl Renderer {
         });
         let outline_pipeline = create_outline_pipeline(&device, &pipeline_layout, render_format);
         let sky_pipeline = create_sky_pipeline(&device, &pipeline_layout, render_format);
+        let cloud_pipeline = create_cloud_pipeline(&device, &pipeline_layout, render_format);
         let outline_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outline"),
             size: (OUTLINE_VERTICES * OUTLINE_VERTEX_SIZE) as u64,
@@ -261,6 +286,8 @@ impl Renderer {
             water_pipeline,
             outline_pipeline,
             sky_pipeline,
+            cloud_pipeline,
+            cloud_texture,
             outline_buffer,
             outline_block: None,
             globals_buffer,
@@ -284,6 +311,10 @@ impl Renderer {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         self.depth_view = create_depth_view(&self.device, width, height);
+    }
+
+    pub fn set_cloud_mask(&self, mask: &CloudMask) {
+        upload_cloud_mask(&self.queue, &self.cloud_texture, mask);
     }
 
     pub fn aspect(&self) -> f32 {
@@ -411,6 +442,7 @@ impl Renderer {
             },
             darkness: params.darkness,
             anim_time: params.anim_time,
+            cloud_drift: params.cloud_drift,
             view_dir: view_dir_matrix(params.view_proj),
             sun_dir: params.sun_dir,
             night: params.night,
@@ -418,6 +450,7 @@ impl Renderer {
             warm: params.warm,
             horizon_tilt: params.horizon_tilt,
             star_rotation: params.star_rotation,
+            cloud_color: cloud_color(params.night, params.warm),
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
@@ -523,6 +556,12 @@ impl Renderer {
             if params.eye_fluid.is_none() {
                 pass.set_pipeline(&self.sky_pipeline);
                 pass.draw(0..3, 0..1);
+                counts.draw_calls += 1;
+            }
+
+            if params.clouds && params.eye_fluid.is_none() {
+                pass.set_pipeline(&self.cloud_pipeline);
+                pass.draw(0..CLOUD_VERTICES, 0..CLOUD_INSTANCES);
                 counts.draw_calls += 1;
             }
 

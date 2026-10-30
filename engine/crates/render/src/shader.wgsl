@@ -8,6 +8,7 @@ struct Globals {
     eye_fluid: f32,
     darkness: f32,
     anim_time: f32,
+    cloud_drift: f32,
 };
 
 // Яркость уровня света — как `light::level_brightness`: 0.8^(15 − уровень), не ниже

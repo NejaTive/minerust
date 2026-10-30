@@ -3,6 +3,7 @@ import type { KeyValueStore } from './store'
 export const KEYS = {
   renderDistance: 'minerust.renderDistance',
   ambientOcclusion: 'minerust.ambientOcclusion',
+  clouds: 'minerust.clouds',
   mouseSensitivity: 'minerust.mouseSensitivity',
   fov: 'minerust.fov',
   showDebug: 'minerust.showDebug',
@@ -13,6 +14,7 @@ const OBSOLETE_KEYS = ['minerust.controlsHidden', 'minerust.graphicsApi']
 export interface EngineSettings {
   renderDistance: number
   ambientOcclusion: boolean
+  clouds: boolean
   mouseSensitivity: number
   fov: number
 }
@@ -73,6 +75,7 @@ export function loadSettings(
       ),
     ),
     ambientOcclusion: readBool(store, KEYS.ambientOcclusion, defaults.ambientOcclusion),
+    clouds: readBool(store, KEYS.clouds, defaults.clouds),
     mouseSensitivity: readNumber(
       store,
       KEYS.mouseSensitivity,
@@ -88,6 +91,7 @@ export function loadSettings(
 export function saveSettings(store: KeyValueStore, s: Settings) {
   store.set(KEYS.renderDistance, String(s.renderDistance))
   store.set(KEYS.ambientOcclusion, String(s.ambientOcclusion))
+  store.set(KEYS.clouds, String(s.clouds))
   store.set(KEYS.mouseSensitivity, String(s.mouseSensitivity))
   store.set(KEYS.fov, String(s.fov))
   store.set(KEYS.showDebug, String(s.showDebug))

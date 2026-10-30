@@ -5,6 +5,7 @@ export function applySettings(engine: Engine, s: Settings) {
   const payload = new EngineSettings(
     s.renderDistance,
     s.ambientOcclusion,
+    s.clouds,
     s.mouseSensitivity,
     s.fov,
   )

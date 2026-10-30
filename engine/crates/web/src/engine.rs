@@ -3,6 +3,7 @@ use render::Renderer;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 use world::block::Block;
+use world::clouds::CloudMask;
 use world::pos::ColumnPos;
 use world::save::{FORMAT_VERSION, decode_column, encode_column};
 
@@ -19,6 +20,7 @@ pub struct Engine {
     renderer: Renderer,
     streamer: Streamer,
     profiler: Profiler,
+    clouds: bool,
 }
 
 #[wasm_bindgen]
@@ -49,6 +51,7 @@ impl Engine {
         let mut renderer = Renderer::new(surface, &adapter, width, height)
             .await
             .map_err(|e| JsError::new(&e))?;
+        renderer.set_cloud_mask(&CloudMask::new(seed));
 
         let mut profiler = Profiler::new();
         let mut streamer = Streamer::new(game.camera_column());
@@ -58,6 +61,7 @@ impl Engine {
             renderer,
             streamer,
             profiler,
+            clouds: true,
         })
     }
 
@@ -116,6 +120,7 @@ impl Engine {
         self.streamer.set_radius(settings.render_distance);
         self.streamer
             .set_ambient_occlusion(settings.ambient_occlusion, &self.game, &self.renderer);
+        self.clouds = settings.clouds;
         self.game
             .camera_mut()
             .set_sensitivity(settings.mouse_sensitivity);
@@ -255,7 +260,12 @@ impl Engine {
         );
         self.renderer.set_outline(self.game.target_block());
 
-        let params = frame_params(&self.game, self.streamer.radius(), self.renderer.aspect());
+        let params = frame_params(
+            &self.game,
+            self.streamer.radius(),
+            self.renderer.aspect(),
+            self.clouds,
+        );
         let Some(pending) = self.renderer.begin(&params).map_err(|e| JsError::new(&e))? else {
             return Ok(());
         };
