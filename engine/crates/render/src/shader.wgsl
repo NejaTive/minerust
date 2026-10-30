@@ -5,7 +5,7 @@ struct Globals {
     fog_start: f32,
     fog_color: vec3<f32>,
     fog_end: f32,
-    underwater: f32,
+    eye_fluid: f32,
     darkness: f32,
 };
 
@@ -16,6 +16,7 @@ const MIN_BRIGHTNESS: f32 = 0.05;
 const MAX_LIGHT: f32 = 15.0;
 
 const UNDERWATER_TINT: vec3<f32> = vec3<f32>(0.35, 0.6, 1.0);
+const LAVA_TINT: vec3<f32> = vec3<f32>(1.0, 0.45, 0.2);
 
 @group(0) @binding(0)
 var<uniform> globals: Globals;
@@ -108,8 +109,8 @@ fn vs_main(in: VertexIn) -> VertexOut {
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
     var color = texel * in.shade;
     var distance = length(in.world_pos.xz - globals.camera_pos.xz);
-    if globals.underwater > 0.5 {
-        color *= UNDERWATER_TINT;
+    if globals.eye_fluid > 0.5 {
+        color *= select(UNDERWATER_TINT, LAVA_TINT, globals.eye_fluid > 1.5);
         distance = length(in.world_pos - globals.camera_pos);
     }
     let fog = smoothstep(globals.fog_start, globals.fog_end, distance);

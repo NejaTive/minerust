@@ -2,6 +2,7 @@ use game::Game;
 use glam::{Vec2, Vec3};
 use render::FrameParams;
 use render::fog::Fog;
+use world::block::FluidKind;
 use world::terrain::WATER_LEVEL;
 
 const UNDERWATER_FOG: Fog = Fog {
@@ -9,20 +10,25 @@ const UNDERWATER_FOG: Fog = Fog {
     end: 24.0,
 };
 const UNDERWATER_COLOR: [f32; 3] = [0.02, 0.07, 0.2];
+const LAVA_FOG: Fog = Fog {
+    start: 0.0,
+    end: 4.0,
+};
+const LAVA_COLOR: [f32; 3] = [0.784, 0.314, 0.102];
 
 pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32) -> FrameParams {
     let camera = game.camera();
     let fog = Fog::for_radius(radius);
     let view_proj = camera.view_proj(aspect, fog.far_plane(camera.position.y), game.fov_scale());
-    let underwater = game.underwater();
+    let eye_fluid = game.eye_fluid();
     let sky = game.sky();
-    let (fog, background) = if underwater {
-        (
+    let (fog, background) = match eye_fluid {
+        Some(FluidKind::Water) => (
             UNDERWATER_FOG,
             UNDERWATER_COLOR.map(|c| c * sky.underwater_scale),
-        )
-    } else {
-        (fog, sky.color)
+        ),
+        Some(FluidKind::Lava) => (LAVA_FOG, LAVA_COLOR),
+        None => (fog, sky.color),
     };
     FrameParams {
         view_proj,
@@ -30,7 +36,7 @@ pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32) -> FrameParams
         fog_start: fog.start,
         fog_end: fog.end,
         background: Vec3::from(background),
-        underwater,
+        eye_fluid,
         darkness: sky.darkness,
         sun_dir: Vec3::from(game.sun_direction()),
         night: sky.night,

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::f32::consts::FRAC_PI_2;
 use std::f32::consts::FRAC_PI_4;
 
-use world::block::WATER_SURFACE;
+use world::block::{FluidKind, WATER_SURFACE};
 
 use super::*;
 
@@ -330,16 +330,20 @@ fn clock_counts_ticks_and_keeps_remainder() {
     assert_eq!(clock.alpha(), 0.0);
 }
 
-fn dry(_: IVec3) -> Option<f32> {
+fn dry(_: IVec3) -> Option<(FluidKind, f32)> {
     None
 }
 
-fn pool(top: i32) -> impl Fn(IVec3) -> Option<f32> {
+fn basin(kind: FluidKind, top: i32) -> impl Fn(IVec3) -> Option<(FluidKind, f32)> {
     move |p: IVec3| {
         let inside =
             p.y > FLOOR && p.y <= top && (-10..10).contains(&p.x) && (-10..10).contains(&p.z);
-        inside.then_some(if p.y == top { WATER_SURFACE } else { 1.0 })
+        inside.then_some((kind, if p.y == top { WATER_SURFACE } else { 1.0 }))
     }
+}
+
+fn pool(top: i32) -> impl Fn(IVec3) -> Option<(FluidKind, f32)> {
+    basin(FluidKind::Water, top)
 }
 
 const JUMP: Input = Input {
@@ -372,7 +376,7 @@ fn run_in(
     input: Input,
     ticks: u32,
     solid: &impl Fn(IVec3) -> bool,
-    water: &impl Fn(IVec3) -> Option<f32>,
+    water: &impl Fn(IVec3) -> Option<(FluidKind, f32)>,
 ) {
     for _ in 0..ticks {
         player.step(&input, 0.0, solid, water);
@@ -395,11 +399,11 @@ fn space_swims_up_and_floats_at_surface() {
             "{}",
             player.feet.y
         );
-        assert!(!player.eyes_in_water(&water));
+        assert!(player.eye_fluid(&water).is_none());
     }
     run_in(&mut player, Input::default(), 120, &solid, &water);
     assert!(player.feet.y < surface - 1.5);
-    assert!(player.eyes_in_water(&water));
+    assert_eq!(player.eye_fluid(&water), Some(FluidKind::Water));
 }
 
 #[test]
@@ -435,12 +439,12 @@ fn fall_into_water_slows_down() {
 fn eyes_in_water_by_eye_cell_and_surface() {
     let water = pool(70);
     let at_eye = |y: f32| Player::new(Vec3::new(0.5, y - EYE_HEIGHT, 0.5), Mode::Walking);
-    assert!(at_eye(70.5).eyes_in_water(&water));
-    assert!(!at_eye(70.9).eyes_in_water(&water));
-    assert!(at_eye(69.95).eyes_in_water(&water));
-    assert!(!at_eye(72.0).eyes_in_water(&water));
+    assert_eq!(at_eye(70.5).eye_fluid(&water), Some(FluidKind::Water));
+    assert!(at_eye(70.9).eye_fluid(&water).is_none());
+    assert_eq!(at_eye(69.95).eye_fluid(&water), Some(FluidKind::Water));
+    assert!(at_eye(72.0).eye_fluid(&water).is_none());
     let outside = Player::new(Vec3::new(20.5, 66.0, 0.5), Mode::Walking);
-    assert!(!outside.eyes_in_water(&water));
+    assert!(outside.eye_fluid(&water).is_none());
 }
 
 #[test]
@@ -587,10 +591,10 @@ fn fov_scale_follows_sprint_in_set_time() {
     assert!((scale - 1.0).abs() < 1e-4, "{scale}");
 }
 
-fn shallow(height: f32) -> impl Fn(IVec3) -> Option<f32> {
+fn shallow(height: f32) -> impl Fn(IVec3) -> Option<(FluidKind, f32)> {
     move |p: IVec3| {
         let inside = p.y == FLOOR + 1 && (-10..10).contains(&p.x) && (-10..10).contains(&p.z);
-        inside.then_some(height)
+        inside.then_some((FluidKind::Water, height))
     }
 }
 
@@ -598,10 +602,52 @@ fn shallow(height: f32) -> impl Fn(IVec3) -> Option<f32> {
 fn shallow_water_does_not_float_or_cover_eyes() {
     let (solid, water) = (world(&[]), shallow(0.25));
     let mut player = standing();
-    assert!(player.water_depth(&water) <= 0.25);
+    assert!(
+        player
+            .fluid_depth(&water)
+            .is_some_and(|(_, depth)| depth <= 0.25)
+    );
     run_in(&mut player, JUMP, 240, &solid, &water);
     assert!(player.feet.y < GROUND + 0.5, "floated to {}", player.feet.y);
     let at_eye = |y: f32| Player::new(Vec3::new(0.5, y - EYE_HEIGHT, 0.5), Mode::Walking);
-    assert!(!at_eye(GROUND + 0.5).eyes_in_water(&water));
-    assert!(at_eye(GROUND + 0.2).eyes_in_water(&water));
+    assert!(at_eye(GROUND + 0.5).eye_fluid(&water).is_none());
+    assert!(at_eye(GROUND + 0.2).eye_fluid(&water).is_some());
+}
+
+#[test]
+fn eye_fluid_reports_kind() {
+    let lava = basin(FluidKind::Lava, 70);
+    let player = Player::new(Vec3::new(0.5, 70.5 - EYE_HEIGHT, 0.5), Mode::Walking);
+    assert_eq!(player.eye_fluid(&lava), Some(FluidKind::Lava));
+    assert_eq!(player.eye_fluid(pool(70)), Some(FluidKind::Water));
+}
+
+#[test]
+fn lava_is_more_viscous_than_water() {
+    let solid = world(&[]);
+    let sink = |fluid: &dyn Fn(IVec3) -> Option<(FluidKind, f32)>| {
+        let mut player = Player::new(Vec3::new(0.5, 80.0, 0.5), Mode::Walking);
+        player.velocity.y = -20.0;
+        player.feet.y = 69.0;
+        let start = player.feet.y;
+        run_in(&mut player, Input::default(), 30, &solid, &fluid);
+        (start - player.feet.y, player.velocity.y)
+    };
+    let (water_drop, water_speed) = sink(&pool(75));
+    let (lava_drop, lava_speed) = sink(&basin(FluidKind::Lava, 75));
+    assert!(lava_drop < water_drop, "{lava_drop} vs {water_drop}");
+    assert!(lava_speed > -LAVA_SINK_SPEED - 0.5 && lava_speed < water_speed.max(0.0) + 0.01);
+
+    let swim = |fluid: &dyn Fn(IVec3) -> Option<(FluidKind, f32)>| {
+        let mut player = Player::new(Vec3::new(0.5, 66.0, 0.5), Mode::Walking);
+        let forward = Input {
+            forward: 1.0,
+            ..Input::default()
+        };
+        run_in(&mut player, forward, 60, &solid, &fluid);
+        Vec2::new(player.velocity.x, player.velocity.z).length()
+    };
+    let (water_swim, lava_swim) = (swim(&pool(75)), swim(&basin(FluidKind::Lava, 75)));
+    assert!((water_swim - SWIM_SPEED).abs() < 1e-3);
+    assert!((lava_swim - LAVA_SWIM_SPEED).abs() < 1e-3);
 }

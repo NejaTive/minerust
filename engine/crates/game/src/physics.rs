@@ -1,4 +1,5 @@
 use glam::{IVec3, Vec2, Vec3};
+use world::block::FluidKind;
 
 pub const PLAYER_WIDTH: f32 = 0.6;
 pub const PLAYER_HEIGHT: f32 = 1.8;
@@ -17,15 +18,54 @@ pub const SPRINT_FOV_TIME: f32 = 0.15;
 pub const AIR_ACCEL: f32 = 10.0;
 
 pub const WATER_GRAVITY: f32 = GRAVITY / 4.0;
+pub const SWIM_DEPTH: f32 = 0.4;
+const WATER_EXIT_DEPTH: f32 = 1.0;
+
+pub struct Medium {
+    pub sink_speed: f32,
+    pub swim_speed: f32,
+    pub swim_up_speed: f32,
+    pub swim_up_accel: f32,
+    pub accel: f32,
+    pub drag: f32,
+    pub exit_speed: f32,
+}
+
 pub const WATER_SINK_SPEED: f32 = 2.0;
 pub const SWIM_UP_SPEED: f32 = 3.0;
-const SWIM_UP_ACCEL: f32 = 24.0;
 pub const SWIM_SPEED: f32 = WALK_SPEED * 0.5;
-const WATER_ACCEL: f32 = 20.0;
-const WATER_DRAG: f32 = 0.928;
-pub const SWIM_DEPTH: f32 = 0.4;
 pub const WATER_EXIT_SPEED: f32 = 10.0;
-const WATER_EXIT_DEPTH: f32 = 1.0;
+pub const LAVA_SINK_SPEED: f32 = 1.0;
+pub const LAVA_SWIM_SPEED: f32 = SWIM_SPEED * 0.5;
+pub const LAVA_SWIM_UP_SPEED: f32 = SWIM_UP_SPEED * 0.5;
+pub const LAVA_EXIT_SPEED: f32 = 6.0;
+
+pub const WATER: Medium = Medium {
+    sink_speed: WATER_SINK_SPEED,
+    swim_speed: SWIM_SPEED,
+    swim_up_speed: SWIM_UP_SPEED,
+    swim_up_accel: 24.0,
+    accel: 20.0,
+    drag: 0.928,
+    exit_speed: WATER_EXIT_SPEED,
+};
+
+pub const LAVA: Medium = Medium {
+    sink_speed: LAVA_SINK_SPEED,
+    swim_speed: LAVA_SWIM_SPEED,
+    swim_up_speed: LAVA_SWIM_UP_SPEED,
+    swim_up_accel: 12.0,
+    accel: 10.0,
+    drag: 0.86,
+    exit_speed: LAVA_EXIT_SPEED,
+};
+
+pub fn medium(kind: FluidKind) -> &'static Medium {
+    match kind {
+        FluidKind::Water => &WATER,
+        FluidKind::Lava => &LAVA,
+    }
+}
 
 const EPS: f32 = 1e-3;
 
@@ -106,29 +146,39 @@ impl Player {
         (min + EPS).cmplt(block_max).all() && (max - EPS).cmpgt(block_min).all()
     }
 
-    pub fn water_depth(&self, water_height: impl Fn(IVec3) -> Option<f32>) -> f32 {
+    pub fn fluid_depth(
+        &self,
+        fluid: impl Fn(IVec3) -> Option<(FluidKind, f32)>,
+    ) -> Option<(FluidKind, f32)> {
         let (min, max) = self.aabb();
         let lo = (min + EPS).floor().as_ivec3();
         let hi = (max - EPS).floor().as_ivec3();
-        let mut surface = None;
+        let mut found: Option<(FluidKind, f32)> = None;
         for y in lo.y..=hi.y {
             for z in lo.z..=hi.z {
                 for x in lo.x..=hi.x {
                     let pos = IVec3::new(x, y, z);
-                    if let Some(height) = water_height(pos) {
+                    if let Some((kind, height)) = fluid(pos) {
                         let top = y as f32 + height;
-                        surface = Some(surface.map_or(top, |s: f32| s.max(top)));
+                        found = Some(match found {
+                            Some((prev, surface)) if prev == kind => (kind, surface.max(top)),
+                            Some((FluidKind::Lava, surface)) => (FluidKind::Lava, surface),
+                            _ => (kind, top),
+                        });
                     }
                 }
             }
         }
-        surface.map_or(0.0, |s| (s - self.feet.y).max(0.0))
+        found.map(|(kind, surface)| (kind, (surface - self.feet.y).max(0.0)))
     }
 
-    pub fn eyes_in_water(&self, water_height: impl Fn(IVec3) -> Option<f32>) -> bool {
+    pub fn eye_fluid(
+        &self,
+        fluid: impl Fn(IVec3) -> Option<(FluidKind, f32)>,
+    ) -> Option<FluidKind> {
         let eye = self.eye();
         let cell = eye.floor().as_ivec3();
-        water_height(cell).is_some_and(|height| eye.y < cell.y as f32 + height)
+        fluid(cell).and_then(|(kind, height)| (eye.y < cell.y as f32 + height).then_some(kind))
     }
 
     pub fn step(
@@ -136,7 +186,7 @@ impl Player {
         input: &Input,
         yaw: f32,
         is_solid: impl Fn(IVec3) -> bool,
-        water_height: impl Fn(IVec3) -> Option<f32>,
+        fluid: impl Fn(IVec3) -> Option<(FluidKind, f32)>,
     ) {
         let (sin, cos) = yaw.sin_cos();
         let forward = Vec3::new(cos, 0.0, sin);
@@ -144,26 +194,28 @@ impl Player {
         let wish = (forward * input.forward + right * input.strafe).clamp_length_max(1.0);
         let vertical = f32::from(u8::from(input.jump)) - f32::from(u8::from(input.descend));
 
-        let depth = match self.mode {
-            Mode::Walking => self.water_depth(&water_height),
-            Mode::Flying | Mode::Noclip => 0.0,
+        let immersion = match self.mode {
+            Mode::Walking => self.fluid_depth(&fluid).filter(|&(_, depth)| depth > 0.0),
+            Mode::Flying | Mode::Noclip => None,
         };
+        let depth = immersion.map_or(0.0, |(_, depth)| depth);
         if input.forward <= 0.0 || depth > 0.0 {
             self.sprinting = false;
         }
         match self.mode {
-            Mode::Walking if depth > 0.0 => {
-                let target = Vec2::new(wish.x, wish.z) * SWIM_SPEED;
+            Mode::Walking if let Some((kind, _)) = immersion => {
+                let medium = medium(kind);
+                let target = Vec2::new(wish.x, wish.z) * medium.swim_speed;
                 let horizontal = Vec2::new(self.velocity.x, self.velocity.z)
-                    .move_towards(target, WATER_ACCEL * TICK);
+                    .move_towards(target, medium.accel * TICK);
                 self.velocity.x = horizontal.x;
                 self.velocity.z = horizontal.y;
                 let mut vy = self.velocity.y - WATER_GRAVITY * TICK;
-                if input.jump && depth > SWIM_DEPTH && vy < SWIM_UP_SPEED {
-                    vy = (vy + SWIM_UP_ACCEL * TICK).min(SWIM_UP_SPEED);
+                if input.jump && depth > SWIM_DEPTH && vy < medium.swim_up_speed {
+                    vy = (vy + medium.swim_up_accel * TICK).min(medium.swim_up_speed);
                 }
-                if vy < -WATER_SINK_SPEED {
-                    vy = (vy * WATER_DRAG).min(-WATER_SINK_SPEED);
+                if vy < -medium.sink_speed {
+                    vy = (vy * medium.drag).min(-medium.sink_speed);
                 }
                 self.velocity.y = vy;
             }
@@ -211,8 +263,12 @@ impl Player {
         if against_wall {
             self.sprinting = false;
         }
-        if depth > 0.0 && depth < WATER_EXIT_DEPTH && input.jump && against_wall {
-            self.velocity.y = self.velocity.y.max(WATER_EXIT_SPEED);
+        if let Some((kind, _)) = immersion
+            && depth < WATER_EXIT_DEPTH
+            && input.jump
+            && against_wall
+        {
+            self.velocity.y = self.velocity.y.max(medium(kind).exit_speed);
         }
         if self.mode == Mode::Flying && self.on_ground {
             self.mode = Mode::Walking;

@@ -7,7 +7,7 @@ use crate::templates::{
     WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
 use world::block::{
-    ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, RenderLayer, Shape, fluid_height_units,
+    ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, FluidKind, RenderLayer, Shape, fluid_height_units,
 };
 use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
@@ -285,29 +285,40 @@ pub(crate) fn mesh_cached(
                     push_shaped(&mut meshes.cutout, block, byte(), cell, light);
                     continue;
                 }
-                if block.is_water() {
+                if let Some(kind) = block.fluid() {
                     for (face_index, (face, normal, _)) in faces.iter().enumerate() {
-                        if blocks.at(index, *normal).shape() == Shape::Cube
-                            && blocks.at(index, *normal) != Block::Air
-                        {
+                        let neighbor = blocks.at(index, *normal);
+                        let hidden = if face_index == 0 {
+                            neighbor.fluid() == Some(kind)
+                        } else {
+                            neighbor.shape() == Shape::Cube && neighbor != Block::Air
+                        };
+                        if hidden {
                             continue;
                         }
-                        let (sky, block) = lights.at(index, *normal);
+                        let lit = if neighbor.is_opaque() { 0 } else { *normal };
+                        let (sky, block) = lights.at(index, lit);
                         let light = [sky, block].map(|l| half_average(l, 1));
-                        let heights = face
-                            .corners
-                            .map(|[cx, _, cz]| surface_height(blocks, datas, index, cx, cz, up));
+                        let heights = face.corners.map(|[cx, _, cz]| {
+                            surface_height(blocks, datas, index, kind, cx, cz, up)
+                        });
                         let (template, sloped) = water_template(face_index, heights);
                         let quad = Quad::new(
                             cell,
                             template,
                             false,
-                            Tile::Water.layer() as u8,
+                            kind.block()
+                                .tile(Facing::Side)
+                                .map_or(0, |t| t.layer() as u8),
                             [3; 4],
                             [light[0]; 4],
                             [light[1]; 4],
                         );
-                        meshes.water.quads.push(if sloped {
+                        let target = match kind {
+                            FluidKind::Water => &mut meshes.water,
+                            FluidKind::Lava => &mut meshes.solid,
+                        };
+                        target.quads.push(if sloped {
                             quad.with_heights(heights)
                         } else {
                             quad
@@ -390,6 +401,7 @@ fn surface_height(
     blocks: &Neighborhood,
     datas: &Datas,
     index: usize,
+    kind: FluidKind,
     cx: i32,
     cz: i32,
     up: isize,
@@ -399,8 +411,8 @@ fn surface_height(
         for dx in [cx - 1, cx] {
             let offset = Neighborhood::stride(IVec3::new(dx, 0, dz));
             let block = blocks.at(index, offset);
-            if block.is_water() {
-                if blocks.at(index, offset + up).is_water() {
+            if block.fluid() == Some(kind) {
+                if blocks.at(index, offset + up).fluid() == Some(kind) {
                     return POSITION_UNITS as u8;
                 }
                 let height = u32::from(fluid_height_units(datas.at(index, offset)));

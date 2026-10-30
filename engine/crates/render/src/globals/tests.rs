@@ -12,7 +12,7 @@ fn layout_matches_shader() {
         fog_start: 103.0,
         fog_color: Vec3::new(104.0, 105.0, 106.0),
         fog_end: 107.0,
-        underwater: 108.0,
+        eye_fluid: 108.0,
         darkness: 109.0,
         view_dir: Mat4::from_cols_array(&std::array::from_fn(|i| 200.0 + i as f32)),
         sun_dir: Vec3::new(300.0, 301.0, 302.0),

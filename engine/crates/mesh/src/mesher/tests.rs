@@ -273,6 +273,9 @@ fn assert_shades_match(
 ) -> usize {
     let mut shaded = 0;
     for (q, quad) in vertices(mesh).chunks(4).enumerate() {
+        if u32::from(mesh.quads[q].layer()) == Tile::Lava.layer() {
+            continue;
+        }
         let expected = world_shades(origin, &block_at, &light_at, quad);
         let side = face_shade(quad_normal(quad));
         for (v, (shade, sun, block)) in quad.iter().zip(expected) {
@@ -526,6 +529,8 @@ fn world_face_count(world: &World, key: ColumnPos) -> (usize, usize) {
                 let neighbors = FACES.iter().map(|face| world.block(pos + face.normal));
                 if block.is_water() {
                     water += neighbors.filter(|&n| n == Block::Air).count();
+                } else if block == Block::Lava {
+                    solid += neighbors.filter(|&n| n == Block::Air).count();
                 } else if block != Block::Air {
                     solid += neighbors.filter(|n| !n.is_opaque()).count();
                 }
@@ -934,12 +939,12 @@ fn water_under_water_is_full_height_without_top() {
 }
 
 #[test]
-fn water_under_stone_is_lowered_without_top() {
+fn water_under_stone_is_lowered_and_keeps_its_top() {
     let mesh = section_of(&[
         (IVec3::new(5, 5, 5), Block::Water),
         (IVec3::new(5, 6, 5), Block::Stone),
     ]);
-    assert_eq!(face_count(&mesh.water), 5);
+    assert_eq!(face_count(&mesh.water), 6);
     let max = vertices(&mesh.water)
         .iter()
         .map(|v| v.position()[1])

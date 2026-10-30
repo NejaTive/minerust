@@ -4,7 +4,7 @@ use glam::{IVec2, IVec3};
 
 use crate::pos::{ColumnPos, SectionPos};
 
-use crate::block::{Block, fluid_height};
+use crate::block::{Block, FluidKind, fluid_height};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::section::SECTION_SIZE;
 
@@ -42,14 +42,14 @@ impl World {
         self.columns.contains_key(&ColumnPos::of_block(pos))
     }
 
-    pub fn water_height(&self, pos: IVec3) -> Option<f32> {
-        self.block(pos).is_water().then(|| {
-            if self.block(pos + IVec3::Y).is_water() {
-                1.0
-            } else {
-                fluid_height(self.block_data(pos))
-            }
-        })
+    pub fn fluid_height(&self, pos: IVec3) -> Option<(FluidKind, f32)> {
+        let kind = self.block(pos).fluid()?;
+        let height = if self.block(pos + IVec3::Y).fluid() == Some(kind) {
+            1.0
+        } else {
+            fluid_height(self.block_data(pos))
+        };
+        Some((kind, height))
     }
 
     pub fn neighborhood(&self, key: ColumnPos) -> [Option<&Column>; 9] {

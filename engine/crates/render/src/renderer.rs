@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use glam::{IVec3, Mat4, Vec2, Vec3};
 use mesh::mesher::SectionMeshes;
-use world::block::Block;
+use world::block::{Block, FluidKind};
 use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 
@@ -24,7 +24,7 @@ pub struct FrameParams {
     pub fog_start: f32,
     pub fog_end: f32,
     pub background: Vec3,
-    pub underwater: bool,
+    pub eye_fluid: Option<FluidKind>,
     pub darkness: f32,
     pub sun_dir: Vec3,
     pub night: f32,
@@ -388,7 +388,11 @@ impl Renderer {
             fog_start: params.fog_start,
             fog_color: params.background,
             fog_end: params.fog_end,
-            underwater: f32::from(u8::from(params.underwater)),
+            eye_fluid: match params.eye_fluid {
+                None => 0.0,
+                Some(FluidKind::Water) => 1.0,
+                Some(FluidKind::Lava) => 2.0,
+            },
             darkness: params.darkness,
             view_dir: view_dir_matrix(params.view_proj),
             sun_dir: params.sun_dir,
@@ -499,7 +503,7 @@ impl Renderer {
                 counts.draw_calls += 1;
             }
 
-            if !params.underwater {
+            if params.eye_fluid.is_none() {
                 pass.set_pipeline(&self.sky_pipeline);
                 pass.draw(0..3, 0..1);
                 counts.draw_calls += 1;

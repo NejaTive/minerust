@@ -11,6 +11,7 @@ const CELL: i32 = 4;
 const NODES_XZ: usize = (SECTION_SIZE / CELL + 1) as usize;
 const NODES_Y: usize = (WORLD_HEIGHT / CELL + 1) as usize;
 const FLOOR: i32 = 3;
+pub const LAVA_LEVEL: i32 = 10;
 const ROOF: i32 = 3;
 const WET_ROOF: i32 = 4;
 
@@ -120,7 +121,12 @@ impl Caves {
                     let j = (y / CELL) as usize;
                     let sample = lerp(layers[j], layers[j + 1], fraction(y % CELL));
                     if hollow(sample, l.density(y)) {
-                        column.set(local, Block::Air);
+                        let filling = if y < LAVA_LEVEL {
+                            Block::Lava
+                        } else {
+                            Block::Air
+                        };
+                        column.set(local, filling);
                     }
                 }
             }

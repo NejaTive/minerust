@@ -168,3 +168,13 @@ fn block_without_flag_stays() {
     assert!(falling.step(&mut world, |_| false).is_empty());
     assert_eq!(world.block(at(20)), Block::Stone);
 }
+
+#[test]
+fn sand_displaces_lava() {
+    let mut world = flat_world(&[(0, 0)]);
+    let mut falling = Falling::new();
+    world.set_block(at(FLOOR + 1), Block::Lava);
+    put(&mut world, &mut falling, at(FLOOR + 2), Block::Sand);
+    settle(&mut world, &mut falling);
+    assert_eq!(world.block(at(FLOOR + 1)), Block::Sand);
+}
