@@ -18,7 +18,6 @@ fn axis_rays_hit_each_face() {
         IVec3::Z,
         IVec3::NEG_Z,
     ] {
-        // Из центра блока на 3 блока в сторону нормали, смотрим обратно.
         let origin = Vec3::splat(0.5) + normal.as_vec3() * 3.0;
         let hit = raycast(origin, -normal.as_vec3(), 6.0, &solid).unwrap();
         assert_eq!(hit.block, IVec3::ZERO);
@@ -29,7 +28,6 @@ fn axis_rays_hit_each_face() {
 
 #[test]
 fn diagonal_through_edge_does_not_slip_between_blocks() {
-    // Два блока касаются ребром, луч идёт точно через это ребро.
     let solid = blocks(&[[1, 0, 0], [0, 1, 0]]);
     let hit = raycast(
         Vec3::new(0.5, 0.5, 0.5),
@@ -44,12 +42,10 @@ fn diagonal_through_edge_does_not_slip_between_blocks() {
 
 #[test]
 fn diagonal_through_corner_does_not_slip_between_blocks() {
-    // Три блока вокруг угла (1, 1, 1) по соседству с исходным; луч точно в угол.
     let solid = blocks(&[[1, 0, 0], [0, 1, 0], [0, 0, 1]]);
     let hit = raycast(Vec3::splat(0.5), Vec3::ONE, 6.0, solid);
     assert!(hit.is_some());
 
-    // Блок только по диагонали через угол: путь идёт через соседей, а не мимо.
     let far = blocks(&[[1, 1, 1]]);
     let hit = raycast(Vec3::splat(0.5), Vec3::ONE, 6.0, far).unwrap();
     assert_eq!(hit.block, IVec3::ONE);
@@ -57,7 +53,6 @@ fn diagonal_through_corner_does_not_slip_between_blocks() {
 
 #[test]
 fn diagonal_visits_every_crossed_voxel() {
-    // Пологий луч через стену: сколько бы шагов ни было, стена не пропускается.
     let solid = |p: IVec3| p.x == 5;
     let hit = raycast(
         Vec3::new(0.1, 0.9, 0.3),
@@ -73,8 +68,6 @@ fn diagonal_visits_every_crossed_voxel() {
 #[test]
 fn negative_coordinates() {
     let solid = blocks(&[[-3, 10, -7]]);
-    // По диагонали точно через ребро: при ничьей шаг сначала по x, в воздух
-    // (-3, 10, -6), потом по z — в блок через его грань +Z.
     let origin = Vec3::new(-1.5, 10.5, -5.5);
     let hit = raycast(origin, Vec3::new(-1.0, 0.0, -1.0), 6.0, &solid).unwrap();
     assert_eq!(hit.block, IVec3::new(-3, 10, -7));
@@ -117,4 +110,17 @@ fn degenerate_input_is_none() {
     assert_eq!(raycast(Vec3::ZERO, Vec3::ZERO, 6.0, solid), None);
     assert_eq!(raycast(Vec3::NAN, Vec3::X, 6.0, solid), None);
     assert_eq!(raycast(Vec3::ZERO, Vec3::X, f32::NAN, solid), None);
+}
+
+#[test]
+fn axis_ray_from_block_corner_terminates() {
+    let hit = raycast(
+        Vec3::new(4.0, 6.0, 4.0),
+        Vec3::NEG_Y,
+        10.0,
+        blocks(&[[4, 2, 4]]),
+    )
+    .unwrap();
+    assert_eq!(hit.block, IVec3::new(4, 2, 4));
+    assert!(raycast(Vec3::new(4.0, 6.0, 4.0), Vec3::NEG_Y, 10.0, |_| false).is_none());
 }

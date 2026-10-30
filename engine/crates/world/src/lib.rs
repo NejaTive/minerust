@@ -1,12 +1,17 @@
 pub mod block;
 mod caves;
+pub mod clouds;
 pub mod column;
+pub mod falling;
+pub mod fluid;
 pub mod light;
 mod plants;
 pub mod pos;
+pub mod random_ticks;
 pub mod save;
 pub mod section;
 pub mod terrain;
 pub mod tile;
 pub mod trees;
+pub mod updates;
 pub mod world;

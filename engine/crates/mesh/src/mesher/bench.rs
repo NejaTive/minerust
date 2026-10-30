@@ -4,7 +4,6 @@ use std::time::{Duration, Instant};
 use super::*;
 use world::terrain::Terrain;
 
-/// Мир 14×14 колонок с светом и ключи внутренних 12×12 (у них все соседи загружены).
 fn setup() -> (World, LightMap, Vec<ColumnPos>) {
     let terrain = Terrain::new(1337);
     let mut world = World::new();
@@ -24,8 +23,6 @@ fn setup() -> (World, LightMap, Vec<ColumnPos>) {
     (world, light, keys)
 }
 
-/// Среднее время `mesh_world_column` на квадрате колонок 12×12 (соседи загружены);
-/// запуск: `cargo test --release mesh_timing -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn mesh_timing() {
@@ -43,13 +40,6 @@ fn mesh_timing() {
     println!("mesh: {per_column:?} per column");
 }
 
-/// Время `mesh_world_column` по этапам, на колонку, при AO и без. Кэш (блоки и свет с
-/// соседями) меряется отдельно через `Surroundings::fill`. Цикл граней (AO, свет
-/// вершин, запись) отдельно не выделить без правки мешера, поэтому его время — это
-/// полный меш минус кэш, а запись квадов оценивается пересборкой готовых мешей
-/// копированием записей квадов (без расчёта AO и света). Расчёт AO и света
-/// вершин — остаток. Запуск:
-/// `cargo test --release mesh_stages -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn mesh_stages() {
@@ -63,7 +53,7 @@ fn mesh_stages() {
     ] {
         let (mut total, mut cache, mut write) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
         let mut quads = 0usize;
-        let (mut blocks, mut lights) = new_caches();
+        let (mut blocks, mut lights, mut datas) = new_caches();
         for _ in 0..REPEATS {
             let mut meshes = Vec::new();
             for &key in &keys {
@@ -73,13 +63,13 @@ fn mesh_stages() {
                         continue;
                     }
                     let start = Instant::now();
-                    around.fill(sy, &mut blocks, &mut lights);
-                    black_box((&blocks, &lights));
+                    around.fill(sy, &mut blocks, &mut lights, &mut datas);
+                    black_box((&blocks, &lights, &datas));
                     cache += start.elapsed();
 
                     let start = Instant::now();
-                    around.fill(sy, &mut blocks, &mut lights);
-                    let data = mesh_cached(&blocks, &lights, options);
+                    around.fill(sy, &mut blocks, &mut lights, &mut datas);
+                    let data = mesh_cached(&blocks, &lights, &datas, options);
                     total += start.elapsed();
                     meshes.push(black_box(data));
                 }

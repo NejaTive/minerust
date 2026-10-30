@@ -1,9 +1,9 @@
 import { classifyKeyDown, GAME_KEYS } from './keys'
+import { armMouseGuard, filterMouseDelta, type MouseGuard } from './mouse-guard'
+import { releasePointerLock, requestPointerLock } from './pointer-lock'
 import { stepSlot, WheelAccumulator } from './wheel'
 
-/** Что вводу нужно знать об игре и куда он сообщает; ввод не знает ни Vue, ни wasm. */
 export interface InputTarget {
-  /** Движок, если он уже создан. */
   engine(): InputEngine | undefined
   canvas(): HTMLElement | undefined
   showDebug(): boolean
@@ -11,13 +11,15 @@ export interface InputTarget {
   slotCount: number
   selectSlot(slot: number): void
   changeRenderDistance(delta: number): void
-  /** Нажата N. */
   askNewWorld(): void
-  /** Курсор захвачен или отпущен (после этого движок уже поставлен на паузу или снят). */
   lockChanged(locked: boolean): void
+  lockLostAfterInventory(): void
+  inventoryGrace(): boolean
+  inventoryOpen(): boolean
+  openInventory(): void
+  closeInventory(): void
 }
 
-/** Часть `Engine`, нужная вводу. */
 export interface InputEngine {
   mouse_move(dx: number, dy: number): void
   mouse_button(button: number, pressed: boolean): void
@@ -28,37 +30,88 @@ export interface InputEngine {
   set_paused(paused: boolean): void
 }
 
-/** Подписывается на события браузера; возвращает функцию отписки и признак захвата курсора. */
 export function bindInput(target: InputTarget): { unbind(): void; isLocked(): boolean } {
   let locked = false
+  let mouseGuard: MouseGuard | null = null
   const wheel = new WheelAccumulator()
 
-  // Пауза следует за курсором: Esc браузер забирает себе и до страницы не доводит, так что
-  // единственный надёжный сигнал выхода — это событие.
   const onLockChange = () => {
     locked = document.pointerLockElement === target.canvas()
     const engine = target.engine()
-    engine?.set_paused(!locked)
-    if (!locked) engine?.release_all_keys()
-    target.lockChanged(locked)
+    if (locked) {
+      mouseGuard = armMouseGuard(performance.now())
+      engine?.set_paused(false)
+      target.lockChanged(true)
+      return
+    }
+    if (target.inventoryOpen()) {
+      engine?.set_paused(false)
+      target.lockChanged(false)
+      return
+    }
+    if (target.inventoryGrace()) {
+      engine?.set_paused(false)
+      target.lockLostAfterInventory()
+      return
+    }
+    engine?.set_paused(true)
+    engine?.release_all_keys()
+    target.lockChanged(false)
   }
   const onMouseMove = (e: MouseEvent) => {
-    if (locked) target.engine()?.mouse_move(e.movementX, e.movementY)
+    if (!locked) return
+    const result = filterMouseDelta(mouseGuard, performance.now(), e.movementX, e.movementY)
+    mouseGuard = result.guard
+    if (result.delta) target.engine()?.mouse_move(result.delta.dx, result.delta.dy)
   }
-  // Только при уже захваченном курсоре: клик, который захватывает курсор, блок не ломает.
   const onMouseDown = (e: MouseEvent) => {
     if (locked) target.engine()?.mouse_button(e.button, true)
   }
-  // Отпускание передаём всегда: курсор могли отпустить посреди удержания.
   const onMouseUp = (e: MouseEvent) => target.engine()?.mouse_button(e.button, false)
   const onWheel = (e: WheelEvent) => {
     if (!locked) return
-    // Колесо при захваченном курсоре не должно масштабировать или листать страницу.
     e.preventDefault()
     const step = wheel.push(e.deltaY, e.deltaMode)
     if (step !== 0) target.selectSlot(stepSlot(target.slot(), step, target.slotCount))
   }
   const onKeyDown = (e: KeyboardEvent) => {
+    const inv = target.inventoryOpen()
+    if (e.code === 'KeyE' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (inv) {
+        e.preventDefault()
+        target.closeInventory()
+        return
+      }
+      if (locked) {
+        e.preventDefault()
+        target.openInventory()
+        return
+      }
+    }
+    if (e.code === 'Escape' && inv) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      return
+    }
+
+    if (inv) {
+      if (GAME_KEYS.has(e.code)) e.preventDefault()
+      const digit = /^Digit([1-9])$/.exec(e.code)
+      if (digit && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        target.selectSlot(Number(digit[1]) - 1)
+        return
+      }
+      const command = classifyKeyDown(e, false, target.showDebug())
+      switch (command.type) {
+        case 'distance':
+          return target.changeRenderDistance(command.delta)
+        case 'new-world':
+          return target.askNewWorld()
+        default:
+          return
+      }
+    }
+
     if (locked && GAME_KEYS.has(e.code)) e.preventDefault()
     const command = classifyKeyDown(e, locked, target.showDebug())
     switch (command.type) {
@@ -77,9 +130,15 @@ export function bindInput(target: InputTarget): { unbind(): void; isLocked(): bo
     }
   }
   const onKeyUp = (e: KeyboardEvent) => {
+    if (e.code === 'Escape' && target.inventoryOpen()) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      target.closeInventory()
+      return
+    }
     const engine = target.engine()
     if (e.code === 'KeyT') engine?.set_time_fast(false)
-    engine?.set_key(e.code, false)
+    if (!target.inventoryOpen()) engine?.set_key(e.code, false)
   }
   const onBlur = () => {
     const engine = target.engine()
@@ -92,8 +151,8 @@ export function bindInput(target: InputTarget): { unbind(): void; isLocked(): bo
   document.addEventListener('mousedown', onMouseDown)
   document.addEventListener('mouseup', onMouseUp)
   document.addEventListener('wheel', onWheel, { passive: false })
-  window.addEventListener('keydown', onKeyDown)
-  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('keydown', onKeyDown, true)
+  window.addEventListener('keyup', onKeyUp, true)
   window.addEventListener('blur', onBlur)
 
   return {
@@ -104,9 +163,18 @@ export function bindInput(target: InputTarget): { unbind(): void; isLocked(): bo
       document.removeEventListener('mousedown', onMouseDown)
       document.removeEventListener('mouseup', onMouseUp)
       document.removeEventListener('wheel', onWheel)
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('keyup', onKeyUp, true)
       window.removeEventListener('blur', onBlur)
     },
   }
+}
+
+export function beginInventory(engine: InputEngine | undefined) {
+  engine?.release_all_keys()
+  releasePointerLock()
+}
+
+export async function endInventory(canvas: HTMLElement | undefined): Promise<boolean> {
+  return requestPointerLock(canvas)
 }

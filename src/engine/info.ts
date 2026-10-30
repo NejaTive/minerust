@@ -7,7 +7,6 @@ export interface BlockInfo {
   placeable: boolean
 }
 
-/** Всё, что движок сообщает до создания `Engine`: простые объекты, без указателей в wasm. */
 export interface EngineInfo {
   formatVersion: number
   blocks: BlockInfo[]
@@ -17,7 +16,6 @@ export interface EngineInfo {
 
 let loaded: EngineInfo | undefined
 
-/** Инициализирует wasm и читает справочные данные движка; вызывается один раз до монтирования. */
 export async function loadEngineInfo(): Promise<EngineInfo> {
   await init()
   const list = blocks()
@@ -37,6 +35,7 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
     defaults: {
       renderDistance: defaults.renderDistance,
       ambientOcclusion: defaults.ambientOcclusion,
+      clouds: defaults.clouds,
       mouseSensitivity: defaults.mouseSensitivity,
       fov: defaults.fov,
     },
@@ -52,7 +51,6 @@ export function engineInfo(): EngineInfo {
   return loaded
 }
 
-/** Подпись блока для интерфейса; неизвестное имя возвращается как есть. */
 export function blockLabel(name: string): string {
   return engineInfo().blocks.find((block) => block.name === name)?.label ?? name
 }

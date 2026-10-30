@@ -6,10 +6,14 @@
   { "name": "sand", "label": "песок", "placeable": true },
   { "name": "log", "label": "бревно", "placeable": true },
   { "name": "leaves", "label": "листва", "placeable": true },
-  { "name": "water", "label": "вода", "placeable": false },
+  { "name": "water", "label": "вода", "placeable": true },
   { "name": "glowstone", "label": "светокамень", "placeable": true },
   { "name": "tall_grass", "label": "высокая трава", "placeable": true },
   { "name": "poppy", "label": "мак", "placeable": true },
   { "name": "dandelion", "label": "одуванчик", "placeable": true },
-  { "name": "torch", "label": "факел", "placeable": true }
+  { "name": "torch", "label": "факел", "placeable": true },
+  { "name": "gravel", "label": "гравий", "placeable": true },
+  { "name": "lava", "label": "лава", "placeable": true },
+  { "name": "obsidian", "label": "обсидиан", "placeable": true },
+  { "name": "cobblestone", "label": "булыжник", "placeable": true }
 ]

@@ -2,50 +2,45 @@ use std::collections::HashMap;
 
 use glam::{IVec3, Mat4, Vec2, Vec3};
 use mesh::mesher::SectionMeshes;
-use world::block::Block;
+use world::block::{Block, FluidKind};
+use world::clouds::CloudMask;
 use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 
+use crate::clouds::{
+    CLOUD_INSTANCES, CLOUD_VERTICES, cloud_color, create_cloud_texture, upload_cloud_mask,
+};
 use crate::frustum::Frustum;
 use crate::globals::{Globals, view_dir_matrix};
 use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_section};
 use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::pipelines::{
-    BlockPass, create_block_pipeline, create_depth_view, create_outline_pipeline,
-    create_sky_pipeline,
+    BlockPass, create_block_pipeline, create_cloud_pipeline, create_depth_view,
+    create_outline_pipeline, create_sky_pipeline,
 };
 use crate::shaders;
-use crate::texture::create_block_textures;
+use crate::texture::{create_animation_table, create_block_textures};
 
-/// Всё, что нужно кадру от игры: `render` не знает про `game`, заполняет это `web`.
 pub struct FrameParams {
     pub view_proj: Mat4,
     pub camera_pos: Vec3,
-    /// Горизонтальное расстояние в блоках, с которого начинается туман.
     pub fog_start: f32,
-    /// Горизонтальное расстояние в блоках, с которого виден только туман.
     pub fog_end: f32,
-    /// Линейный цвет фона, тумана и неба у горизонта.
     pub background: Vec3,
-    /// Глаза под водой: тон и туман по полному расстоянию, неба нет.
-    pub underwater: bool,
-    /// Уровней солнечного света, которые отнимает ночь.
+    pub eye_fluid: Option<FluidKind>,
     pub darkness: f32,
+    pub anim_time: f32,
+    pub cloud_drift: f32,
     pub sun_dir: Vec3,
-    /// Степень ночи 0..1: видимость звёзд.
     pub night: f32,
-    /// Линейный цвет неба в зените.
     pub zenith: Vec3,
-    /// Вес тёплого пятна заката у горизонта 0..1.
     pub warm: f32,
-    /// Насколько край земли ниже горизонта, см. `Globals::horizon_tilt`.
     pub horizon_tilt: f32,
-    /// (cos, sin) поворота звёзд.
     pub star_rotation: Vec2,
+    pub clouds: bool,
 }
 
-/// Счётчики последнего кадра для `stats()`.
 #[derive(Clone, Copy, Default)]
 pub struct FrameCounts {
     pub solid_quads: u32,
@@ -54,57 +49,40 @@ pub struct FrameCounts {
     pub draw_calls: u32,
 }
 
-/// Кадр, записанный в команды, но не отправленный: между [`Renderer::begin`] и
-/// [`Renderer::submit`] вызывающий может снять время кодирования.
 pub struct PendingFrame {
     frame: wgpu::SurfaceTexture,
     encoder: wgpu::CommandEncoder,
-    /// Буфер чтения GPU-таймера, если кадр с замером.
     timer_slot: Option<usize>,
 }
 
-/// Устройство, surface, пайплайны и GPU-меши колонок; рисует кадры.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    /// Формат view кадра: всегда sRGB, даже если поверхность без него.
     render_format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
-    /// Листва, кресты, факел: `discard`, после `pipeline`.
     cutout_pipeline: wgpu::RenderPipeline,
-    /// Вода: со смешением, без записи глубины, после рамки.
     water_pipeline: wgpu::RenderPipeline,
     outline_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
-    /// Рёбра рамки вокруг `outline_block`.
+    cloud_pipeline: wgpu::RenderPipeline,
+    cloud_texture: wgpu::Texture,
     outline_buffer: wgpu::Buffer,
-    /// Блок, чья рамка лежит в `outline_buffer` и рисуется; `None` — рамки нет.
-    outline_block: Option<(IVec3, Block)>,
+    outline_block: Option<(IVec3, Block, u8)>,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
-    /// Меши колонок по ключу колонки, по секции снизу вверх; `None` — пустая секция.
     column_meshes: HashMap<ColumnPos, ColumnMeshes>,
-    /// Арена записей квадов и буфер слотов всех мешей.
     buffers: SceneBuffers,
-    /// Меши, которые не поместились в буферы (предел `max_buffer_size`): их нет на экране.
     failed_uploads: u32,
-    /// `None`, если адаптер не даёт `TIMESTAMP_QUERY`.
     gpu_timer: Option<GpuTimer>,
-    /// Метки времени ставятся только при включённом профилировании.
     gpu_timing: bool,
     depth_view: wgpu::TextureView,
-    /// Сколько секций прошло отсечение по пирамиде видимости в последнем кадре.
     drawn_sections: u32,
-    /// Счётчики последнего кадра; считаются всегда, это сложение целых.
     frame_counts: FrameCounts,
 }
 
 impl Renderer {
-    /// Устройство, очередь и пайплайны для `surface`; `adapter` должен быть создан с
-    /// `compatible_surface: Some(&surface)`. Surface создаёт вызывающий: `SurfaceTarget`
-    /// canvas есть только на wasm32.
     pub async fn new(
         surface: wgpu::Surface<'static>,
         adapter: &wgpu::Adapter,
@@ -122,9 +100,6 @@ impl Renderer {
             .map_err(|e| format!("WebGPU device is unavailable: {e}"))?;
 
         let caps = surface.get_capabilities(adapter);
-        // Канвас WebGPU не умеет sRGB-форматы поверхности (только `*8unorm`), зато
-        // разрешает sRGB-view через `view_formats`. Без него линейный цвет шейдера
-        // ушёл бы на экран без перевода в sRGB, и картинка потемнела бы.
         let format = caps
             .formats
             .iter()
@@ -158,10 +133,7 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let block_textures = create_block_textures(&device, &queue);
-        // Nearest внутри уровня — чёткие пиксели вблизи, как в Minecraft; Linear между
-        // мип-уровнями — без ряби вдали и без видимой границы смены уровня.
-        // Repeat — UV задаются в блоках, так грань больше 1×1 (greedy meshing)
-        // повторит тайл без правок шейдера.
+        let animation_table = create_animation_table(&device);
         let block_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("blocks"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -177,7 +149,6 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    // Фрагментному шейдеру нужны параметры тумана.
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -202,8 +173,30 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
+        let cloud_texture = create_cloud_texture(&device);
+        let cloud_view = cloud_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals"),
             layout: &globals_layout,
@@ -220,13 +213,19 @@ impl Renderer {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&block_sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: animation_table.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&cloud_view),
+                },
             ],
         });
 
         let shader = shaders::module(&device, "shader", shaders::BLOCK_SHADER);
         let buffers = SceneBuffers::new(&device);
-        // У неба и рамки арены нет, поэтому у них свой layout: WebGPU требует ставить все
-        // группы layout'а пайплайна, даже если шейдер их не читает.
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("main"),
             bind_group_layouts: &[Some(&globals_layout)],
@@ -242,6 +241,7 @@ impl Renderer {
         });
         let outline_pipeline = create_outline_pipeline(&device, &pipeline_layout, render_format);
         let sky_pipeline = create_sky_pipeline(&device, &pipeline_layout, render_format);
+        let cloud_pipeline = create_cloud_pipeline(&device, &pipeline_layout, render_format);
         let outline_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outline"),
             size: (OUTLINE_VERTICES * OUTLINE_VERTEX_SIZE) as u64,
@@ -286,6 +286,8 @@ impl Renderer {
             water_pipeline,
             outline_pipeline,
             sky_pipeline,
+            cloud_pipeline,
+            cloud_texture,
             outline_buffer,
             outline_block: None,
             globals_buffer,
@@ -301,7 +303,6 @@ impl Renderer {
         })
     }
 
-    /// Вызывается при изменении размеров canvas (в физических пикселях).
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
@@ -312,13 +313,14 @@ impl Renderer {
         self.depth_view = create_depth_view(&self.device, width, height);
     }
 
+    pub fn set_cloud_mask(&self, mask: &CloudMask) {
+        upload_cloud_mask(&self.queue, &self.cloud_texture, mask);
+    }
+
     pub fn aspect(&self) -> f32 {
         self.config.width as f32 / self.config.height as f32
     }
 
-    /// Загружает меши колонки на GPU (секции снизу вверх), заменяя прежние. Пустые
-    /// секции места не занимают. Секция, не поместившаяся в буферы, не рисуется и
-    /// считается в [`Renderer::failed_uploads`].
     pub fn upload_column(&mut self, key: ColumnPos, data: &[SectionMeshes]) {
         self.remove_column(key);
         let origin = key.origin();
@@ -329,16 +331,12 @@ impl Renderer {
         self.column_meshes.insert(key, meshes);
     }
 
-    /// Заменяет меш одной секции. Колонку без
-    /// меша пропускает: её загрузят целиком позже.
     pub fn upload_section(&mut self, key: SectionPos, data: &SectionMeshes) {
         let column = key.column();
         if !self.column_meshes.contains_key(&column) {
             return;
         }
         let min = key.origin().as_vec3();
-        // Новый меш пишется до освобождения старого: короткая двойная занятость
-        // дешевле, чем окно, в котором секция не нарисована.
         let new = self.upload(data, min);
         let old = self
             .column_meshes
@@ -359,7 +357,6 @@ impl Renderer {
         }
     }
 
-    /// Освобождает диапазоны и слоты колонки.
     pub fn remove_column(&mut self, key: ColumnPos) {
         if let Some(meshes) = self.column_meshes.remove(&key) {
             for mesh in meshes.into_iter().flatten() {
@@ -368,7 +365,6 @@ impl Renderer {
         }
     }
 
-    /// Секций, которые не удалось загрузить из-за предела размера буфера; 0 в норме.
     pub fn failed_uploads(&self) -> u32 {
         self.failed_uploads
     }
@@ -385,38 +381,30 @@ impl Renderer {
         self.column_meshes.len()
     }
 
-    /// Секций с мешем на GPU.
     pub fn section_count(&self) -> usize {
         self.column_meshes.values().flatten().flatten().count()
     }
 
-    /// Память мешей на GPU, байт: арена записей квадов, буфер слотов и индексы квадов
-    /// целиком (с запасом).
     pub fn gpu_bytes(&self) -> u64 {
         self.buffers.bytes()
     }
 
-    /// Из [`Renderer::gpu_bytes`] занято мешами, слотами и индексами, байт.
     pub fn gpu_used_bytes(&self) -> u64 {
         self.buffers.used_bytes()
     }
 
-    /// GPU-таймер доступен (адаптер дал `timestamp-query`).
     pub fn has_gpu_timer(&self) -> bool {
         self.gpu_timer.is_some()
     }
 
-    /// Включает метки времени render pass; без таймера ничего не делает.
     pub fn set_gpu_timing(&mut self, enabled: bool) {
         self.gpu_timing = enabled;
     }
 
-    /// Сумма времени GPU проходов (мс) и их число с прошлого вызова.
     pub fn take_gpu_samples(&self) -> Option<(f64, u32)> {
         self.gpu_timer.as_ref()?.take_samples()
     }
 
-    /// Секций, прошедших отсечение в последнем кадре.
     pub fn drawn_sections(&self) -> u32 {
         self.drawn_sections
     }
@@ -425,23 +413,19 @@ impl Renderer {
         self.frame_counts
     }
 
-    /// Рамка вокруг блока под прицелом; `None` убирает её. Блок в ключе: на месте
-    /// цветка мог появиться камень, и рамка стала бы другой.
-    pub fn set_outline(&mut self, outline: Option<(IVec3, Block)>) {
+    pub fn set_outline(&mut self, outline: Option<(IVec3, Block, u8)>) {
         if outline != self.outline_block {
-            if let Some((pos, block)) = outline {
+            if let Some((pos, block, data)) = outline {
                 self.queue.write_buffer(
                     &self.outline_buffer,
                     0,
-                    &outline_bytes(pos, block.bounds()),
+                    &outline_bytes(pos, block.bounds(data)),
                 );
             }
             self.outline_block = outline;
         }
     }
 
-    /// Записывает кадр в команды. `Ok(None)` — кадр пропущен (поверхность устарела или
-    /// закрыта), следующий попробует снова.
     pub fn begin(&mut self, params: &FrameParams) -> Result<Option<PendingFrame>, String> {
         let [r, g, b] = params.background.to_array().map(f64::from);
         let clear = wgpu::Color { r, g, b, a: 1.0 };
@@ -451,8 +435,14 @@ impl Renderer {
             fog_start: params.fog_start,
             fog_color: params.background,
             fog_end: params.fog_end,
-            underwater: f32::from(u8::from(params.underwater)),
+            eye_fluid: match params.eye_fluid {
+                None => 0.0,
+                Some(FluidKind::Water) => 1.0,
+                Some(FluidKind::Lava) => 2.0,
+            },
             darkness: params.darkness,
+            anim_time: params.anim_time,
+            cloud_drift: params.cloud_drift,
             view_dir: view_dir_matrix(params.view_proj),
             sun_dir: params.sun_dir,
             night: params.night,
@@ -460,6 +450,7 @@ impl Renderer {
             warm: params.warm,
             horizon_tilt: params.horizon_tilt,
             star_rotation: params.star_rotation,
+            cloud_color: cloud_color(params.night, params.warm),
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
@@ -475,7 +466,6 @@ impl Renderer {
                 self.surface.configure(&self.device, &self.config);
                 return Ok(None);
             }
-            // Пропускаем кадр и пробуем на следующем.
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 return Ok(None);
             }
@@ -528,9 +518,6 @@ impl Renderer {
                 self.buffers.indices.buffer().slice(..),
                 wgpu::IndexFormat::Uint32,
             );
-            // Спереди назад: ближний рельеф ложится в буфер глубины первым, и дальние
-            // пиксели отсекаются по глубине до шейдера. Сортировка одна на кадр, вода
-            // идёт по ней в обратном порядке.
             let eye = params.camera_pos;
             let mut visible: Vec<(f32, &SectionMesh)> = self
                 .column_meshes
@@ -549,8 +536,6 @@ impl Renderer {
                     counts.draw_calls += 1;
                 }
             }
-            // Вырезанное после всего непрозрачного: `discard` у листвы не должен
-            // мешать отсечению скрытых пикселей у рельефа.
             pass.set_pipeline(&self.cutout_pipeline);
             for (_, section) in &visible {
                 if let Some(mesh) = &section.cutout {
@@ -561,7 +546,6 @@ impl Renderer {
             }
             self.drawn_sections = visible.len() as u32;
 
-            // После рельефа: глубина `LessEqual` без записи прячет рёбра за блоками.
             if self.outline_block.is_some() {
                 pass.set_pipeline(&self.outline_pipeline);
                 pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
@@ -569,19 +553,18 @@ impl Renderer {
                 counts.draw_calls += 1;
             }
 
-            // Небо закрашивает только пустые пиксели (глубина 1.0), поэтому после рельефа и
-            // рамки, но до воды: вода смешивается уже с небом. Под водой неба нет, фон —
-            // подводный цвет.
-            if !params.underwater {
+            if params.eye_fluid.is_none() {
                 pass.set_pipeline(&self.sky_pipeline);
                 pass.draw(0..3, 0..1);
                 counts.draw_calls += 1;
             }
 
-            // Вода — последней и от дальних секций к ближним: глубину она не пишет,
-            // и смешение верно, только если ближняя вода ложится поверх дальней.
-            // Внутри секции грани не сортируются: цвет у воды один, и разница почти
-            // не видна.
+            if params.clouds && params.eye_fluid.is_none() {
+                pass.set_pipeline(&self.cloud_pipeline);
+                pass.draw(0..CLOUD_VERTICES, 0..CLOUD_INSTANCES);
+                counts.draw_calls += 1;
+            }
+
             let water: Vec<&GpuMesh> = visible
                 .iter()
                 .rev()
@@ -589,7 +572,6 @@ impl Renderer {
                 .collect();
             if !water.is_empty() {
                 pass.set_pipeline(&self.water_pipeline);
-                // Рамка заняла вершинный буфер 0, а её layout без арены: ставим всё обратно.
                 pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
                 pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
                 for mesh in water {
@@ -610,7 +592,6 @@ impl Renderer {
         }))
     }
 
-    /// Отправляет записанный кадр и показывает его.
     pub fn submit(&mut self, pending: PendingFrame) {
         self.queue.submit([pending.encoder.finish()]);
         if let (Some(timer), Some(slot)) = (&self.gpu_timer, pending.timer_slot) {

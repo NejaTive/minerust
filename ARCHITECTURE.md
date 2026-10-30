@@ -44,13 +44,13 @@ Composables без Pinia — модульные синглтоны: `useSettings
 
 ## Проверки
 
-- Rust (из `engine/`): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo clippy --target wasm32-unknown-unknown -- -D warnings`, `cargo test`.
-- Клиент: `npm run wasm`, затем `npx vue-tsc -b`, `npm run format:check`, `npm run lint`, `npm test`. То же делает CI (задачи `rust` и `web`).
+Команды перед сдачей — в `.claude/rules/code/checks.md` (то же, что CI: задачи `rust` и `web`).
+
 - `src/settings/blocks.fixture.json` — копия `blocks()` для тестов без wasm. Rust-тест `js_fixture_matches_blocks` падает при расхождении; обновить: `UPDATE_FIXTURES=1 cargo test -p engine js_fixture`.
 
 ## Рецепты
 
-**Новый блок.** Вариант в `Block` и запись в `Block::ALL` и `BLOCKS` — в конец (номера блока — часть формата сохранения), тайл (см. ниже). Обновить фикстуру. Чтобы блок можно было ставить, добавить имя в `HOTBAR` (`settings/hotbar.ts`); тест проверит имя по фикстуре. Подпись для HUD берётся из `BlockDef.label`.
+**Новый блок.** Вариант в `Block` и запись в `Block::ALL` и `BLOCKS` — в конец (номера блока — часть формата сохранения), тайл (см. ниже). Обновить фикстуру. Размещаемые блоки попадают в креатив-инвентарь по `placeable`; умолчание хотбара (`DEFAULT_HOTBAR` в `settings/hotbar.ts`) — пустые слоты. Подпись для HUD берётся из `BlockDef.label`.
 
 **Новый тайл.** PNG 16×16 в `engine/crates/world/assets/textures/<имя_в_snake_case>.png`, вариант в `Tile` и в `ALL` (`world/src/tile.rs`); блок ссылается на него в `BLOCKS`. Атлас и иконки хотбара подхватят тайл сами.
 

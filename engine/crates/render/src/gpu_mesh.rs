@@ -8,7 +8,6 @@ use crate::arena::{QuadArena, WORD};
 use crate::quad_indices::{INDICES_PER_QUAD, QuadIndices};
 use crate::slots::SlotBuffer;
 
-/// Общие буферы мешей: записи квадов всех секций, слоты мешей и индексы квадов.
 pub(crate) struct SceneBuffers {
     pub(crate) arena: QuadArena,
     pub(crate) slots: SlotBuffer,
@@ -24,31 +23,23 @@ impl SceneBuffers {
         }
     }
 
-    /// Размер буферов на GPU, байт.
     pub(crate) fn bytes(&self) -> u64 {
         self.arena.capacity() + self.slots.bytes() + self.indices.bytes()
     }
 
-    /// Занято мешами и слотами, байт.
     pub(crate) fn used_bytes(&self) -> u64 {
-        // Индексный шаблон занят целиком: свободных мест в нём нет.
         self.arena.used() + self.slots.used_bytes() + self.indices.bytes()
     }
 }
 
-/// Записи квадов одного меша в арене и его слот.
 pub(crate) struct GpuMesh {
-    /// Смещение в арене, байт; кратно слову.
     offset: u64,
     bytes: u64,
     pub(crate) quad_count: u32,
-    /// Слот в [`SlotBuffer`]: угол секции и начало записей; он же `first_instance`.
     slot: u32,
 }
 
 impl GpuMesh {
-    /// `Ok(None)` для пустого меша: диапазон нулевого размера не нужен. `min` — нижний
-    /// угол секции в мире.
     pub(crate) fn upload(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -86,9 +77,6 @@ impl GpuMesh {
         buffers.slots.free(self.slot);
     }
 
-    /// Пайплайн, арена (bind group), буфер слотов и индексы квадов уже выставлены. Индексы
-    /// общие, `base_vertex` нулевой: квады меша нумеруются с нуля; слот — `first_instance`,
-    /// по нему вершинный шейдер берёт угол секции и начало записей меша.
     pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.draw_indexed(
             0..INDICES_PER_QUAD * self.quad_count,
@@ -98,18 +86,15 @@ impl GpuMesh {
     }
 }
 
-/// Меши одной секции на GPU по проходам; хотя бы один не `None`.
 pub(crate) struct SectionMesh {
     pub(crate) solid: Option<GpuMesh>,
     pub(crate) cutout: Option<GpuMesh>,
     pub(crate) water: Option<GpuMesh>,
-    /// Коробка секции целиком в мировых координатах — для отсечения по пирамиде.
     pub(crate) min: Vec3,
     pub(crate) max: Vec3,
 }
 
 impl SectionMesh {
-    /// Возвращает диапазоны и слоты секции буферам.
     pub(crate) fn release(self, buffers: &mut SceneBuffers) {
         for mesh in [self.solid, self.cutout, self.water].into_iter().flatten() {
             mesh.free(buffers);
@@ -117,12 +102,8 @@ impl SectionMesh {
     }
 }
 
-/// Меши секций колонки снизу вверх; `None` — секция без видимых граней. Номер
-/// секции нужен, чтобы после правки блока перестроить одну её, а не всю колонку.
 pub(crate) type ColumnMeshes = [Option<SectionMesh>; COLUMN_SECTIONS as usize];
 
-/// `min` — нижний угол секции в мире. `Ok(None)` для секции без граней. При ошибке
-/// (буфер на пределе) всё уже выделенное возвращается.
 pub(crate) fn upload_section(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -131,7 +112,6 @@ pub(crate) fn upload_section(
     min: Vec3,
 ) -> Result<Option<SectionMesh>, String> {
     let meshes = [&data.solid, &data.cutout, &data.water];
-    // Индексы сначала: они не привязаны к мешу, и при ошибке откатывать нечего.
     let most = meshes.iter().map(|m| m.quads.len()).max().unwrap_or(0);
     buffers.indices.ensure(
         device,

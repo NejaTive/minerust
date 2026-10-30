@@ -1,6 +1,6 @@
 use super::*;
 
-const ALL: [Block; 13] = Block::ALL;
+const ALL: [Block; 17] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -8,7 +8,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(13), Err(13));
+    assert_eq!(Block::try_from(17), Err(17));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -30,7 +30,7 @@ fn selectable_by_name() {
     assert_eq!(Block::from_name("leaves"), Some(Block::Leaves));
     assert_eq!(Block::from_name("glowstone"), Some(Block::Glowstone));
     assert_eq!(Block::from_name("air"), None);
-    assert_eq!(Block::from_name("water"), None);
+    assert_eq!(Block::from_name("water"), Some(Block::Water));
     assert_eq!(Block::from_name("Stone"), None);
 }
 
@@ -41,7 +41,6 @@ fn icon_is_side_face() {
     assert_eq!(Block::Log.icon_pixels(), pixels(Tile::LogSide));
     assert_eq!(Block::Stone.icon_pixels(), pixels(Tile::Stone));
     assert_eq!(Block::Air.icon_pixels(), None);
-    // Зелёная кайма сверху и земля ниже: иконка травы не сплошная.
     let grass = Block::Grass.icon_pixels().unwrap();
     let (top, bottom) = (&grass[..3], &grass[grass.len() - 4..][..3]);
     assert_ne!(top, bottom);
@@ -54,9 +53,12 @@ fn solid_and_opaque() {
             block,
             Block::TallGrass | Block::Poppy | Block::Dandelion | Block::Torch
         );
-        let solid = !matches!(block, Block::Air | Block::Water) && !plant;
+        let solid = !matches!(block, Block::Air | Block::Water | Block::Lava) && !plant;
         assert_eq!(block.is_solid(), solid, "{block:?}");
-        let opaque = !matches!(block, Block::Air | Block::Leaves | Block::Water) && !plant;
+        let opaque = !matches!(
+            block,
+            Block::Air | Block::Leaves | Block::Water | Block::Lava
+        ) && !plant;
         assert_eq!(block.is_targetable(), solid || plant, "{block:?}");
         assert_eq!(block.needs_support(), plant, "{block:?}");
         assert_eq!(block.is_opaque(), opaque, "{block:?}");
@@ -90,16 +92,19 @@ fn log_has_rings_on_ends_and_bark_on_sides() {
 
 #[test]
 fn bounds_follow_shape() {
-    assert_eq!(Block::Stone.bounds(), (Vec3::ZERO, Vec3::ONE));
-    assert_eq!(Block::Poppy.bounds(), (Vec3::ZERO, Vec3::ONE));
-    let (lo, hi) = Block::Torch.bounds();
+    assert_eq!(Block::Stone.bounds(0), (Vec3::ZERO, Vec3::ONE));
+    assert_eq!(Block::Poppy.bounds(0), (Vec3::ZERO, Vec3::ONE));
+    let (lo, hi) = Block::Torch.bounds(0);
     assert_eq!((lo.x, hi.x, hi.y), (7.0 / 16.0, 9.0 / 16.0, 10.0 / 16.0));
 }
 
 #[test]
 fn replaceable_cells() {
     for block in ALL {
-        let expected = matches!(block, Block::Air | Block::Water | Block::TallGrass);
+        let expected = matches!(
+            block,
+            Block::Air | Block::Water | Block::Lava | Block::TallGrass
+        );
         assert_eq!(block.is_replaceable(), expected, "{block:?}");
     }
 }
@@ -170,11 +175,90 @@ fn air_has_no_tiles_and_others_have_all() {
 fn support_is_for_non_solid_blocks() {
     for def in &BLOCKS {
         assert!(!(def.needs_support && def.solid), "{}", def.name);
-        // Непрозрачный блок обязан быть твёрдым кубом.
         assert!(
             !def.opaque || def.solid && def.shape == Shape::Cube,
             "{}",
             def.name
         );
     }
+}
+
+#[test]
+fn wall_torch_bounds_lean_away_from_the_wall() {
+    use crate::block::{ATTACH_NEG_X, ATTACH_POS_X, ATTACH_POS_Z};
+    let u = 1.0 / 16.0;
+    let (lo, hi) = Block::Torch.bounds(ATTACH_NEG_X);
+    assert_eq!((lo.x, hi.x, lo.y, hi.y), (0.0, 6.0 * u, 3.0 * u, 13.0 * u));
+    assert_eq!((lo.z, hi.z), (7.0 * u, 9.0 * u));
+    let (lo, hi) = Block::Torch.bounds(ATTACH_POS_X);
+    assert_eq!((lo.x, hi.x), (10.0 * u, 1.0));
+    let (lo, hi) = Block::Torch.bounds(ATTACH_POS_Z);
+    assert_eq!((lo.z, hi.z), (10.0 * u, 1.0));
+    assert_eq!((lo.x, hi.x), (7.0 * u, 9.0 * u));
+    assert_eq!(Block::Torch.bounds(77), Block::Torch.bounds(0));
+}
+
+#[test]
+fn support_direction_by_block() {
+    use crate::block::ATTACH_POS_Z;
+    assert_eq!(Block::Stone.support_dir(0), None);
+    assert_eq!(Block::Poppy.support_dir(3), Some(IVec3::NEG_Y));
+    assert_eq!(Block::Torch.support_dir(0), Some(IVec3::NEG_Y));
+    assert_eq!(Block::Torch.support_dir(ATTACH_POS_Z), Some(IVec3::Z));
+    assert_eq!(Block::Torch.support_dir(200), Some(IVec3::NEG_Y));
+}
+
+#[test]
+fn only_log_torch_and_water_use_data() {
+    for block in ALL {
+        let expected = match block {
+            Block::Log => DataKind::Axis,
+            Block::Torch => DataKind::Attachment,
+            Block::Water | Block::Lava => DataKind::Fluid,
+            _ => DataKind::None,
+        };
+        assert_eq!(block.data_kind(), expected, "{block:?}");
+    }
+}
+
+#[test]
+fn fluid_heights_fall_with_level_and_falling_is_full() {
+    use crate::block::{FLUID_FALLING, FLUID_MAX_LEVEL, FLUID_SOURCE, fluid_height_units};
+    assert_eq!(fluid_height_units(FLUID_SOURCE), 14);
+    assert_eq!(fluid_height_units(FLUID_MAX_LEVEL), 2);
+    let heights: Vec<u8> = (0..=FLUID_MAX_LEVEL).map(fluid_height_units).collect();
+    assert!(
+        heights.windows(2).all(|pair| pair[0] > pair[1]),
+        "{heights:?}"
+    );
+    assert_eq!(fluid_height_units(FLUID_FALLING), 16);
+    assert_eq!(fluid_height_units(FLUID_FALLING | 3), 16);
+}
+
+#[test]
+fn water_is_placed_as_source() {
+    assert_eq!(Block::Water.placement_data(IVec3::Y), Some(0));
+    assert_eq!(Block::Water.placement_data(IVec3::NEG_X), Some(0));
+}
+
+#[test]
+fn water_has_icon_for_the_palette() {
+    let icon = Block::Water.icon_pixels().expect("water icon");
+    assert_eq!(icon.len(), 16 * 16 * 4);
+}
+
+#[test]
+fn lava_is_an_emissive_fluid_and_hardened_blocks_are_cubes() {
+    assert_eq!(Block::Lava.fluid(), Some(FluidKind::Lava));
+    assert_eq!(Block::Water.fluid(), Some(FluidKind::Water));
+    assert_eq!(Block::Stone.fluid(), None);
+    assert_eq!(FluidKind::Lava.block(), Block::Lava);
+    assert_eq!(Block::Lava.emission(), 15);
+    assert!(!Block::Lava.is_solid() && !Block::Lava.is_targetable());
+    for block in [Block::Obsidian, Block::Cobblestone] {
+        assert!(block.is_solid() && block.is_opaque(), "{block:?}");
+    }
+    assert_eq!(Block::from_name("lava"), Some(Block::Lava));
+    assert_eq!(Block::from_name("obsidian"), Some(Block::Obsidian));
+    assert_eq!(Block::from_name("cobblestone"), Some(Block::Cobblestone));
 }

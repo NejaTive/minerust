@@ -3,7 +3,6 @@ import { JOBS_PER_WORKER, pickWorker, slotsFor, workerCount } from './mesh-pool-
 
 declare global {
   interface Window {
-    /** Живых воркеров мешера: проверка из консоли, что «Новый мир» их не копит. */
     __meshWorkers?: number
   }
 }
@@ -18,11 +17,6 @@ type WorkerMessage =
   | { type: 'ready' }
   | { type: 'result'; buffer: ArrayBuffer; ms: number }
 
-/**
- * Пул воркеров мешера. Движок сам кодирует задания в своём бюджете кадра
- * (`take_mesh_job`), пул только раздаёт их воркерам и возвращает результаты
- * (`submit_mesh_result`); ставит их на GPU и отсеивает устаревшие движок.
- */
 export class MeshPool {
   private readonly workers: Worker[] = []
   private readonly inFlight: number[] = []
@@ -45,7 +39,6 @@ export class MeshPool {
       if (this.disposed) return
       const message = event.data
       if (message.type === 'ready') {
-        // Слоты открываются по мере готовности: не загруженному воркеру задания не нужны.
         this.ready++
         this.engine.set_mesh_slots(slotsFor(this.ready))
       } else {
@@ -55,12 +48,10 @@ export class MeshPool {
     }
     worker.onerror = (event) => {
       console.error('mesh worker failed', event.message)
-      // Без воркера задания в полёте потерялись бы: движок строит их заново на месте.
       this.dispose()
     }
   }
 
-  /** Раздаёт воркерам задания, закодированные движком в последнем кадре. */
   pump() {
     if (this.disposed) return
     for (;;) {
@@ -73,7 +64,6 @@ export class MeshPool {
     }
   }
 
-  /** Останавливает воркеры; движок возвращается к мешу на месте. Безопасно вызывать повторно. */
   dispose() {
     if (this.disposed) return
     this.disposed = true
@@ -82,7 +72,7 @@ export class MeshPool {
     try {
       this.engine.set_mesh_slots(0)
     } catch {
-      // Движок уже освобождён: ему возвращаться не к чему.
+      return
     }
   }
 }

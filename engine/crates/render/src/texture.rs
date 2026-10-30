@@ -1,45 +1,26 @@
 use wgpu::util::DeviceExt;
-use world::tile::{LAYER_COUNT, TILE_SIZE, Tile, tile_pixels};
+use world::tile::{LAYER_COUNT, TILE_SIZE, Tile, animation_table, tile_frames};
 
-/// Мип-уровней на слой: 16 → 8 → 4 → 2 → 1.
 pub const MIP_LEVELS: u32 = TILE_SIZE.ilog2() + 1;
 
-/// Данные всех `LAYER_COUNT` слоёв в порядке `TextureDataOrder::LayerMajor`: для каждого
-/// слоя все его мип-уровни подряд, от 16×16 до 1×1. Пиксели RGBA8 sRGB, строки сверху
-/// вниз (v = 0 — верх тайла). Лишний выравнивающий слой, если есть, прозрачный.
 pub fn generate() -> Vec<u8> {
+    let frame_bytes = (TILE_SIZE * TILE_SIZE * 4) as usize;
     let mut data = Vec::new();
-    for layer in 0..LAYER_COUNT {
-        let mut level = match Tile::ALL.get(layer as usize) {
-            Some(&tile) => tile_pixels(tile),
-            None => vec![0; (TILE_SIZE * TILE_SIZE * 4) as usize],
-        };
-        let mut size = TILE_SIZE;
-        data.extend_from_slice(&level);
-        let cutout = Tile::ALL.get(layer as usize).is_some_and(|t| t.is_cutout());
-        while size > 1 {
-            level = downsample(&level, size, cutout);
-            size /= 2;
+    for tile in Tile::ALL {
+        for frame in tile_frames(tile).chunks_exact(frame_bytes) {
+            let mut level = frame.to_vec();
+            let mut size = TILE_SIZE;
             data.extend_from_slice(&level);
+            while size > 1 {
+                level = downsample(&level, size, tile.is_cutout());
+                size /= 2;
+                data.extend_from_slice(&level);
+            }
         }
     }
     data
 }
 
-/// Уровень вдвое меньше: каждый квадрат 2×2 → один пиксель. Цвет усредняется в
-/// линейном пространстве — среднее sRGB-байтов темнее настоящего, и вдали тайлы бы
-/// темнели.
-///
-/// Без `cutout` (вода) альфа — простое среднее: она и так полупрозрачная и
-/// смешивается пайплайном, порога нет.
-///
-/// С `cutout` (листва) цвет берётся только по непрозрачным пикселям, чтобы цвет дырок
-/// не просачивался, а альфа остаётся двоичной: 255, если непрозрачны хотя бы 2 из 4. Шейдер отбрасывает
-/// пиксели с альфой < 0.5, и при простом среднем покрытие таяло бы с каждым уровнем —
-/// кроны вдали «растворялись» бы. Большинство при 70% непрозрачных даёт ~92% на
-/// следующем уровне: вдали листва плотнее, а не прозрачнее. Масштабирование альфы под
-/// покрытие (как для травы с мягкой альфой) здесь лишнее: на уровнях 2×2 и 1×1 долю
-/// 70% всё равно не выразить, а двоичная альфа не зависит от того, где GPU смешает уровни.
 fn downsample(level: &[u8], size: u32, cutout: bool) -> Vec<u8> {
     let half = size / 2;
     let mut out = Vec::with_capacity((half * half * 4) as usize);
@@ -82,7 +63,6 @@ fn downsample(level: &[u8], size: u32, cutout: bool) -> Vec<u8> {
     out
 }
 
-/// Формулы sRGB (IEC 61966-2-1), те же, что применяет GPU для `*UnormSrgb`.
 fn srgb_to_linear(c: u8) -> f32 {
     let c = f32::from(c) / 255.0;
     if c <= 0.04045 {
@@ -101,7 +81,19 @@ fn linear_to_srgb(c: f32) -> u8 {
     (c * 255.0).round() as u8
 }
 
-/// Массив текстур блоков: по слою на тайл, с готовыми мип-уровнями.
+pub(crate) fn create_animation_table(device: &wgpu::Device) -> wgpu::Buffer {
+    let bytes: Vec<u8> = animation_table()
+        .into_iter()
+        .flatten()
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("animation"),
+        contents: &bytes,
+        usage: wgpu::BufferUsages::UNIFORM,
+    })
+}
+
 pub(crate) fn create_block_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,

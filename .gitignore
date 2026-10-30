@@ -4,5 +4,7 @@ target
 engine/pkg
 engine/pkg-worker
 .claude/
+.cursor/
+graphify-out/
 .DS_Store
 tsconfig.tsbuildinfo

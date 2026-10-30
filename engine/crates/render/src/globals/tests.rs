@@ -12,8 +12,10 @@ fn layout_matches_shader() {
         fog_start: 103.0,
         fog_color: Vec3::new(104.0, 105.0, 106.0),
         fog_end: 107.0,
-        underwater: 108.0,
+        eye_fluid: 108.0,
         darkness: 109.0,
+        anim_time: 110.0,
+        cloud_drift: 111.0,
         view_dir: Mat4::from_cols_array(&std::array::from_fn(|i| 200.0 + i as f32)),
         sun_dir: Vec3::new(300.0, 301.0, 302.0),
         night: 303.0,
@@ -21,9 +23,10 @@ fn layout_matches_shader() {
         warm: 307.0,
         horizon_tilt: 308.0,
         star_rotation: Vec2::new(309.0, 310.0),
+        cloud_color: Vec3::new(311.0, 312.0, 313.0),
     };
     let bytes = globals.to_bytes();
-    assert_eq!(bytes.len(), 224);
+    assert_eq!(bytes.len(), 240);
     assert_eq!(f32_at(&bytes, 0), 0.0);
     assert_eq!(f32_at(&bytes, 60), 15.0);
     assert_eq!(f32_at(&bytes, 64), 100.0);
@@ -34,7 +37,8 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 92), 107.0);
     assert_eq!(f32_at(&bytes, 96), 108.0);
     assert_eq!(f32_at(&bytes, 100), 109.0);
-    assert!(bytes[104..112].iter().all(|&b| b == 0));
+    assert_eq!(f32_at(&bytes, 104), 110.0);
+    assert_eq!(f32_at(&bytes, 108), 111.0);
     assert_eq!(f32_at(&bytes, 112), 200.0);
     assert_eq!(f32_at(&bytes, 172), 215.0);
     assert_eq!(f32_at(&bytes, 176), 300.0);
@@ -46,7 +50,11 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 208), 308.0);
     assert_eq!(f32_at(&bytes, 212), 309.0);
     assert_eq!(f32_at(&bytes, 216), 310.0);
-    assert!(bytes[220..].iter().all(|&b| b == 0));
+    assert_eq!(f32_at(&bytes, 220), 0.0);
+    assert_eq!(f32_at(&bytes, 224), 311.0);
+    assert_eq!(f32_at(&bytes, 228), 312.0);
+    assert_eq!(f32_at(&bytes, 232), 313.0);
+    assert!(bytes[236..].iter().all(|&b| b == 0));
 }
 
 #[test]
@@ -60,7 +68,6 @@ fn view_dir_recovers_pixel_direction() {
         let dir = (inverse * glam::Vec4::new(x, y, 1.0, 0.0))
             .truncate()
             .normalize();
-        // Точка на этом луче проецируется обратно в тот же пиксель.
         let clip = proj * view * (eye + dir * 10.0).extend(1.0);
         assert!((clip.x / clip.w - x).abs() < 1e-3, "{x} {y}");
         assert!((clip.y / clip.w - y).abs() < 1e-3, "{x} {y}");

@@ -14,6 +14,5 @@ fn vs_main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
-    // Почти чёрный: видно и на траве, и на камне, и на фоне неба.
     return vec4<f32>(0.02, 0.02, 0.02, 1.0);
 }

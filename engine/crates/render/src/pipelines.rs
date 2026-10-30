@@ -6,16 +6,11 @@ pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth3
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockPass {
-    /// Непрозрачные блоки: с записью глубины, без `discard`.
     Solid,
-    /// Листва, кресты, факел: с записью глубины, дырки через `discard`.
     Cutout,
     Water,
 }
 
-/// Пайплайн граней блоков. У воды смешение по альфе, глубина проверяется, но не
-/// пишется (вода не заслоняет воду за собой), и обе стороны граней: поверхность видна
-/// и из-под воды.
 pub(crate) fn create_block_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -70,7 +65,6 @@ pub(crate) fn create_block_pipeline(
     })
 }
 
-/// Пайплайн рамки вокруг блока под прицелом: линии поверх рельефа с тем же буфером глубины.
 pub(crate) fn create_outline_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -100,8 +94,6 @@ pub(crate) fn create_outline_pipeline(
             topology: wgpu::PrimitiveTopology::LineList,
             ..Default::default()
         },
-        // Рамка раздута над гранями, так что `LessEqual` показывает рёбра на видимых
-        // гранях и прячет те, что за блоком. Без записи: рамка не должна заслонять ничего.
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: Some(false),
@@ -115,8 +107,6 @@ pub(crate) fn create_outline_pipeline(
     })
 }
 
-/// Пайплайн неба: треугольник на дальней плоскости без буферов. `LessEqual` без записи
-/// глубины оставляет рельеф и рамку нетронутыми.
 pub(crate) fn create_sky_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -143,6 +133,50 @@ pub(crate) fn create_sky_pipeline(
             format: DEPTH_FORMAT,
             depth_write_enabled: Some(false),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+pub(crate) fn create_cloud_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let shader = shaders::module(device, "clouds", shaders::CLOUDS_SHADER);
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("clouds"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),

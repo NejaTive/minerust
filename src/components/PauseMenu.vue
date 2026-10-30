@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
+import { BENCH } from '../bench/config'
+import { pauseMenuEscAction } from '../input/lock-policy'
 import type { Settings, SettingsLimits } from '../settings/settings'
 import ConfirmScreen from './menu/ConfirmScreen.vue'
 import ControlsScreen from './menu/ControlsScreen.vue'
@@ -12,14 +14,11 @@ const props = defineProps<{
   screen: MenuScreen
   settings: Settings
   limits: SettingsLimits
-  /** Игра уже шла: вместо «Играть» — «Продолжить». */
   started: boolean
-  /** Движок грузится или пересоздаётся: играть и менять мир пока нельзя. */
   busy: boolean
-  /** Браузер отказал в захвате курсора. */
   lockFailed: boolean
-  /** В базе мир более новой версии игры: он не загружен, «Новый мир» его сотрёт. */
   newerSave: boolean
+  hasError: boolean
 }>()
 
 const emit = defineEmits<{
@@ -31,10 +30,17 @@ const emit = defineEmits<{
 
 const go = (screen: MenuScreen) => emit('update:screen', screen)
 
-// Браузер при захваченном курсоре забирает Esc себе, так что сюда он попадает только
-// из меню: из подменю — назад, из главного ничего (продолжить можно лишь кликом).
 function onKeyDown(e: KeyboardEvent) {
-  if (e.code === 'Escape' && props.screen !== 'main') go('main')
+  if (e.code !== 'Escape' || e.repeat) return
+  const action = pauseMenuEscAction({
+    started: props.started,
+    busy: props.busy,
+    hasError: props.hasError,
+    bench: BENCH,
+    onMainScreen: props.screen === 'main',
+  })
+  if (action === 'back-to-main') go('main')
+  else if (action === 'resume') emit('play')
 }
 
 onMounted(() => window.addEventListener('keydown', onKeyDown))

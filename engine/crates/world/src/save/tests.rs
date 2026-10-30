@@ -2,6 +2,8 @@ use super::*;
 use crate::pos::ColumnPos;
 use crate::terrain::Terrain;
 
+const HEADER: usize = 5;
+
 const BLOCKS: [Block; 13] = [
     Block::Air,
     Block::Grass,
@@ -21,6 +23,12 @@ const BLOCKS: [Block; 13] = [
 fn assert_same(a: &Column, b: &Column) {
     for i in 0..COLUMN_VOLUME {
         assert_eq!(a.get(position(i)), b.get(position(i)), "{}", position(i));
+        assert_eq!(
+            a.get_data(position(i)),
+            b.get_data(position(i)),
+            "data {}",
+            position(i)
+        );
     }
 }
 
@@ -46,15 +54,14 @@ fn position_covers_column_once() {
         assert!(Column::contains(p), "{p}");
         assert!(seen.insert(p.to_array()));
     }
-    // y внутри: соседние номера — соседние блоки одного вертикального столба.
     assert_eq!(position(1), IVec3::new(0, 1, 0));
     assert_eq!(position(WORLD_HEIGHT as usize), IVec3::new(0, 0, 1));
 }
 
 #[test]
 fn empty_and_solid_are_one_run() {
-    assert_eq!(round_trip(&Column::new()).len(), 4 + RUN_SIZE);
-    assert_eq!(round_trip(&filled(Block::Stone)).len(), 4 + RUN_SIZE);
+    assert_eq!(round_trip(&Column::new()).len(), HEADER + RUN_SIZE);
+    assert_eq!(round_trip(&filled(Block::Stone)).len(), HEADER + RUN_SIZE);
 }
 
 #[test]
@@ -66,15 +73,12 @@ fn generated_column_is_small() {
         ColumnPos::new(40, -3),
     ] {
         let bytes = round_trip(&terrain.generate(key));
-        // Рельеф даёт ~4 серии на столб (камень, земля, трава, воздух): ~3 КБ из 32;
-        // пещеры добавляют по паре серий в столбах, где проходят.
         assert!(bytes.len() < 8192, "{key}: {} bytes", bytes.len());
     }
 }
 
 #[test]
 fn random_blocks_round_trip() {
-    // xorshift: случайность без зависимостей и одинаковая при каждом запуске.
     let mut state = 0x2545_f491_u32;
     let mut column = Column::new();
     for i in 0..COLUMN_VOLUME {
@@ -88,9 +92,6 @@ fn random_blocks_round_trip() {
 
 #[test]
 fn reads_columns_saved_before_new_blocks() {
-    // Колонка в байтах, как её писала версия с блоками 0–3: камень, земля, трава,
-    // воздух в каждом столбе. Формат не менялся, новые номера просто стали допустимы.
-    // Версия записана литералом: тест должен читать именно v1 и после подъёма FORMAT_VERSION.
     let mut bytes = b"MRC".to_vec();
     bytes.push(1);
     let columns = SECTION_SIZE * SECTION_SIZE;
@@ -156,8 +157,6 @@ fn rejects_version_zero() {
 
 #[test]
 fn upgrade_applies_steps_from_the_saved_version() {
-    // Заглушка цепочки: каждая версия дописывает в тело свой номер. Так видно, какие
-    // шаги и в каком порядке прошли; первая настоящая миграция заменит эти функции.
     fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
         Ok([body, &[2]].concat())
     }
@@ -174,7 +173,6 @@ fn upgrade_applies_steps_from_the_saved_version() {
     assert_eq!(upgraded(3), Ok(vec![9]));
     assert_eq!(upgraded(0), Err(SaveError::UnsupportedVersion(0)));
     assert_eq!(upgraded(4), Err(SaveError::UnsupportedVersion(4)));
-    // Ошибка шага не теряется.
     let steps: [Migration; 1] = [broken];
     assert_eq!(upgrade(1, &[], &steps).err(), Some(SaveError::Truncated));
 }
@@ -191,7 +189,7 @@ fn current_version_body_is_not_copied() {
 #[test]
 fn rejects_unknown_block() {
     let mut bytes = encode_column(&filled(Block::Dirt));
-    bytes[4] = 200;
+    bytes[HEADER] = 200;
     assert_eq!(
         decode_column(&bytes).err(),
         Some(SaveError::UnknownBlock(200))
@@ -201,7 +199,6 @@ fn rejects_unknown_block() {
 #[test]
 fn rejects_truncated() {
     let bytes = round_trip(&Terrain::new(7).generate(ColumnPos::ZERO));
-    // Посреди серии и ровно без последней серии.
     assert_eq!(
         decode_column(&bytes[..bytes.len() - 1]).err(),
         Some(SaveError::Truncated)
@@ -219,13 +216,80 @@ fn rejects_extra_data() {
     bytes.push(0);
     assert_eq!(decode_column(&bytes).err(), Some(SaveError::Overflow));
 
-    // Пустая серия после полной колонки — тоже лишние данные.
     let mut bytes = encode_column(&Column::new());
     bytes.extend_from_slice(&[0, 0, 0]);
     assert_eq!(decode_column(&bytes).err(), Some(SaveError::Overflow));
 
-    // Серия длиннее остатка колонки.
     let mut bytes = encode_column(&Column::new());
-    bytes[5..7].copy_from_slice(&(COLUMN_VOLUME as u16 + 1).to_le_bytes());
+    bytes[HEADER + 1..HEADER + 3].copy_from_slice(&(COLUMN_VOLUME as u16 + 1).to_le_bytes());
     assert_eq!(decode_column(&bytes).err(), Some(SaveError::Overflow));
+}
+
+#[test]
+fn v1_column_migrates_with_zero_data() {
+    let mut bytes = b"MRC".to_vec();
+    bytes.push(1);
+    bytes.push(0);
+    bytes.extend_from_slice(&(COLUMN_VOLUME as u16).to_le_bytes());
+    let column = decode_column(&bytes).expect("v1 decodes");
+    assert!(column.section(0).data().is_none());
+    assert_eq!(encode_column(&column).len(), bytes.len() + 1);
+}
+
+#[test]
+fn column_without_data_costs_one_flag_byte_over_v1() {
+    let terrain = Terrain::new(1337);
+    for key in [ColumnPos::ZERO, ColumnPos::new(-7, 12)] {
+        let column = terrain.generate(key);
+        let v2 = encode_column(&column);
+        let migrated = v1_to_v2(&v2[4 + 1..]).expect("migrates");
+        assert_eq!(migrated, v2[4..]);
+        assert_eq!(v2[4], 0);
+    }
+}
+
+#[test]
+fn block_data_round_trips() {
+    let mut column = Column::new();
+    column.set_with_data(IVec3::new(2, 70, 3), Block::Log, 1);
+    column.set_with_data(IVec3::new(15, 127, 15), Block::Log, 2);
+    column.set_with_data(IVec3::new(0, 0, 0), Block::Torch, 4);
+    column.set(IVec3::new(5, 70, 5), Block::Log);
+    let bytes = round_trip(&column);
+    let back = decode_column(&bytes).expect("decodes");
+    assert_eq!(back.get_data(IVec3::new(2, 70, 3)), 1);
+    assert_eq!(back.get_data(IVec3::new(15, 127, 15)), 2);
+    assert_eq!(back.get_data(IVec3::new(0, 0, 0)), 4);
+    assert_eq!(back.get_data(IVec3::new(5, 70, 5)), 0);
+    assert_eq!(bytes[4], 1 | 1 << 4 | 1 << 7);
+    assert_eq!(
+        bytes.len(),
+        encode_column(&Column::new()).len() - RUN_SIZE + 3 * SECTION_VOLUME + runs_len(&bytes)
+    );
+}
+
+fn runs_len(bytes: &[u8]) -> usize {
+    bytes.len() - HEADER - bytes[4].count_ones() as usize * SECTION_VOLUME
+}
+
+#[test]
+fn zeroed_data_is_not_saved() {
+    let mut column = Column::new();
+    column.set_with_data(IVec3::new(1, 1, 1), Block::Log, 2);
+    column.set(IVec3::new(1, 1, 1), Block::Air);
+    assert_eq!(encode_column(&column), encode_column(&Column::new()));
+}
+
+#[test]
+fn rejects_truncated_section_data() {
+    let mut column = Column::new();
+    column.set_with_data(IVec3::new(1, 1, 1), Block::Log, 2);
+    let bytes = encode_column(&column);
+    assert_eq!(
+        decode_column(&bytes[..HEADER + 100]).err(),
+        Some(SaveError::Truncated)
+    );
+    let mut bytes = encode_column(&Column::new());
+    bytes[4] = 0xFF;
+    assert_eq!(decode_column(&bytes).err(), Some(SaveError::Truncated));
 }

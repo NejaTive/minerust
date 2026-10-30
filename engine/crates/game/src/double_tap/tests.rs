@@ -12,7 +12,6 @@ fn presses_outside_window_do_not_fire() {
     let mut tap = DoubleTap::new(0.3);
     assert!(!tap.press(1.0));
     assert!(!tap.press(1.4));
-    // Опоздавшее нажатие начинает новую пару.
     assert!(tap.press(1.6));
 }
 

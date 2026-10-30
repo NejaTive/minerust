@@ -42,12 +42,10 @@ fn surface_stays_in_range() {
             max = max.max(h);
         }
     }
-    // Рельеф не плоский и держится около заданного коридора.
     assert!(max - min > 30, "{min}..{max}");
     assert!(min > 20 && max < 110, "{min}..{max}");
 }
 
-/// Первый столбец биома `biome` выше пляжей при обходе от (0, 0) по диагонали с шагом 8.
 fn find_biome(terrain: &Terrain, biome: Biome) -> (i32, i32) {
     find_column(terrain, |x, z, w| {
         w.dominant() == biome && terrain.surface(x, z, w) > *BEACH.end()
@@ -55,7 +53,6 @@ fn find_biome(terrain: &Terrain, biome: Biome) -> (i32, i32) {
     .unwrap_or_else(|| panic!("no {biome:?}"))
 }
 
-/// Первый столбец при обходе по диагонали с шагом 8, для которого `pred` истинен.
 fn find_column(
     terrain: &Terrain,
     pred: impl Fn(i32, i32, BiomeWeights) -> bool,
@@ -72,10 +69,9 @@ fn low_ground_is_under_water() {
         w.dominant() != Biome::Desert && terrain.surface(x, z, w) < *BEACH.start()
     })
     .expect("no deep water");
-    // Проверка воды до WATER_LEVEL и воздуха выше — внутри ground_layers.
     let (top, layers) = ground_layers(&terrain, x, z);
     assert!(top < WATER_LEVEL);
-    assert_eq!(layers[0], Block::Dirt, "no grass under water");
+    assert_eq!(layers[0], Block::Gravel, "deep water floor is gravel");
     assert!(layers.iter().all(|&b| b != Block::Water));
 }
 
@@ -106,8 +102,6 @@ fn beaches_are_sand() {
     }
 }
 
-/// Блоки земли столбца (x, z) сверху вниз до камня, без деревьев. Над землёй
-/// проверяет воду до `WATER_LEVEL` и воздух выше.
 fn ground_layers(terrain: &Terrain, x: i32, z: i32) -> (i32, Vec<Block>) {
     let key = ColumnPos::new(x.div_euclid(16), z.div_euclid(16));
     let column = terrain.generate_ground(key);
@@ -186,7 +180,6 @@ fn all_biomes_within_2048_blocks() {
                 counts[terrain.biome_at(x, z) as usize] += 1;
             }
         }
-        // Каждый биом — не меньше 5% площади.
         let total: i32 = counts.iter().sum();
         assert!(
             counts.iter().all(|&c| c * 20 > total),
@@ -197,8 +190,6 @@ fn all_biomes_within_2048_blocks() {
 
 #[test]
 fn biome_borders_have_no_cliffs() {
-    // Перепад высоты между соседними столбцами: в переходной зоне (смешанные веса)
-    // и внутри леса — самого холмистого биома.
     let terrain = Terrain::new(1337);
     let pure = |w: BiomeWeights| [w.plains, w.desert, w.forest].contains(&1.0);
     let (mut border, mut forest, mut border_pairs) = (0, 0, 0);
@@ -227,4 +218,26 @@ fn biome_borders_have_no_cliffs() {
         border <= forest,
         "border step {border}, forest step {forest}"
     );
+}
+
+#[test]
+fn deep_water_floor_is_gravel() {
+    let terrain = Terrain::new(42);
+    let key = lake_key(&terrain);
+    let column = terrain.generate(key);
+    let origin = key.origin();
+    let mut deep = 0;
+    for z in 0..SECTION_SIZE {
+        for x in 0..SECTION_SIZE {
+            let surface = terrain.surface_height(origin.x + x, origin.z + z);
+            let top = column.get(IVec3::new(x, surface, z));
+            if WATER_LEVEL - surface > 2 {
+                deep += 1;
+                assert_eq!(top, Block::Gravel, "({x}, {z})");
+            } else {
+                assert_ne!(top, Block::Gravel, "({x}, {z})");
+            }
+        }
+    }
+    assert!(deep > 0);
 }

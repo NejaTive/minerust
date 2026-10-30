@@ -1,7 +1,5 @@
-/// Сторона тайла в пикселях.
 pub const TILE_SIZE: u32 = 16;
 
-/// Тайл текстуры блока; значение — номер слоя в массиве текстур.
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tile {
@@ -19,10 +17,14 @@ pub enum Tile {
     Poppy,
     Dandelion,
     Torch,
+    Gravel,
+    Lava,
+    Obsidian,
+    Cobblestone,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 14] = [
+    pub const ALL: [Tile; 18] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -37,13 +39,43 @@ impl Tile {
         Tile::Poppy,
         Tile::Dandelion,
         Tile::Torch,
+        Tile::Gravel,
+        Tile::Lava,
+        Tile::Obsidian,
+        Tile::Cobblestone,
     ];
 
-    pub fn layer(self) -> u32 {
-        self as u32
+    pub const fn frames(self) -> u32 {
+        match self {
+            Tile::Water | Tile::Lava => 16,
+            _ => 1,
+        }
     }
 
-    /// Тайл с дырками (двоичная альфа, мипы по большинству): листва, растения, факел.
+    pub fn fps(self) -> f32 {
+        match self {
+            Tile::Water => 10.0,
+            Tile::Lava => 5.0,
+            _ => 0.0,
+        }
+    }
+
+    pub fn scroll(self) -> f32 {
+        match self {
+            Tile::Water => 1.0,
+            Tile::Lava => 0.3,
+            _ => 0.0,
+        }
+    }
+
+    pub fn layer(self) -> u32 {
+        Tile::ALL
+            .iter()
+            .take_while(|&&t| t != self)
+            .map(|t| t.frames())
+            .sum()
+    }
+
     pub fn is_cutout(self) -> bool {
         matches!(
             self,
@@ -52,17 +84,30 @@ impl Tile {
     }
 }
 
-/// Сколько слоёв выделить на GPU: по слою на тайл.
-pub const LAYER_COUNT: u32 = Tile::ALL.len() as u32;
+pub const LAYER_COUNT: u32 = {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < Tile::ALL.len() {
+        sum += Tile::ALL[i].frames();
+        i += 1;
+    }
+    sum
+};
 
-/// Столбик факела в тайле: столбцы 7..9, строки 6..16 (10 из 16, как 2×10×2 в мешере).
-/// Договорённость с `torch.png`: мешер строит по ней коробку и верх, картинка обязана
-/// быть непрозрачной именно здесь (проверяет тест).
+pub fn animation_table() -> Vec<[f32; 4]> {
+    Tile::ALL
+        .iter()
+        .flat_map(|&t| {
+            let entry = [t.frames() as f32, t.fps(), t.scroll(), 0.0];
+            (0..t.frames()).map(move |_| entry)
+        })
+        .collect()
+}
+
 pub const TORCH_PIXELS: (u32, u32) = (7, 9);
 pub const TORCH_TOP_ROW: u32 = 6;
 
 impl Tile {
-    /// Имя файла в `engine/crates/world/assets/textures/`.
     fn file_name(self) -> String {
         let name = format!("{self:?}");
         let mut out = String::new();
@@ -75,8 +120,6 @@ impl Tile {
         out
     }
 
-    /// PNG тайла, вшитый в бинарник. Файлы лежат в `engine/crates/world/assets/textures/<имя_в_snake_case>.png`;
-    /// новый тайл — это PNG 16×16 плюс вариант в `Tile` и в `ALL`.
     pub fn png(self) -> &'static [u8] {
         macro_rules! files {
             ($($tile:ident => $file:literal),* $(,)?) => {
@@ -92,17 +135,21 @@ impl Tile {
             Stone => "stone", Sand => "sand", LogSide => "log_side", LogTop => "log_top",
             Leaves => "leaves", Water => "water", Glowstone => "glowstone",
             TallGrass => "tall_grass", Poppy => "poppy", Dandelion => "dandelion",
-            Torch => "torch",
+            Torch => "torch", Gravel => "gravel", Lava => "lava", Obsidian => "obsidian",
+            Cobblestone => "cobblestone",
         }
     }
 }
 
-/// Пиксели тайла 16×16 RGBA (sRGB, строки сверху вниз) — те же, что базовый уровень на GPU.
-/// Байты PNG берутся как есть, цветовые чанки (gAMA, sRGB, iCCP) игнорируются.
 pub fn tile_pixels(tile: Tile) -> Vec<u8> {
+    let mut frames = tile_frames(tile);
+    frames.truncate((TILE_SIZE * TILE_SIZE * 4) as usize);
+    frames
+}
+
+pub fn tile_frames(tile: Tile) -> Vec<u8> {
     let name = tile.file_name();
     let mut decoder = png::Decoder::new(std::io::Cursor::new(tile.png()));
-    // Палитра, grayscale и 16 бит, которые сохраняют редакторы, приводятся к RGBA8.
     decoder.set_transformations(
         png::Transformations::ALPHA | png::Transformations::EXPAND | png::Transformations::STRIP_16,
     );
@@ -114,8 +161,9 @@ pub fn tile_pixels(tile: Tile) -> Vec<u8> {
         .next_frame(&mut buf)
         .unwrap_or_else(|e| panic!("{name}.png: {e}"));
     assert!(
-        info.width == TILE_SIZE && info.height == TILE_SIZE,
-        "{name}.png: expected {TILE_SIZE}x{TILE_SIZE}, got {}x{}",
+        info.width == TILE_SIZE && info.height == TILE_SIZE * tile.frames(),
+        "{name}.png: expected {TILE_SIZE}x{}, got {}x{}",
+        TILE_SIZE * tile.frames(),
         info.width,
         info.height
     );

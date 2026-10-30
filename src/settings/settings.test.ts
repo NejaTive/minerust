@@ -20,6 +20,7 @@ const limits: SettingsLimits = {
 const defaults = defaultSettings({
   renderDistance: 8,
   ambientOcclusion: true,
+  clouds: true,
   mouseSensitivity: 1,
   fov: 70,
 })
@@ -36,6 +37,7 @@ describe('loadSettings', () => {
     const data = {
       [KEYS.renderDistance]: '12',
       [KEYS.ambientOcclusion]: 'false',
+      [KEYS.clouds]: 'false',
       [KEYS.mouseSensitivity]: '1.5',
       [KEYS.fov]: '90',
       [KEYS.showDebug]: 'true',
@@ -43,6 +45,7 @@ describe('loadSettings', () => {
     expect(load(data)).toEqual({
       renderDistance: 12,
       ambientOcclusion: false,
+      clouds: false,
       mouseSensitivity: 1.5,
       fov: 90,
       showDebug: true,
@@ -79,6 +82,7 @@ describe('loadSettings', () => {
   it('логические читаются строго по "true"', () => {
     expect(load({ [KEYS.ambientOcclusion]: '1' }).ambientOcclusion).toBe(false)
     expect(load({ [KEYS.showDebug]: 'yes' }).showDebug).toBe(false)
+    expect(load({ [KEYS.clouds]: '1' }).clouds).toBe(false)
   })
 
   it('чистит ключи убранных настроек', () => {

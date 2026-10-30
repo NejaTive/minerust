@@ -3,18 +3,17 @@ struct Globals {
     view_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
     fog_start: f32,
-    // Цвет неба у горизонта: он же цвет тумана, граница с дальним рельефом не видна.
     fog_color: vec3<f32>,
     fog_end: f32,
-    underwater: f32,
+    eye_fluid: f32,
     darkness: f32,
-    // Пиксель → направление взгляда в мире (без переноса камеры).
+    anim_time: f32,
+    cloud_drift: f32,
     view_dir: mat4x4<f32>,
     sun_dir: vec3<f32>,
     night: f32,
     zenith: vec3<f32>,
     warm: f32,
-    // Тангенс угла, на который край земли ниже горизонта; поворот звёзд (cos, sin).
     horizon_tilt: f32,
     star_cos: f32,
     star_sin: f32,
@@ -23,7 +22,6 @@ struct Globals {
 @group(0) @binding(0)
 var<uniform> globals: Globals;
 
-// Половина стороны диска — тангенс половины углового размера: солнце ~5.7°, луна ~4.6°.
 const SUN_HALF: f32 = 0.05;
 const MOON_HALF: f32 = 0.04;
 const SUN_COLOR: vec3<f32> = vec3<f32>(1.6, 1.45, 1.1);
@@ -31,7 +29,6 @@ const SUN_LOW_COLOR: vec3<f32> = vec3<f32>(1.7, 0.7, 0.3);
 const MOON_COLOR: vec3<f32> = vec3<f32>(0.75, 0.8, 0.9);
 // Как DUSK_SKY в daytime.rs (сверяет тест).
 const DUSK_COLOR: vec3<f32> = vec3<f32>(0.78, 0.32, 0.14);
-// Звёзды: ячеек на единичную сферу по радиусу (радиус сферы в ячейках) и доля занятых.
 const STAR_GRID: f32 = 48.0;
 const STAR_CHANCE: f32 = 0.12;
 // Радиус звезды в ячейках: меньше 0.25, иначе диск вылезет из своей ячейки и обрежется.
@@ -44,7 +41,6 @@ struct VertexOut {
 
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
-    // Один треугольник на весь экран: (-1,-1), (3,-1), (-1,3).
     let xy = vec2<f32>(f32((index << 1u) & 2u), f32(index & 2u)) * 2.0 - 1.0;
     var out: VertexOut;
     // z = w = 1: глубина 1.0, тест LessEqual проходит только там, где рельефа нет.
@@ -61,15 +57,12 @@ fn hash(cell: vec3<i32>) -> vec3<f32> {
     return vec3<f32>(h & vec3<u32>(0xffffffu)) / 16777216.0;
 }
 
-// Пятна на луне в пиксельном стиле: диск делится на сетку 8×8 квадратов, часть из них
-// темнее, как пиксели текстуры блока. uv диска от -1 до 1; 0 — светлая поверхность.
 fn moon_surface(uv: vec2<f32>) -> f32 {
     let cell = vec2<i32>(floor((clamp(uv, vec2<f32>(-1.0), vec2<f32>(0.999)) * 0.5 + 0.5) * 8.0));
     let h = hash(vec3<i32>(cell, 31)).x;
     return select(select(0.0, 0.4, h > 0.55), 0.9, h > 0.82);
 }
 
-// Звёзды в системе неба, повёрнутой вместе с солнцем вокруг оси z.
 fn stars(dir: vec3<f32>) -> f32 {
     let c = globals.star_cos;
     let s = globals.star_sin;
@@ -80,18 +73,13 @@ fn stars(dir: vec3<f32>) -> f32 {
     let footprint = length(fwidth(p));
     let h = hash(cell);
     let h2 = hash(cell + vec3<i32>(7919, 104729, 1299709));
-    // Центр в середине ячейки (0.25..0.75): диск целиком внутри.
     let center = vec3<f32>(cell) + 0.25 + 0.5 * h2;
-    // Не меньше ~1 пикселя, иначе звезда пропадает между пикселями и мерцает при повороте;
-    // яркость при расширении падает пропорционально площади.
     let radius = max(STAR_RADIUS, 0.8 * footprint);
     let falloff = 1.0 - smoothstep(0.0, radius, distance(p, center));
     let dim = (STAR_RADIUS * STAR_RADIUS) / (radius * radius);
     return select(0.0, falloff * falloff * dim * (0.5 + 1.5 * h.y), h.x <= STAR_CHANCE);
 }
 
-// Квадратный диск вокруг направления `light`. Возвращает (маска диска, ореол, u, v), где
-// u, v — координаты в диске от -1 до 1.
 fn square_body(dir: vec3<f32>, light: vec3<f32>, half_size: f32) -> vec4<f32> {
     let right = normalize(cross(vec3<f32>(0.0, 0.0, 1.0), light));
     let up = cross(light, right);
@@ -110,33 +98,19 @@ fn square_body(dir: vec3<f32>, light: vec3<f32>, half_size: f32) -> vec4<f32> {
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let dir = normalize((globals.view_dir * vec4<f32>(in.ndc, 1.0, 0.0)).xyz);
-    // Градиент от цвета тумана у края земли к зениту. Край земли виден ниже геометрического горизонта на угол ~высота глаз над водой / дальность
-    // тумана (`horizon_tilt` считает движок).
-    // Именно на нём рельеф растворяется в цвет тумана, поэтому градиент отсчитывается от
-    // него, а не от y = 0: иначе между краем земли и горизонтом остаётся плоская полоса цвета
-    // тумана, а над горизонтом начинается резкий подъём (виден как полоса при полёте высоко).
     let tilt = globals.horizon_tilt;
     let edge = -tilt / sqrt(1.0 + tilt * tilt);
     let height = clamp((dir.y - edge) / (1.0 - edge), 0.0, 1.0);
-    // Кривая с нулевым наклоном на горизонте: у pow(h, 0.55) наклон там бесконечен, и по линии
-    // горизонта виден излом. Выше она растёт быстро, чтобы небо темнело не только у зенита.
     var color = mix(globals.fog_color, globals.zenith, pow(smoothstep(0.0, 1.0, height), 0.6));
 
-    // Тёплое пятно у горизонта со стороны солнца; горизонтальное направление солнца
-    // ±x, но берём общее, чтобы не зависеть от плоскости дуги.
     let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
     let side = max(dot(normalize(dir.xz + vec2<f32>(1e-5)), sun_flat), 0.0);
-    // На самом горизонте и ниже пятна нет: там небо должно совпасть с цветом тумана, которым
-    // дальний рельеф растворяется (он без пятна), иначе виден шов по краю земли.
     let glow = globals.warm * pow(side, 3.0) * exp(-6.0 * height) * smoothstep(0.0, 0.07, height);
     color = mix(color, DUSK_COLOR * 1.3, clamp(glow, 0.0, 1.0));
 
-    // Светила прячет рельеф, а не геометрический горизонт: диск уходит за край земли.
     let above = smoothstep(edge - 0.06, edge - 0.03, dir.y);
     let sun = square_body(dir, globals.sun_dir, SUN_HALF);
     let moon = square_body(dir, -globals.sun_dir, MOON_HALF);
-    // Солнце гасит звёзды и луну рядом с собой: ореол тем сильнее, чем светлее небо.
-    // Низкое солнце краснее: тон от оранжевого у горизонта к тёплому белому с высотой.
     let sun_tint = mix(SUN_LOW_COLOR, SUN_COLOR, smoothstep(0.0, 0.4, globals.sun_dir.y));
     color += sun_tint * sun.y * 0.5 * above;
     color = mix(color, sun_tint, sun.x * above);
@@ -144,11 +118,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     color += MOON_COLOR * moon.y * 0.15 * above;
     color = mix(color, moon_color, moon.x * above * (1.0 - sun.x));
 
-    // Звёзды видны до края рельефа (как и светила), у самой земли чуть тусклее.
     let star_fade = globals.night * above * (0.4 + 0.6 * smoothstep(0.0, 0.3, dir.y));
     color += vec3<f32>(0.9, 0.95, 1.0) * stars(dir) * star_fade * clamp(1.0 - moon.x - 0.5 * moon.y, 0.0, 1.0);
-    // Градиент пологий, и в 8 битах он распадается на полосы. Шум в 1/255 по гамма-
-    // яркости (interleaved gradient noise, Jimenez) разбивает их.
     let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
     let encoded = pow(max(color, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2)) + (noise - 0.5) / 255.0;
     return vec4<f32>(pow(max(encoded, vec3<f32>(0.0)), vec3<f32>(2.2)), 1.0);

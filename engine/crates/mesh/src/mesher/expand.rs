@@ -1,11 +1,7 @@
-//! Развёртка записей квадов в вершины для тестов геометрии: то же, что делает вершинный
-//! шейдер по таблице шаблонов (`templates`), только на CPU.
-
 use crate::mesh::{POSITION_UNITS, light_brightness, quantize_shade};
 use crate::mesher::MeshData;
-use crate::templates::{AO_BRIGHTNESS, templates};
+use crate::templates::{AO_BRIGHTNESS, SIDE_TOP_CORNER, TOP_CORNER, templates};
 
-/// Вершина квада после развёртки. Позиция — шаги 1/16 блока от угла секции.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Vertex {
     position: [u16; 3],
@@ -16,12 +12,10 @@ pub struct Vertex {
 }
 
 impl Vertex {
-    /// Позиция в блоках от угла секции.
     pub fn position(self) -> [f32; 3] {
         self.position.map(|p| f32::from(p) / POSITION_UNITS as f32)
     }
 
-    /// UV в долях тайла.
     pub fn uv(self) -> [f32; 2] {
         self.uv.map(|c| f32::from(c) / POSITION_UNITS as f32)
     }
@@ -30,7 +24,6 @@ impl Vertex {
         self.shade
     }
 
-    /// Яркость стороны × AO, 0..=1, по квантованному байту.
     pub fn shade(self) -> f32 {
         f32::from(self.shade) / 255.0
     }
@@ -47,13 +40,11 @@ impl Vertex {
         self.light[1]
     }
 
-    /// Итоговая яркость 0..=1 при тьме неба `darkness`.
     pub fn brightness(self, darkness: f32) -> f32 {
         self.shade() * light_brightness(self.light[0], self.light[1], darkness)
     }
 }
 
-/// Вершины меша по четыре на квад, в порядке углов шаблона.
 pub fn vertices(data: &MeshData) -> Vec<Vertex> {
     data.quads
         .iter()
@@ -63,10 +54,18 @@ pub fn vertices(data: &MeshData) -> Vec<Vertex> {
             let quad = *quad;
             std::array::from_fn::<_, 4, _>(move |i| {
                 let corner = template.corners[i];
-                let [x, y, z] = corner.pos.map(u16::from);
+                let [x, mut y, z] = corner.pos.map(u16::from);
+                let mut uv = corner.uv;
+                if y == u16::from(TOP_CORNER) || y == u16::from(SIDE_TOP_CORNER) {
+                    let top = quad.heights()[i];
+                    if y == u16::from(SIDE_TOP_CORNER) {
+                        uv[1] = POSITION_UNITS as u8 - top;
+                    }
+                    y = u16::from(top);
+                }
                 Vertex {
                     position: [cx + x, cy + y, cz + z],
-                    uv: corner.uv,
+                    uv,
                     shade: quantize_shade(
                         template.shade * AO_BRIGHTNESS[usize::from(quad.ao()[i])],
                     ),
@@ -78,7 +77,6 @@ pub fn vertices(data: &MeshData) -> Vec<Vertex> {
         .collect()
 }
 
-/// Индексы двух треугольников каждого квада в `vertices(data)`.
 pub fn indices(data: &MeshData) -> Vec<u16> {
     data.quads
         .iter()

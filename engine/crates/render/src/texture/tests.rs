@@ -1,6 +1,6 @@
 use super::*;
+use world::tile::tile_pixels;
 
-/// Альфа во всех пикселях `water.png`: дно на глубине пары блоков ещё видно.
 const WATER_ALPHA: u8 = 180;
 
 fn layer_bytes() -> usize {
@@ -14,7 +14,6 @@ fn rgb(data: &[u8], tile: Tile, x: u32, y: u32) -> [u8; 3] {
     [data[i], data[i + 1], data[i + 2]]
 }
 
-/// Мип-уровень `level` тайла: RGBA-пиксели стороной `TILE_SIZE >> level`.
 fn mip(data: &[u8], tile: Tile, level: u32) -> &[u8] {
     let start = tile.layer() as usize * layer_bytes()
         + (0..level)
@@ -32,7 +31,6 @@ fn coverage(pixels: &[u8]) -> f32 {
 fn generates_every_layer_with_all_mips() {
     let data = generate();
     assert_eq!(MIP_LEVELS, 5);
-    // 16² + 8² + 4² + 2² + 1² = 341 пиксель на слой.
     assert_eq!(layer_bytes(), 341 * 4);
     assert_eq!(data.len(), LAYER_COUNT as usize * layer_bytes());
     for tile in Tile::ALL {
@@ -80,8 +78,6 @@ fn uniform_tile_keeps_color_down_to_1x1() {
 
 #[test]
 fn downsample_averages_in_linear_space() {
-    // Шахматка чёрного и белого: в линейном пространстве среднее 0.5 → sRGB ≈ 188,
-    // а не 128, как дало бы среднее байтов.
     let black = [0, 0, 0, 255];
     let white = [255, 255, 255, 255];
     let level = [white, black, black, white].concat();
@@ -114,8 +110,6 @@ fn leaves_keep_coverage_in_mips() {
 
 #[test]
 fn leaves_mips_stay_within_base_color_range() {
-    // Среднее в линейном пространстве по непрозрачным пикселям не выходит за диапазон
-    // непрозрачных пикселей базового уровня.
     let data = generate();
     let base: Vec<&[u8]> = mip(&data, Tile::Leaves, 0)
         .chunks(4)
@@ -137,12 +131,10 @@ fn leaves_mips_stay_within_base_color_range() {
 
 #[test]
 fn downsample_ignores_color_of_holes() {
-    // Две зелёные непрозрачные и две чёрные дырки: цвет зелёный, без потемнения.
     let green = [58, 118, 38, 255];
     let hole = [0, 0, 0, 0];
     let level = [green, hole, hole, green].concat();
     assert_eq!(downsample(&level, 2, true), green);
-    // Одна непрозрачная из четырёх — дырка.
     let level = [green, hole, hole, hole].concat();
     assert_eq!(downsample(&level, 2, true)[3], 0);
 }
@@ -151,7 +143,6 @@ fn downsample_ignores_color_of_holes() {
 fn translucent_downsample_averages_alpha() {
     let level = [[52, 98, 196, 180], [52, 98, 196, 100]].repeat(2).concat();
     assert_eq!(downsample(&level, 2, false), [52, 98, 196, 140]);
-    // Листва с той же альфой стала бы непрозрачной.
     assert_eq!(downsample(&level, 2, true)[3], 255);
 }
 
@@ -182,4 +173,27 @@ fn generate_timing() {
         std::hint::black_box(generate());
     }
     println!("generate: {:?} per call", start.elapsed() / 100);
+}
+
+#[test]
+fn every_frame_of_animated_tiles_gets_its_own_layer() {
+    let data = generate();
+    let frame_bytes = (TILE_SIZE * TILE_SIZE * 4) as usize;
+    for tile in [Tile::Water, Tile::Lava] {
+        let frames = tile_frames(tile);
+        assert_eq!(frames.len(), tile.frames() as usize * frame_bytes);
+        for (i, frame) in frames.chunks_exact(frame_bytes).enumerate() {
+            let layer = tile.layer() as usize + i;
+            let start = layer * layer_bytes();
+            assert_eq!(
+                &data[start..start + frame_bytes],
+                frame,
+                "{tile:?} frame {i}"
+            );
+        }
+        assert_ne!(
+            &frames[..frame_bytes],
+            &frames[frame_bytes..2 * frame_bytes]
+        );
+    }
 }

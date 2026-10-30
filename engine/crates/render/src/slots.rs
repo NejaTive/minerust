@@ -2,7 +2,6 @@ use mesh::mesh::{SLOT_BYTES, slot_bytes};
 
 use crate::arena::{grow_buffer, grown_capacity};
 
-/// Номера слотов без GPU: освобождённые переиспользуются раньше новых.
 pub(crate) struct SlotAllocator {
     capacity: u32,
     next: u32,
@@ -22,12 +21,10 @@ impl SlotAllocator {
         self.capacity
     }
 
-    /// Занято слотов.
     pub(crate) fn used(&self) -> u32 {
         self.next - self.free.len() as u32
     }
 
-    /// `None`, если слотов не осталось: нужен [`grow`](Self::grow).
     pub(crate) fn alloc(&mut self) -> Option<u32> {
         if let Some(slot) = self.free.pop() {
             return Some(slot);
@@ -48,18 +45,12 @@ impl SlotAllocator {
     }
 }
 
-/// Слоты мешей одним буфером экземпляров: слот меша — `first_instance` отрисовки
-/// ([`slot_layout`](crate::layout::slot_layout)), так что буфер ставится раз на проход. В слоте
-/// мировой угол секции и начало записей квадов меша в арене. Солид и вода одной секции
-/// занимают разные слоты: у каждого своё начало в арене.
 pub(crate) struct SlotBuffer {
     buffer: wgpu::Buffer,
     slots: SlotAllocator,
     max_slots: u32,
 }
 
-/// Мешей при дальности 12 — около 2500 (секции с водой дают два), при максимальной —
-/// вдвое-втрое больше; 4096 слотов — 64 КиБ, рост на 25% дешёв.
 const INITIAL_SLOTS: u32 = 4096;
 
 impl SlotBuffer {
@@ -88,17 +79,14 @@ impl SlotBuffer {
         &self.buffer
     }
 
-    /// Размер буфера, байт.
     pub(crate) fn bytes(&self) -> u64 {
         self.buffer.size()
     }
 
-    /// Занято байт слотами.
     pub(crate) fn used_bytes(&self) -> u64 {
         u64::from(self.slots.used()) * SLOT_BYTES as u64
     }
 
-    /// Слот с записанными углом `origin` и началом записей `first_word` (в словах `u32`).
     pub(crate) fn write(
         &mut self,
         device: &wgpu::Device,
