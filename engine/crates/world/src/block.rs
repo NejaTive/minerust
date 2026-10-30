@@ -115,6 +115,7 @@ pub struct BlockDef {
     pub replaceable: bool,
     pub needs_support: bool,
     pub falls: bool,
+    pub random_ticks: bool,
     pub data: DataKind,
     pub fluid: Option<FluidKind>,
     pub emission: u8,
@@ -136,6 +137,7 @@ impl BlockDef {
         replaceable: false,
         needs_support: false,
         falls: false,
+        random_ticks: false,
         data: DataKind::None,
         fluid: None,
         emission: 0,
@@ -186,9 +188,13 @@ pub const BLOCKS: [BlockDef; 17] = [
         top: Some(Tile::GrassTop),
         side: Some(Tile::GrassSide),
         bottom: Some(Tile::Dirt),
+        random_ticks: true,
         ..BlockDef::uniform("grass", "трава", Tile::Dirt)
     },
-    BlockDef::uniform("dirt", "земля", Tile::Dirt),
+    BlockDef {
+        random_ticks: true,
+        ..BlockDef::uniform("dirt", "земля", Tile::Dirt)
+    },
     BlockDef::uniform("stone", "камень", Tile::Stone),
     BlockDef {
         falls: true,
@@ -380,12 +386,20 @@ impl Block {
         self.def().opaque
     }
 
+    pub fn lights_like(self, other: Block) -> bool {
+        self.is_opaque() == other.is_opaque() && self.emission() == other.emission()
+    }
+
     pub fn emission(self) -> u8 {
         self.def().emission
     }
 
     pub fn falls(self) -> bool {
         self.def().falls
+    }
+
+    pub fn random_ticks(self) -> bool {
+        self.def().random_ticks
     }
 
     pub fn fluid(self) -> Option<FluidKind> {

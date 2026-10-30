@@ -118,6 +118,7 @@ impl Engine {
 
     pub fn apply_settings(&mut self, settings: &EngineSettings) {
         self.streamer.set_radius(settings.render_distance);
+        self.game.set_view_radius(settings.render_distance);
         self.streamer
             .set_ambient_occlusion(settings.ambient_occlusion, &self.game, &self.renderer);
         self.clouds = settings.clouds;

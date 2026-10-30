@@ -21,6 +21,9 @@ pub fn raycast(
     let step = IVec3::new(sign(dir.x), sign(dir.y), sign(dir.z));
     let t_delta = dir.abs().recip();
     let mut t_max = Vec3::from_array(std::array::from_fn(|axis| {
+        if dir[axis] == 0.0 {
+            return f32::INFINITY;
+        }
         let to_border = if dir[axis] > 0.0 {
             voxel[axis] as f32 + 1.0 - origin[axis]
         } else {
