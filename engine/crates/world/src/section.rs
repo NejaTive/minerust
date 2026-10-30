@@ -9,6 +9,7 @@ pub const SECTION_VOLUME: usize = 4096;
 pub struct Section {
     blocks: Box<[Block; SECTION_VOLUME]>,
     emitters: u16,
+    tickable: u16,
     data: Option<Box<[u8; SECTION_VOLUME]>>,
 }
 
@@ -17,6 +18,7 @@ impl Section {
         Self {
             blocks: Box::new([Block::Air; SECTION_VOLUME]),
             emitters: 0,
+            tickable: 0,
             data: None,
         }
     }
@@ -31,6 +33,10 @@ impl Section {
 
     pub fn emits_light(&self) -> bool {
         self.emitters > 0
+    }
+
+    pub fn has_random_ticks(&self) -> bool {
+        self.tickable > 0
     }
 
     pub fn get_index(&self, index: usize) -> Block {
@@ -80,6 +86,8 @@ impl Section {
         let slot = &mut self.blocks[index];
         self.emitters -= u16::from(slot.emission() > 0);
         self.emitters += u16::from(block.emission() > 0);
+        self.tickable -= u16::from(slot.random_ticks());
+        self.tickable += u16::from(block.random_ticks());
         *slot = block;
     }
 

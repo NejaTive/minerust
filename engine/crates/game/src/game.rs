@@ -8,12 +8,14 @@ use world::falling::Falling;
 use world::fluid::Fluid;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
+use world::random_ticks::{RandomTicks, STEP_TICKS};
 use world::terrain::Terrain;
 use world::world::{World, affected_sections};
 
 use crate::camera::Camera;
 use crate::daytime::{self, DayTime, SkyState};
 use crate::double_tap::DoubleTap;
+use crate::loader::DEFAULT_RADIUS;
 use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
@@ -34,6 +36,16 @@ pub struct Edits {
     pub lit: Vec<SectionPos>,
 }
 
+impl Edits {
+    fn new(dirty: HashSet<SectionPos>, lit: HashSet<SectionPos>) -> Self {
+        let lit = lit.into_iter().filter(|key| !dirty.contains(key)).collect();
+        Self {
+            dirty: dirty.into_iter().collect(),
+            lit,
+        }
+    }
+}
+
 pub struct Game {
     pub world: World,
     pub light: LightMap,
@@ -43,8 +55,11 @@ pub struct Game {
     lava_ticks: u32,
     falling: Falling,
     fall_ticks: u32,
+    random_ticks: RandomTicks,
+    random_tick_acc: u32,
+    view_radius: i32,
     pending_dirty: HashSet<SectionPos>,
-    pending_lit: Vec<SectionPos>,
+    pending_lit: HashSet<SectionPos>,
     pub terrain: Terrain,
     seed: i32,
     camera: Camera,
@@ -92,8 +107,11 @@ impl Game {
             lava_ticks: 0,
             falling: Falling::new(),
             fall_ticks: 0,
+            random_ticks: RandomTicks::new(seed),
+            random_tick_acc: 0,
+            view_radius: DEFAULT_RADIUS,
             pending_dirty: HashSet::new(),
-            pending_lit: Vec::new(),
+            pending_lit: HashSet::new(),
             terrain,
             seed,
             camera,
@@ -194,6 +212,10 @@ impl Game {
 
     pub fn day_phase(&self) -> &'static str {
         daytime::phase(self.day.fraction()).name()
+    }
+
+    pub fn set_view_radius(&mut self, radius: i32) {
+        self.view_radius = radius;
     }
 
     pub fn set_time_frozen(&mut self, frozen: bool) {
@@ -310,10 +332,7 @@ impl Game {
         let mut dirty = std::mem::take(&mut self.pending_dirty);
         let mut lit = std::mem::take(&mut self.pending_lit);
         if self.paused {
-            return Edits {
-                dirty: dirty.into_iter().collect(),
-                lit,
-            };
+            return Edits::new(dirty, lit);
         }
         let mut target = self.pick();
         if self.breaking.fire(time)
@@ -322,7 +341,7 @@ impl Game {
             && let changed = self.world.set_block_supported(hit.block, Block::Air)
             && !changed.is_empty()
         {
-            self.apply_edit(&changed, &mut dirty, &mut lit);
+            self.apply_edit(&changed, &[], &mut dirty, &mut lit);
             target = self.pick();
         }
         if self.placing.fire(time)
@@ -334,16 +353,12 @@ impl Game {
         {
             let changed = self.world.set_block_supported_with_data(pos, block, data);
             if !changed.is_empty() {
-                self.apply_edit(&changed, &mut dirty, &mut lit);
+                self.apply_edit(&changed, &[], &mut dirty, &mut lit);
                 target = self.pick();
             }
         }
         self.target = target.map(|hit| hit.block);
-        lit.retain(|key| !dirty.contains(key));
-        Edits {
-            dirty: dirty.into_iter().collect(),
-            lit,
-        }
+        Edits::new(dirty, lit)
     }
 
     pub fn target_block(&self) -> Option<(IVec3, Block, u8)> {
@@ -385,15 +400,18 @@ impl Game {
     fn apply_edit(
         &mut self,
         changed: &[IVec3],
+        light_neutral: &[IVec3],
         dirty: &mut HashSet<SectionPos>,
-        lit: &mut Vec<SectionPos>,
+        lit: &mut HashSet<SectionPos>,
     ) {
         for &pos in changed {
             self.fluid.block_changed(&self.world, pos);
             self.lava.block_changed(&self.world, pos);
             self.falling.block_changed(&self.world, pos);
             dirty.extend(affected_sections(pos));
-            lit.extend(self.light.block_changed(&self.world, pos));
+            if !light_neutral.contains(&pos) {
+                lit.extend(self.light.block_changed(&self.world, pos));
+            }
         }
     }
 
@@ -409,6 +427,7 @@ impl Game {
         self.advance_fluid(ticks);
         self.advance_lava(ticks);
         self.advance_falling(ticks);
+        self.advance_random_ticks(ticks * factor);
         for _ in 0..ticks {
             if !self.body_loaded() {
                 self.clock.reset();
@@ -457,12 +476,28 @@ impl Game {
         }
     }
 
+    fn advance_random_ticks(&mut self, ticks: u32) {
+        self.random_tick_acc += ticks;
+        let center = self.camera_column();
+        while self.random_tick_acc >= STEP_TICKS {
+            self.random_tick_acc -= STEP_TICKS;
+            let ticked =
+                self.random_ticks
+                    .step(&mut self.world, &self.light, center, self.view_radius);
+            self.apply_pending_with(&ticked.changed, &ticked.light_neutral);
+        }
+    }
+
     fn apply_pending(&mut self, changed: &[IVec3]) {
+        self.apply_pending_with(changed, &[]);
+    }
+
+    fn apply_pending_with(&mut self, changed: &[IVec3], light_neutral: &[IVec3]) {
         let (mut dirty, mut lit) = (
             std::mem::take(&mut self.pending_dirty),
             std::mem::take(&mut self.pending_lit),
         );
-        self.apply_edit(changed, &mut dirty, &mut lit);
+        self.apply_edit(changed, light_neutral, &mut dirty, &mut lit);
         (self.pending_dirty, self.pending_lit) = (dirty, lit);
     }
 

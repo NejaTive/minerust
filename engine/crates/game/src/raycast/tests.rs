@@ -111,3 +111,16 @@ fn degenerate_input_is_none() {
     assert_eq!(raycast(Vec3::NAN, Vec3::X, 6.0, solid), None);
     assert_eq!(raycast(Vec3::ZERO, Vec3::X, f32::NAN, solid), None);
 }
+
+#[test]
+fn axis_ray_from_block_corner_terminates() {
+    let hit = raycast(
+        Vec3::new(4.0, 6.0, 4.0),
+        Vec3::NEG_Y,
+        10.0,
+        blocks(&[[4, 2, 4]]),
+    )
+    .unwrap();
+    assert_eq!(hit.block, IVec3::new(4, 2, 4));
+    assert!(raycast(Vec3::new(4.0, 6.0, 4.0), Vec3::NEG_Y, 10.0, |_| false).is_none());
+}
