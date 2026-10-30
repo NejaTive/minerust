@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use glam::{IVec3, Vec3};
 use world::block::{Block, FLUID_SOURCE, FluidKind};
+use world::clouds::cloud_drift;
 use world::column::{Column, WORLD_HEIGHT};
 use world::falling::Falling;
 use world::fluid::Fluid;
@@ -52,6 +53,7 @@ pub struct Game {
     clock: Clock,
     day: DayTime,
     anim_ticks: u64,
+    cloud_ticks: u64,
     time_frozen: bool,
     time_fast: bool,
     space_tap: DoubleTap,
@@ -100,6 +102,7 @@ impl Game {
             clock: Clock::default(),
             day: DayTime::default(),
             anim_ticks: 0,
+            cloud_ticks: 0,
             time_frozen: false,
             time_fast: false,
             space_tap: DoubleTap::new(DOUBLE_TAP_S),
@@ -175,6 +178,10 @@ impl Game {
 
     pub fn anim_time(&self) -> f32 {
         (self.anim_ticks as f64 * f64::from(TICK)) as f32
+    }
+
+    pub fn cloud_drift(&self) -> f32 {
+        cloud_drift(self.cloud_ticks as f64 * f64::from(TICK))
     }
 
     pub fn time_of_day(&self) -> f32 {
@@ -394,8 +401,9 @@ impl Game {
         let input = self.input();
         let ticks = self.clock.advance(dt);
         self.anim_ticks += u64::from(ticks);
+        let factor = if self.time_fast { TIME_FAST_FACTOR } else { 1 };
+        self.cloud_ticks += u64::from(ticks * factor);
         if !self.time_frozen {
-            let factor = if self.time_fast { TIME_FAST_FACTOR } else { 1 };
             self.day.advance(ticks * factor);
         }
         self.advance_fluid(ticks);

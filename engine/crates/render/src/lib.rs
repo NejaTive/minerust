@@ -1,4 +1,5 @@
 mod arena;
+mod clouds;
 pub mod fog;
 mod frustum;
 mod globals;

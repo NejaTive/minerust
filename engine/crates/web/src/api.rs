@@ -90,6 +90,7 @@ pub struct EngineSettings {
     pub render_distance: i32,
     #[wasm_bindgen(js_name = ambientOcclusion)]
     pub ambient_occlusion: bool,
+    pub clouds: bool,
     #[wasm_bindgen(js_name = mouseSensitivity)]
     pub mouse_sensitivity: f32,
     pub fov: f32,
@@ -101,12 +102,14 @@ impl EngineSettings {
     pub fn new(
         render_distance: i32,
         ambient_occlusion: bool,
+        clouds: bool,
         mouse_sensitivity: f32,
         fov: f32,
     ) -> EngineSettings {
         EngineSettings {
             render_distance,
             ambient_occlusion,
+            clouds,
             mouse_sensitivity,
             fov,
         }
@@ -118,6 +121,7 @@ pub fn default_settings() -> EngineSettings {
     EngineSettings {
         render_distance: DEFAULT_RADIUS,
         ambient_occlusion: MeshOptions::default().ambient_occlusion,
+        clouds: true,
         mouse_sensitivity: DEFAULT_SENSITIVITY,
         fov: DEFAULT_FOV,
     }

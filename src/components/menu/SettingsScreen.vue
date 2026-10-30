@@ -41,6 +41,16 @@ function checkedOf(e: Event): boolean {
       />
     </label>
 
+    <label class="row toggle">
+      <span class="name">Облака</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.clouds"
+        @change="patch({ clouds: checkedOf($event) })"
+      />
+    </label>
+
     <label class="row">
       <span class="name">Чувствительность мыши</span>
       <span class="value">×{{ settings.mouseSensitivity.toFixed(2) }}</span>

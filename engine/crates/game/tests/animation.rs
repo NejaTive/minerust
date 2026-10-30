@@ -25,3 +25,14 @@ fn anim_time_grows_with_ticks_and_stops_on_pause() {
     run(&mut game, time, 1.0);
     assert!(game.anim_time() > running + 0.4);
 }
+
+#[test]
+fn clouds_drift_faster_when_time_is_fast() {
+    let mut normal = Game::new(1, None).unwrap();
+    let mut fast = Game::new(1, None).unwrap();
+    fast.set_time_fast(true);
+    run(&mut normal, 0.0, 1.0);
+    run(&mut fast, 0.0, 1.0);
+    assert!(normal.cloud_drift() > 0.0);
+    assert!(fast.cloud_drift() > normal.cloud_drift() * 10.0);
+}

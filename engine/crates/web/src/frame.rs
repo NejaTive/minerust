@@ -16,7 +16,7 @@ const LAVA_FOG: Fog = Fog {
 };
 const LAVA_COLOR: [f32; 3] = [0.784, 0.314, 0.102];
 
-pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32) -> FrameParams {
+pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32, clouds: bool) -> FrameParams {
     let camera = game.camera();
     let fog = Fog::for_radius(radius);
     let view_proj = camera.view_proj(aspect, fog.far_plane(camera.position.y), game.fov_scale());
@@ -39,11 +39,13 @@ pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32) -> FrameParams
         eye_fluid,
         darkness: sky.darkness,
         anim_time: game.anim_time(),
+        cloud_drift: game.cloud_drift(),
         sun_dir: Vec3::from(game.sun_direction()),
         night: sky.night,
         zenith: Vec3::from(sky.zenith),
         warm: sky.warm,
         horizon_tilt: (camera.position.y - (WATER_LEVEL + 1) as f32).max(0.0) / fog.end.max(1.0),
         star_rotation: Vec2::from(game.star_rotation()),
+        clouds,
     }
 }
