@@ -275,13 +275,23 @@ pub fn pack_corner(c: Corner) -> u32 {
     x | y << 5 | z << 10 | u << 15 | v << 20
 }
 
+fn is_fluid_side(index: usize) -> bool {
+    let index = index as u8;
+    (WATER_SIDE..WATER_BOTTOM).contains(&index) || index >= WATER_SIDE_SLOPED
+}
+
 pub const TABLE_BYTES: usize = TEMPLATE_COUNT * 32 + 16;
 
 pub fn table_bytes() -> Vec<u8> {
     let mut words: Vec<u32> = Vec::with_capacity(TABLE_BYTES / 4);
-    for t in templates() {
+    for (index, t) in templates().iter().enumerate() {
         words.extend(t.corners.map(pack_corner));
-        words.extend([t.shade.to_bits(), 0, 0, 0]);
+        words.extend([
+            t.shade.to_bits(),
+            f32::from(is_fluid_side(index)).to_bits(),
+            0,
+            0,
+        ]);
     }
     words.extend(AO_BRIGHTNESS.map(f32::to_bits));
     words.into_iter().flat_map(u32::to_le_bytes).collect()

@@ -1,22 +1,21 @@
 use wgpu::util::DeviceExt;
-use world::tile::{LAYER_COUNT, TILE_SIZE, Tile, tile_pixels};
+use world::tile::{LAYER_COUNT, TILE_SIZE, Tile, animation_table, tile_frames};
 
 pub const MIP_LEVELS: u32 = TILE_SIZE.ilog2() + 1;
 
 pub fn generate() -> Vec<u8> {
+    let frame_bytes = (TILE_SIZE * TILE_SIZE * 4) as usize;
     let mut data = Vec::new();
-    for layer in 0..LAYER_COUNT {
-        let mut level = match Tile::ALL.get(layer as usize) {
-            Some(&tile) => tile_pixels(tile),
-            None => vec![0; (TILE_SIZE * TILE_SIZE * 4) as usize],
-        };
-        let mut size = TILE_SIZE;
-        data.extend_from_slice(&level);
-        let cutout = Tile::ALL.get(layer as usize).is_some_and(|t| t.is_cutout());
-        while size > 1 {
-            level = downsample(&level, size, cutout);
-            size /= 2;
+    for tile in Tile::ALL {
+        for frame in tile_frames(tile).chunks_exact(frame_bytes) {
+            let mut level = frame.to_vec();
+            let mut size = TILE_SIZE;
             data.extend_from_slice(&level);
+            while size > 1 {
+                level = downsample(&level, size, tile.is_cutout());
+                size /= 2;
+                data.extend_from_slice(&level);
+            }
         }
     }
     data
@@ -80,6 +79,19 @@ fn linear_to_srgb(c: f32) -> u8 {
         1.055 * c.powf(1.0 / 2.4) - 0.055
     };
     (c * 255.0).round() as u8
+}
+
+pub(crate) fn create_animation_table(device: &wgpu::Device) -> wgpu::Buffer {
+    let bytes: Vec<u8> = animation_table()
+        .into_iter()
+        .flatten()
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("animation"),
+        contents: &bytes,
+        usage: wgpu::BufferUsages::UNIFORM,
+    })
 }
 
 pub(crate) fn create_block_textures(

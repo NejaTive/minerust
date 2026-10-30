@@ -31,3 +31,20 @@ fn shape_table_size_matches_rust_table() {
         mesh::templates::TABLE_BYTES
     );
 }
+
+#[test]
+fn animation_table_size_matches_layer_count() {
+    let module = module();
+    let (_, var) = module
+        .global_variables
+        .iter()
+        .find(|(_, v)| v.name.as_deref() == Some("animation"))
+        .expect("animation");
+    let naga::TypeInner::Array { size, .. } = module.types[var.ty].inner else {
+        panic!("animation is not an array");
+    };
+    assert_eq!(
+        size,
+        naga::ArraySize::Constant(std::num::NonZeroU32::new(world::tile::LAYER_COUNT).unwrap())
+    );
+}

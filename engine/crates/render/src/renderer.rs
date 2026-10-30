@@ -16,7 +16,7 @@ use crate::pipelines::{
     create_sky_pipeline,
 };
 use crate::shaders;
-use crate::texture::create_block_textures;
+use crate::texture::{create_animation_table, create_block_textures};
 
 pub struct FrameParams {
     pub view_proj: Mat4,
@@ -26,6 +26,7 @@ pub struct FrameParams {
     pub background: Vec3,
     pub eye_fluid: Option<FluidKind>,
     pub darkness: f32,
+    pub anim_time: f32,
     pub sun_dir: Vec3,
     pub night: f32,
     pub zenith: Vec3,
@@ -124,6 +125,7 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let block_textures = create_block_textures(&device, &queue);
+        let animation_table = create_animation_table(&device);
         let block_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("blocks"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -163,6 +165,16 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -180,6 +192,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&block_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: animation_table.as_entire_binding(),
                 },
             ],
         });
@@ -394,6 +410,7 @@ impl Renderer {
                 Some(FluidKind::Lava) => 2.0,
             },
             darkness: params.darkness,
+            anim_time: params.anim_time,
             view_dir: view_dir_matrix(params.view_proj),
             sun_dir: params.sun_dir,
             night: params.night,

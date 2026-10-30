@@ -7,6 +7,7 @@ struct Globals {
     fog_end: f32,
     eye_fluid: f32,
     darkness: f32,
+    anim_time: f32,
 };
 
 // Яркость уровня света — как `light::level_brightness`: 0.8^(15 − уровень), не ниже
@@ -25,12 +26,18 @@ var block_textures: texture_2d_array<f32>;
 @group(0) @binding(2)
 var block_sampler: sampler;
 
+// Запись на слой: (кадры, кадров в секунду, прокрутка боковых граней в блоках в секунду, 0).
+// Строит `world::tile::animation_table`; размер — `LAYER_COUNT`.
+@group(0) @binding(3)
+var<uniform> animation: array<vec4<f32>, 48>;
+
 @group(1) @binding(0)
 var<storage, read> quads: array<u32>;
 
 // Таблица шаблонов квадов, байты даёт `mesh::templates::table_bytes` (размер сверяет тест
 // рендера): на шаблон четыре упакованных угла (x, y, z, u, v по 5 бит, в 1/16) и яркость
-// стороны в `.x`; ao.x..w — яркость вершины по уровню AO.
+// стороны в `.x`, флаг боковой грани жидкости (прокрутка) в `.y`; ao.x..w — яркость
+// вершины по уровню AO.
 struct Shape {
     corners: vec4<u32>,
     shade: vec4<f32>,
@@ -100,10 +107,16 @@ fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.position = globals.view_proj * vec4<f32>(world_pos, 1.0);
     out.uv = vec2<f32>(f32((packed >> 15u) & 0x1Fu), v) / 16.0;
+    out.uv.y -= table.shapes[shape].shade.y * fract(globals.anim_time * animation[(w0 >> 18u) & 0xFFu].z);
     out.shade = table.shapes[shape].shade.x * table.ao[ao] * vertex_brightness(sun, block);
     out.layer = (w0 >> 18u) & 0xFFu;
     out.world_pos = world_pos;
     return out;
+}
+
+fn animated_layer(base: u32) -> u32 {
+    let entry = animation[base];
+    return base + u32(floor(globals.anim_time * entry.y)) % u32(entry.x);
 }
 
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
@@ -121,7 +134,7 @@ fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
 // (TBDR отключает это для любого пайплайна с `discard`).
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);
+    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
     return vec4<f32>(shaded(in, texel.rgb), 1.0);
 }
 
@@ -130,7 +143,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 // не нужно.
 @fragment
 fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);
+    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
     if texel.a < 0.5 {
         discard;
     }
@@ -139,6 +152,6 @@ fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, in.layer);
+    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
     return vec4<f32>(shaded(in, texel.rgb), texel.a);
 }

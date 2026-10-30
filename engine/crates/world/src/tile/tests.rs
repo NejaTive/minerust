@@ -5,7 +5,72 @@ const WATER_ALPHA: u8 = 180;
 #[test]
 fn layer_count_for_current_tiles() {
     assert_eq!(Tile::ALL.len(), 18);
-    assert_eq!(LAYER_COUNT, 18);
+    assert_eq!(LAYER_COUNT, 48);
+}
+
+#[test]
+fn layers_follow_tile_order_and_frame_counts() {
+    let mut next = 0;
+    for tile in Tile::ALL {
+        assert_eq!(tile.layer(), next, "{tile:?}");
+        next += tile.frames();
+    }
+    assert_eq!(next, LAYER_COUNT);
+    assert_eq!(
+        Tile::Water.layer() + Tile::Water.frames(),
+        Tile::Glowstone.layer()
+    );
+}
+
+#[test]
+fn animation_table_has_one_entry_per_layer() {
+    let table = animation_table();
+    assert_eq!(table.len(), LAYER_COUNT as usize);
+    for tile in Tile::ALL {
+        for frame in 0..tile.frames() {
+            let entry = table[(tile.layer() + frame) as usize];
+            assert_eq!(
+                entry,
+                [tile.frames() as f32, tile.fps(), tile.scroll(), 0.0]
+            );
+        }
+    }
+    assert_eq!(table[Tile::Water.layer() as usize], [16.0, 10.0, 1.0, 0.0]);
+    assert_eq!(table[Tile::Lava.layer() as usize], [16.0, 5.0, 0.3, 0.0]);
+    assert_eq!(table[Tile::Stone.layer() as usize], [1.0, 0.0, 0.0, 0.0]);
+}
+
+#[test]
+fn tile_pixels_is_the_first_frame() {
+    for tile in [Tile::Water, Tile::Lava] {
+        let frames = tile_frames(tile);
+        assert_eq!(frames.len(), (16 * TILE_SIZE * TILE_SIZE * 4) as usize);
+        assert_eq!(
+            tile_pixels(tile),
+            frames[..(TILE_SIZE * TILE_SIZE * 4) as usize]
+        );
+    }
+}
+
+#[test]
+fn animation_loops_without_a_jump() {
+    for tile in [Tile::Water, Tile::Lava] {
+        let frames = tile_frames(tile);
+        let size = (TILE_SIZE * TILE_SIZE * 4) as usize;
+        let diff = |a: usize, b: usize| -> usize {
+            frames[a * size..(a + 1) * size]
+                .iter()
+                .zip(&frames[b * size..(b + 1) * size])
+                .map(|(x, y)| usize::from(x.abs_diff(*y)))
+                .sum()
+        };
+        let seam = diff(15, 0);
+        let typical = (0..15).map(|i| diff(i, i + 1)).max().unwrap();
+        assert!(
+            seam <= typical * 2,
+            "{tile:?}: seam {seam}, typical {typical}"
+        );
+    }
 }
 
 #[test]

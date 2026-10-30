@@ -14,6 +14,7 @@ fn layout_matches_shader() {
         fog_end: 107.0,
         eye_fluid: 108.0,
         darkness: 109.0,
+        anim_time: 110.0,
         view_dir: Mat4::from_cols_array(&std::array::from_fn(|i| 200.0 + i as f32)),
         sun_dir: Vec3::new(300.0, 301.0, 302.0),
         night: 303.0,
@@ -34,7 +35,8 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 92), 107.0);
     assert_eq!(f32_at(&bytes, 96), 108.0);
     assert_eq!(f32_at(&bytes, 100), 109.0);
-    assert!(bytes[104..112].iter().all(|&b| b == 0));
+    assert_eq!(f32_at(&bytes, 104), 110.0);
+    assert!(bytes[108..112].iter().all(|&b| b == 0));
     assert_eq!(f32_at(&bytes, 112), 200.0);
     assert_eq!(f32_at(&bytes, 172), 215.0);
     assert_eq!(f32_at(&bytes, 176), 300.0);
