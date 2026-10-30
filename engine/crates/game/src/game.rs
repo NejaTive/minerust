@@ -13,7 +13,7 @@ use world::world::{World, affected_sections};
 use crate::camera::Camera;
 use crate::daytime::{self, DayTime, SkyState};
 use crate::double_tap::DoubleTap;
-use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, next_fov_scale};
+use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
 
@@ -51,6 +51,7 @@ pub struct Game {
     prev_feet: Vec3,
     clock: Clock,
     day: DayTime,
+    anim_ticks: u64,
     time_frozen: bool,
     time_fast: bool,
     space_tap: DoubleTap,
@@ -98,6 +99,7 @@ impl Game {
             player,
             clock: Clock::default(),
             day: DayTime::default(),
+            anim_ticks: 0,
             time_frozen: false,
             time_fast: false,
             space_tap: DoubleTap::new(DOUBLE_TAP_S),
@@ -169,6 +171,10 @@ impl Game {
         self.clock.reset();
         self.target = None;
         Ok(())
+    }
+
+    pub fn anim_time(&self) -> f32 {
+        (self.anim_ticks as f64 * f64::from(TICK)) as f32
     }
 
     pub fn time_of_day(&self) -> f32 {
@@ -387,6 +393,7 @@ impl Game {
     fn update_player(&mut self, dt: f32) {
         let input = self.input();
         let ticks = self.clock.advance(dt);
+        self.anim_ticks += u64::from(ticks);
         if !self.time_frozen {
             let factor = if self.time_fast { TIME_FAST_FACTOR } else { 1 };
             self.day.advance(ticks * factor);

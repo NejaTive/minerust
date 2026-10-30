@@ -38,6 +38,7 @@ pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32) -> FrameParams
         background: Vec3::from(background),
         eye_fluid,
         darkness: sky.darkness,
+        anim_time: game.anim_time(),
         sun_dir: Vec3::from(game.sun_direction()),
         night: sky.night,
         zenith: Vec3::from(sky.zenith),

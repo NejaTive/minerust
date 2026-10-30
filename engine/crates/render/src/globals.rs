@@ -10,6 +10,7 @@ pub struct Globals {
     /// 0 — воздух, 1 — вода, 2 — лава; enum в uniform WGSL запрещён.
     pub eye_fluid: f32,
     pub darkness: f32,
+    pub anim_time: f32,
     pub view_dir: Mat4,
     pub sun_dir: Vec3,
     pub night: f32,
@@ -42,7 +43,13 @@ impl Globals {
             .chain(self.camera_pos.to_array())
             .chain([self.fog_start])
             .chain(self.fog_color.to_array())
-            .chain([self.fog_end, self.eye_fluid, self.darkness, 0.0, 0.0])
+            .chain([
+                self.fog_end,
+                self.eye_fluid,
+                self.darkness,
+                self.anim_time,
+                0.0,
+            ])
             .chain(self.view_dir.to_cols_array())
             .chain(self.sun_dir.to_array())
             .chain([self.night])

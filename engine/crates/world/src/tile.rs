@@ -45,8 +45,35 @@ impl Tile {
         Tile::Cobblestone,
     ];
 
+    pub const fn frames(self) -> u32 {
+        match self {
+            Tile::Water | Tile::Lava => 16,
+            _ => 1,
+        }
+    }
+
+    pub fn fps(self) -> f32 {
+        match self {
+            Tile::Water => 10.0,
+            Tile::Lava => 5.0,
+            _ => 0.0,
+        }
+    }
+
+    pub fn scroll(self) -> f32 {
+        match self {
+            Tile::Water => 1.0,
+            Tile::Lava => 0.3,
+            _ => 0.0,
+        }
+    }
+
     pub fn layer(self) -> u32 {
-        self as u32
+        Tile::ALL
+            .iter()
+            .take_while(|&&t| t != self)
+            .map(|t| t.frames())
+            .sum()
     }
 
     pub fn is_cutout(self) -> bool {
@@ -57,7 +84,25 @@ impl Tile {
     }
 }
 
-pub const LAYER_COUNT: u32 = Tile::ALL.len() as u32;
+pub const LAYER_COUNT: u32 = {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < Tile::ALL.len() {
+        sum += Tile::ALL[i].frames();
+        i += 1;
+    }
+    sum
+};
+
+pub fn animation_table() -> Vec<[f32; 4]> {
+    Tile::ALL
+        .iter()
+        .flat_map(|&t| {
+            let entry = [t.frames() as f32, t.fps(), t.scroll(), 0.0];
+            (0..t.frames()).map(move |_| entry)
+        })
+        .collect()
+}
 
 pub const TORCH_PIXELS: (u32, u32) = (7, 9);
 pub const TORCH_TOP_ROW: u32 = 6;
@@ -97,6 +142,12 @@ impl Tile {
 }
 
 pub fn tile_pixels(tile: Tile) -> Vec<u8> {
+    let mut frames = tile_frames(tile);
+    frames.truncate((TILE_SIZE * TILE_SIZE * 4) as usize);
+    frames
+}
+
+pub fn tile_frames(tile: Tile) -> Vec<u8> {
     let name = tile.file_name();
     let mut decoder = png::Decoder::new(std::io::Cursor::new(tile.png()));
     decoder.set_transformations(
@@ -110,8 +161,9 @@ pub fn tile_pixels(tile: Tile) -> Vec<u8> {
         .next_frame(&mut buf)
         .unwrap_or_else(|e| panic!("{name}.png: {e}"));
     assert!(
-        info.width == TILE_SIZE && info.height == TILE_SIZE,
-        "{name}.png: expected {TILE_SIZE}x{TILE_SIZE}, got {}x{}",
+        info.width == TILE_SIZE && info.height == TILE_SIZE * tile.frames(),
+        "{name}.png: expected {TILE_SIZE}x{}, got {}x{}",
+        TILE_SIZE * tile.frames(),
         info.width,
         info.height
     );

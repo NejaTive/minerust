@@ -1,4 +1,5 @@
 use super::*;
+use world::tile::tile_pixels;
 
 const WATER_ALPHA: u8 = 180;
 
@@ -172,4 +173,27 @@ fn generate_timing() {
         std::hint::black_box(generate());
     }
     println!("generate: {:?} per call", start.elapsed() / 100);
+}
+
+#[test]
+fn every_frame_of_animated_tiles_gets_its_own_layer() {
+    let data = generate();
+    let frame_bytes = (TILE_SIZE * TILE_SIZE * 4) as usize;
+    for tile in [Tile::Water, Tile::Lava] {
+        let frames = tile_frames(tile);
+        assert_eq!(frames.len(), tile.frames() as usize * frame_bytes);
+        for (i, frame) in frames.chunks_exact(frame_bytes).enumerate() {
+            let layer = tile.layer() as usize + i;
+            let start = layer * layer_bytes();
+            assert_eq!(
+                &data[start..start + frame_bytes],
+                frame,
+                "{tile:?} frame {i}"
+            );
+        }
+        assert_ne!(
+            &frames[..frame_bytes],
+            &frames[frame_bytes..2 * frame_bytes]
+        );
+    }
 }
