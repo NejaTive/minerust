@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "engine"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "console_error_panic_hook",
  "game",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "game"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "glam",
  "world",
@@ -306,7 +306,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "mesh"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "glam",
  "world",
@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "render"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "glam",
  "mesh",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "worker"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "console_error_panic_hook",
  "mesh",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "world"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "fastnoise-lite",
  "glam",
