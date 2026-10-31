@@ -16,6 +16,8 @@ pub const FLY_SPRINT_FACTOR: f32 = 2.0;
 pub const SPRINT_FOV_SCALE: f32 = 1.1;
 pub const SPRINT_FOV_TIME: f32 = 0.15;
 pub const AIR_ACCEL: f32 = 10.0;
+pub const STEP_HEIGHT: f32 = 1.0;
+pub const STEP_SMOOTH_TIME: f32 = 0.12;
 
 pub const WATER_GRAVITY: f32 = GRAVITY / 4.0;
 pub const SWIM_DEPTH: f32 = 0.4;
@@ -90,6 +92,8 @@ pub struct Player {
     pub mode: Mode,
     pub on_ground: bool,
     pub sprinting: bool,
+    pub auto_step: bool,
+    pub step_offset: f32,
 }
 
 impl Player {
@@ -100,6 +104,8 @@ impl Player {
             mode,
             on_ground: false,
             sprinting: false,
+            auto_step: true,
+            step_offset: 0.0,
         }
     }
 
@@ -123,6 +129,7 @@ impl Player {
         self.mode = match self.mode {
             Mode::Walking => {
                 self.velocity.y = 0.0;
+                self.step_offset = 0.0;
                 Mode::Flying
             }
             Mode::Flying | Mode::Noclip => Mode::Walking,
@@ -134,6 +141,7 @@ impl Player {
             Mode::Noclip => Mode::Flying,
             Mode::Walking | Mode::Flying => {
                 self.velocity.y = 0.0;
+                self.step_offset = 0.0;
                 Mode::Noclip
             }
         };
@@ -255,9 +263,15 @@ impl Player {
             self.feet += delta;
             return;
         }
+        self.step_offset = (self.step_offset - TICK * STEP_HEIGHT / STEP_SMOOTH_TIME).max(0.0);
+        let can_step = self.auto_step && self.mode == Mode::Walking && immersion.is_none();
         let mut against_wall = false;
         for axis in [1, 0, 2] {
-            let blocked = self.move_axis(axis, delta[axis], &is_solid);
+            let before = self.feet;
+            let mut blocked = self.move_axis(axis, delta[axis], &is_solid);
+            if blocked && axis != 1 && can_step && self.on_ground {
+                blocked = !self.step_up(before, axis, delta[axis], &is_solid);
+            }
             against_wall |= blocked && axis != 1;
         }
         if against_wall {
@@ -273,6 +287,30 @@ impl Player {
         if self.mode == Mode::Flying && self.on_ground {
             self.mode = Mode::Walking;
         }
+    }
+
+    fn step_up(
+        &mut self,
+        start: Vec3,
+        axis: usize,
+        delta: f32,
+        is_solid: &impl Fn(IVec3) -> bool,
+    ) -> bool {
+        let saved = (self.feet, self.velocity);
+        self.feet = start;
+        let raised = !self.move_axis(1, STEP_HEIGHT, is_solid)
+            && !self.move_axis(axis, delta, is_solid)
+            && {
+                self.on_ground = false;
+                self.move_axis(1, -STEP_HEIGHT, is_solid) && self.feet.y > start.y + EPS
+            };
+        if raised {
+            self.step_offset += self.feet.y - start.y;
+            return true;
+        }
+        (self.feet, self.velocity) = saved;
+        self.on_ground = true;
+        false
     }
 
     fn move_axis(&mut self, axis: usize, delta: f32, is_solid: &impl Fn(IVec3) -> bool) -> bool {

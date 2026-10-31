@@ -4,8 +4,8 @@ const WATER_ALPHA: u8 = 180;
 
 #[test]
 fn layer_count_for_current_tiles() {
-    assert_eq!(Tile::ALL.len(), 18);
-    assert_eq!(LAYER_COUNT, 48);
+    assert_eq!(Tile::ALL.len(), 25);
+    assert_eq!(LAYER_COUNT, 55);
 }
 
 #[test]

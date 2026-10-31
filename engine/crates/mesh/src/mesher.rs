@@ -326,7 +326,8 @@ pub(crate) fn mesh_cached(
                     }
                     continue;
                 }
-                let lying = (block == Block::Log)
+                let lying = block
+                    .is_log()
                     .then(|| block.axis(byte()))
                     .filter(|&axis| axis != 1);
                 for (face_index, (face, normal, corners)) in faces.iter().enumerate() {

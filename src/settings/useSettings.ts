@@ -4,11 +4,9 @@ import { engineInfo } from '../engine/info'
 import {
   clearHotbar,
   clearHotbarSlot,
-  loadHotbarContents,
-  loadHotbarSlot,
+  parseHotbarContents,
+  parseHotbarSlot,
   putHotbarSlot,
-  saveHotbarContents,
-  saveHotbarSlot,
   swapHotbarSlots,
 } from './hotbar'
 import { defaultSettings, loadSettings, saveSettings, type Settings } from './settings'
@@ -17,6 +15,7 @@ import { localStore } from './store'
 let shared: ReturnType<typeof create> | undefined
 
 function create() {
+  for (const key of ['minerust.hotbar', 'minerust.hotbarSlot']) localStore.remove(key)
   const { limits, defaults, blocks } = engineInfo()
   const settings = reactive<Settings>(loadSettings(localStore, limits, defaultSettings(defaults)))
   if (BENCH) {
@@ -24,6 +23,8 @@ function create() {
       renderDistance: BENCH_RENDER_DISTANCE,
       ambientOcclusion: true,
       clouds: true,
+      weather: true,
+      autoStep: true,
       showDebug: BENCH_DEBUG,
     })
   }
@@ -31,18 +32,9 @@ function create() {
     if (!BENCH) saveSettings(localStore, value)
   })
 
-  const slot = ref(loadHotbarSlot(localStore))
-  watch(slot, (value) => saveHotbarSlot(localStore, value))
-
+  const slot = ref(0)
   const knownNames = new Set(blocks.map((b) => b.name))
-  const slots = reactive(loadHotbarContents(localStore, knownNames))
-  watch(
-    slots,
-    (value) => {
-      if (!BENCH) saveHotbarContents(localStore, [...value])
-    },
-    { deep: true },
-  )
+  const slots = reactive(parseHotbarContents(undefined, knownNames))
 
   const block = computed(() => slots[slot.value] ?? null)
 
@@ -67,6 +59,10 @@ function create() {
     resetHotbar() {
       clearHotbar(slots)
       slot.value = 0
+    },
+    setHotbar(contents: unknown, selected: unknown) {
+      slots.splice(0, slots.length, ...parseHotbarContents(contents, knownNames))
+      slot.value = parseHotbarSlot(selected)
     },
   }
 }

@@ -1,6 +1,7 @@
 export interface TimeInfo {
   time: number
   phase: string
+  weather: string
 }
 
 export interface PlayerInfo {

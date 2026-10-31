@@ -22,14 +22,13 @@ describe('classifyKeyDown', () => {
     })
   })
 
-  it('N — новый мир один раз, автоповтор гасится', () => {
-    expect(classifyKeyDown(key('KeyN'), true, false)).toEqual({ type: 'new-world' })
-    expect(classifyKeyDown(key('KeyN', { repeat: true }), true, false)).toEqual({ type: 'none' })
-  })
-
   it('хоткей с модификатором — системное сочетание, идёт как обычная клавиша', () => {
-    expect(classifyKeyDown(key('KeyN', { ctrlKey: true }), true, false)).toEqual({ type: 'key' })
-    expect(classifyKeyDown(key('KeyN', { metaKey: true }), false, false)).toEqual({ type: 'none' })
+    expect(classifyKeyDown(key('BracketLeft', { ctrlKey: true }), true, false)).toEqual({
+      type: 'key',
+    })
+    expect(classifyKeyDown(key('BracketLeft', { metaKey: true }), false, false)).toEqual({
+      type: 'none',
+    })
   })
 
   it('без захвата курсора игровые клавиши игнорируются', () => {
@@ -49,6 +48,13 @@ describe('classifyKeyDown', () => {
     expect(classifyKeyDown(key('KeyT'), true, true)).toEqual({ type: 'time-fast' })
     expect(classifyKeyDown(key('KeyV'), true, false)).toEqual({ type: 'key' })
     expect(classifyKeyDown(key('KeyT', { altKey: true }), true, true)).toEqual({ type: 'key' })
+  })
+
+  it('R меняет погоду только с отладкой и без модификаторов', () => {
+    expect(classifyKeyDown(key('KeyR'), true, true)).toEqual({ type: 'weather' })
+    expect(classifyKeyDown(key('KeyR'), true, false)).toEqual({ type: 'key' })
+    expect(classifyKeyDown(key('KeyR', { metaKey: true }), true, true)).toEqual({ type: 'key' })
+    expect(classifyKeyDown(key('KeyR'), false, true)).toEqual({ type: 'none' })
   })
 
   it('автоповтор обычной клавиши игнорируется, остальное уходит в движок', () => {

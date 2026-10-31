@@ -9,7 +9,7 @@ use world::fluid::Fluid;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
 use world::random_ticks::{RandomTicks, STEP_TICKS};
-use world::terrain::Terrain;
+use world::terrain::{Biome, Terrain, WorldType};
 use world::world::{World, affected_sections};
 
 use crate::camera::Camera;
@@ -17,8 +17,10 @@ use crate::daytime::{self, DayTime, SkyState};
 use crate::double_tap::DoubleTap;
 use crate::loader::DEFAULT_RADIUS;
 use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
+use crate::rain_cover::RainCover;
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
+use crate::weather::{self, Weather, WeatherState};
 
 const TIME_FAST_FACTOR: u32 = 60;
 const REACH: f32 = 6.0;
@@ -65,12 +67,16 @@ pub struct Game {
     camera: Camera,
     player: Player,
     prev_feet: Vec3,
+    prev_step_offset: f32,
     clock: Clock,
     day: DayTime,
     anim_ticks: u64,
     cloud_ticks: u64,
     time_frozen: bool,
     time_fast: bool,
+    weather: WeatherState,
+    weather_enabled: bool,
+    rain_cover: RainCover,
     space_tap: DoubleTap,
     sprint_tap: DoubleTap,
     fov_scale: f32,
@@ -85,7 +91,15 @@ pub struct Game {
 
 impl Game {
     pub fn new(seed: i32, state: Option<&[f32]>) -> Result<Game, BadCameraState> {
-        let terrain = Terrain::new(seed);
+        Self::of(seed, WorldType::Standard, state)
+    }
+
+    pub fn of(
+        seed: i32,
+        world_type: WorldType,
+        state: Option<&[f32]>,
+    ) -> Result<Game, BadCameraState> {
+        let terrain = Terrain::of(seed, world_type);
         let (camera, player) = match state {
             Some(state) => restore_player(state).ok_or(BadCameraState)?,
             None => {
@@ -116,6 +130,7 @@ impl Game {
             seed,
             camera,
             prev_feet: player.feet,
+            prev_step_offset: player.step_offset,
             player,
             clock: Clock::default(),
             day: DayTime::default(),
@@ -123,6 +138,9 @@ impl Game {
             cloud_ticks: 0,
             time_frozen: false,
             time_fast: false,
+            weather: WeatherState::new(seed),
+            weather_enabled: true,
+            rain_cover: RainCover::new(),
             space_tap: DoubleTap::new(DOUBLE_TAP_S),
             sprint_tap: DoubleTap::new(DOUBLE_TAP_S),
             fov_scale: 1.0,
@@ -187,8 +205,8 @@ impl Game {
         self.camera.position = camera.position;
         self.camera.yaw = camera.yaw;
         self.camera.pitch = camera.pitch;
-        self.prev_feet = player.feet;
         self.player = player;
+        self.sync_prev();
         self.clock.reset();
         self.target = None;
         Ok(())
@@ -214,6 +232,10 @@ impl Game {
         daytime::phase(self.day.fraction()).name()
     }
 
+    pub fn set_auto_step(&mut self, enabled: bool) {
+        self.player.auto_step = enabled;
+    }
+
     pub fn set_view_radius(&mut self, radius: i32) {
         self.view_radius = radius;
     }
@@ -227,7 +249,57 @@ impl Game {
     }
 
     pub fn sky(&self) -> SkyState {
-        daytime::sky_state(self.day.fraction())
+        weather::tint_sky(
+            daytime::sky_state(self.day.fraction()),
+            self.weather.rain(),
+            self.weather.flash(),
+        )
+    }
+
+    pub fn weather(&self) -> Weather {
+        self.weather.kind()
+    }
+
+    pub fn rain(&self) -> f32 {
+        self.weather.rain()
+    }
+
+    pub fn flash(&self) -> f32 {
+        self.weather.flash()
+    }
+
+    pub fn rain_drops(&self) -> f32 {
+        let rain = self.weather.rain();
+        let p = self.camera.position.floor().as_ivec3();
+        if rain > 0.0 && self.terrain.biome_at(p.x, p.z) != Biome::Desert {
+            rain
+        } else {
+            0.0
+        }
+    }
+
+    pub fn cycle_weather(&mut self) {
+        if self.weather_enabled {
+            self.weather.set_kind(self.weather.kind().next());
+        }
+    }
+
+    pub fn set_weather_enabled(&mut self, enabled: bool) {
+        self.weather_enabled = enabled;
+    }
+
+    pub fn weather_state(&self) -> Vec<f32> {
+        self.weather.to_state()
+    }
+
+    pub fn set_weather_state(&mut self, state: &[f32]) {
+        if let Some(restored) = WeatherState::from_state(self.seed, state) {
+            self.weather = restored;
+        }
+    }
+
+    pub fn take_rain_cover(&mut self) -> Option<&[u8]> {
+        self.rain_cover.take_dirty()
     }
 
     pub fn sun_direction(&self) -> [f32; 3] {
@@ -251,7 +323,7 @@ impl Game {
             self.release_all_keys();
         } else {
             self.clock.reset();
-            self.prev_feet = self.player.feet;
+            self.sync_prev();
         }
     }
 
@@ -269,6 +341,7 @@ impl Game {
             let fresh = self.keys.insert(code.to_owned());
             if fresh && code == "Space" && self.space_tap.press(self.last_time.unwrap_or(0.0)) {
                 self.player.toggle_mode();
+                self.prev_step_offset = 0.0;
             }
             if fresh && code == "KeyW" && self.sprint_tap.press(self.last_time.unwrap_or(0.0)) {
                 self.player.start_sprint();
@@ -281,6 +354,7 @@ impl Game {
     pub fn toggle_noclip(&mut self) {
         if !self.paused {
             self.player.toggle_noclip();
+            self.prev_step_offset = 0.0;
         }
     }
 
@@ -325,6 +399,10 @@ impl Game {
             self.update_player(dt);
         }
         self.fov_scale = next_fov_scale(self.fov_scale, self.player.sprinting, dt);
+        if self.rain_drops() > 0.0 {
+            let p = self.camera.position.floor().as_ivec3();
+            self.rain_cover.update(&self.world, p.x, p.z);
+        }
         dt
     }
 
@@ -338,6 +416,7 @@ impl Game {
         if self.breaking.fire(time)
             && let Some(hit) = target
             && hit.block.y >= 0
+            && !self.world.block(hit.block).is_unbreakable()
             && let changed = self.world.set_block_supported(hit.block, Block::Air)
             && !changed.is_empty()
         {
@@ -369,6 +448,7 @@ impl Game {
     /// `add_column` пересчитывает его заново вместе с соседями.
     pub fn import_column(&mut self, key: ColumnPos, column: Column) {
         self.world.import(key, column);
+        self.rain_cover.invalidate_column(key);
         if self.light.column(key).is_some() {
             self.light.add_column(&self.world, key);
         }
@@ -408,6 +488,7 @@ impl Game {
             self.fluid.block_changed(&self.world, pos);
             self.lava.block_changed(&self.world, pos);
             self.falling.block_changed(&self.world, pos);
+            self.rain_cover.invalidate(pos);
             dirty.extend(affected_sections(pos));
             if !light_neutral.contains(&pos) {
                 lit.extend(self.light.block_changed(&self.world, pos));
@@ -424,6 +505,9 @@ impl Game {
         if !self.time_frozen {
             self.day.advance(ticks * factor);
         }
+        let weather_pace = if self.time_frozen { 0 } else { factor };
+        self.weather
+            .advance(ticks, weather_pace, self.weather_enabled);
         self.advance_fluid(ticks);
         self.advance_lava(ticks);
         self.advance_falling(ticks);
@@ -431,10 +515,10 @@ impl Game {
         for _ in 0..ticks {
             if !self.body_loaded() {
                 self.clock.reset();
-                self.prev_feet = self.player.feet;
+                self.sync_prev();
                 break;
             }
-            self.prev_feet = self.player.feet;
+            self.sync_prev();
             self.player.step(
                 &input,
                 self.camera.yaw,
@@ -442,8 +526,14 @@ impl Game {
                 |pos| self.world.fluid_height(pos),
             );
         }
-        let feet = self.prev_feet.lerp(self.player.feet, self.clock.alpha());
-        self.camera.position = feet + Vec3::Y * EYE_HEIGHT;
+        let from = self.prev_feet - Vec3::Y * self.prev_step_offset;
+        let to = self.player.feet - Vec3::Y * self.player.step_offset;
+        self.camera.position = from.lerp(to, self.clock.alpha()) + Vec3::Y * EYE_HEIGHT;
+    }
+
+    fn sync_prev(&mut self) {
+        self.prev_feet = self.player.feet;
+        self.prev_step_offset = self.player.step_offset;
     }
 
     fn advance_fluid(&mut self, ticks: u32) {
@@ -543,3 +633,6 @@ fn restore_player(state: &[f32]) -> Option<(Camera, Player)> {
     let player = Player::new(camera.position - Vec3::Y * EYE_HEIGHT, mode);
     Some((camera, player))
 }
+
+#[cfg(test)]
+mod tests;

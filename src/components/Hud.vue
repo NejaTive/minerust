@@ -19,6 +19,11 @@ const PHASES: Record<string, string> = {
   night: 'ночь',
   dawn: 'рассвет',
 }
+const WEATHERS: Record<string, string> = {
+  clear: 'ясно',
+  rain: 'дождь',
+  thunder: 'гроза',
+}
 const clock = (t: number) => {
   const minutes = Math.floor(((t * 24 + 6) % 24) * 60)
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
@@ -65,7 +70,8 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
       <template v-if="stats.loadMs">{{ stats.loadMs }} мс</template><template v-else>идёт</template>
     </div>
     <div v-if="showDebug && time">
-      Время: {{ clock(time.time) }} · {{ PHASES[time.phase] ?? time.phase }}
+      Время: {{ clock(time.time) }} · {{ PHASES[time.phase] ?? time.phase }} · погода:
+      {{ WEATHERS[time.weather] ?? time.weather }}
     </div>
     <div v-if="player">
       <template v-if="player.mode === 'flying'">Режим: полёт</template>
@@ -85,14 +91,14 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
   top: 8px;
   left: 8px;
   color: #fff;
-  font-size: 14px;
+  font-size: var(--px-fs-s);
   line-height: 1.4;
-  text-shadow: 1px 1px 0 #000;
+  text-shadow: 2px 2px 0 #000;
   pointer-events: none;
   z-index: 20;
 }
 .notice {
   margin-top: 4px;
-  color: #ffd75e;
+  color: var(--px-warn);
 }
 </style>

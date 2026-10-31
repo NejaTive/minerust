@@ -11,7 +11,6 @@ export interface InputTarget {
   slotCount: number
   selectSlot(slot: number): void
   changeRenderDistance(delta: number): void
-  askNewWorld(): void
   lockChanged(locked: boolean): void
   lockLostAfterInventory(): void
   inventoryGrace(): boolean
@@ -25,6 +24,7 @@ export interface InputEngine {
   mouse_button(button: number, pressed: boolean): void
   set_key(code: string, pressed: boolean): void
   set_time_fast(fast: boolean): void
+  cycle_weather(): void
   toggle_noclip(): void
   release_all_keys(): void
   set_paused(paused: boolean): void
@@ -105,8 +105,6 @@ export function bindInput(target: InputTarget): { unbind(): void; isLocked(): bo
       switch (command.type) {
         case 'distance':
           return target.changeRenderDistance(command.delta)
-        case 'new-world':
-          return target.askNewWorld()
         default:
           return
       }
@@ -117,12 +115,12 @@ export function bindInput(target: InputTarget): { unbind(): void; isLocked(): bo
     switch (command.type) {
       case 'distance':
         return target.changeRenderDistance(command.delta)
-      case 'new-world':
-        return target.askNewWorld()
       case 'noclip':
         return target.engine()?.toggle_noclip()
       case 'time-fast':
         return target.engine()?.set_time_fast(true)
+      case 'weather':
+        return target.engine()?.cycle_weather()
       case 'slot':
         return target.selectSlot(command.slot)
       case 'key':

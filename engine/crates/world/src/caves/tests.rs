@@ -147,7 +147,10 @@ fn bottom_layers_stay_stone() {
     for key in keys(ColumnPos::new(-4, 9), 2) {
         let column = terrain.generate(key);
         for p in blocks(key).filter(|p| p.y <= FLOOR) {
-            assert_eq!(column.get(local(p)), Block::Stone, "{p}");
+            assert!(
+                matches!(column.get(local(p)), Block::Stone | Block::Bedrock),
+                "{p}"
+            );
         }
     }
 }

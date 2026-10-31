@@ -21,6 +21,8 @@ const defaults = defaultSettings({
   renderDistance: 8,
   ambientOcclusion: true,
   clouds: true,
+  weather: true,
+  autoStep: true,
   mouseSensitivity: 1,
   fov: 70,
 })
@@ -33,11 +35,17 @@ describe('loadSettings', () => {
     expect(load()).toEqual({ ...defaults, showDebug: false })
   })
 
+  it('погода по умолчанию включена', () => {
+    expect(load().weather).toBe(true)
+  })
+
   it('читает сохранённые значения', () => {
     const data = {
       [KEYS.renderDistance]: '12',
       [KEYS.ambientOcclusion]: 'false',
       [KEYS.clouds]: 'false',
+      [KEYS.weather]: 'false',
+      [KEYS.autoStep]: 'false',
       [KEYS.mouseSensitivity]: '1.5',
       [KEYS.fov]: '90',
       [KEYS.showDebug]: 'true',
@@ -46,6 +54,8 @@ describe('loadSettings', () => {
       renderDistance: 12,
       ambientOcclusion: false,
       clouds: false,
+      weather: false,
+      autoStep: false,
       mouseSensitivity: 1.5,
       fov: 90,
       showDebug: true,
@@ -83,6 +93,8 @@ describe('loadSettings', () => {
     expect(load({ [KEYS.ambientOcclusion]: '1' }).ambientOcclusion).toBe(false)
     expect(load({ [KEYS.showDebug]: 'yes' }).showDebug).toBe(false)
     expect(load({ [KEYS.clouds]: '1' }).clouds).toBe(false)
+    expect(load({ [KEYS.autoStep]: '1' }).autoStep).toBe(false)
+    expect(load({ [KEYS.weather]: '1' }).weather).toBe(false)
   })
 
   it('чистит ключи убранных настроек', () => {

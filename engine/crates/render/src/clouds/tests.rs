@@ -91,9 +91,16 @@ fn interior_faces_between_clouds_are_dropped() {
 
 #[test]
 fn color_follows_day_phase() {
-    assert_eq!(cloud_color(0.0, 0.0), Vec3::ONE);
-    assert_eq!(cloud_color(1.0, 0.0), NIGHT_CLOUD);
-    let dusk = cloud_color(0.0, 1.0);
+    assert_eq!(cloud_color(0.0, 0.0, 0.0, 0.0), Vec3::ONE);
+    assert_eq!(cloud_color(1.0, 0.0, 0.0, 0.0), NIGHT_CLOUD);
+    let dusk = cloud_color(0.0, 1.0, 0.0, 0.0);
     assert!(dusk.x > dusk.y && dusk.y > dusk.z);
-    assert!(cloud_color(1.0, 0.0).max_element() < 0.2);
+    assert!(cloud_color(1.0, 0.0, 0.0, 0.0).max_element() < 0.2);
+}
+
+#[test]
+fn rain_darkens_clouds_and_flash_lights_them() {
+    let rainy = cloud_color(0.0, 0.0, 1.0, 0.0);
+    assert!(rainy.max_element() < 0.5);
+    assert!(cloud_color(0.0, 0.0, 1.0, 1.0).min_element() > rainy.max_element());
 }

@@ -617,7 +617,7 @@ fn tree_on_column_border_matches_whole_world() {
     use world::trees::border_tree;
 
     let terrain = Terrain::new(1337);
-    let tree = border_tree(&terrain);
+    let tree = border_tree(&terrain, world::trees::TreeKind::BigOak);
     let trunk = ColumnPos::of_block(tree.base);
     let mut world = World::new();
     for z in -2..=2 {
@@ -626,7 +626,7 @@ fn tree_on_column_border_matches_whole_world() {
             world.insert(key, terrain.generate_trees(key));
         }
     }
-    let mut keys: Vec<ColumnPos> = tree.leaves().map(ColumnPos::of_block).collect();
+    let mut keys: Vec<ColumnPos> = tree.leaves().into_iter().map(ColumnPos::of_block).collect();
     keys.sort();
     keys.dedup();
     assert!(keys.len() > 1);

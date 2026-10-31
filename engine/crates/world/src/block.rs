@@ -23,6 +23,11 @@ pub enum Block {
     Lava,
     Obsidian,
     Cobblestone,
+    BirchLog,
+    BirchLeaves,
+    SpruceLog,
+    SpruceLeaves,
+    Bedrock,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -115,6 +120,7 @@ pub struct BlockDef {
     pub replaceable: bool,
     pub needs_support: bool,
     pub falls: bool,
+    pub unbreakable: bool,
     pub random_ticks: bool,
     pub data: DataKind,
     pub fluid: Option<FluidKind>,
@@ -137,6 +143,7 @@ impl BlockDef {
         replaceable: false,
         needs_support: false,
         falls: false,
+        unbreakable: false,
         random_ticks: false,
         data: DataKind::None,
         fluid: None,
@@ -159,6 +166,23 @@ impl BlockDef {
         }
     }
 
+    const fn log(name: &'static str, label: &'static str, side: Tile, end: Tile) -> BlockDef {
+        BlockDef {
+            data: DataKind::Axis,
+            top: Some(end),
+            bottom: Some(end),
+            ..Self::uniform(name, label, side)
+        }
+    }
+
+    const fn leaves(name: &'static str, label: &'static str, tile: Tile) -> BlockDef {
+        BlockDef {
+            opaque: false,
+            layer: RenderLayer::Cutout,
+            ..Self::uniform(name, label, tile)
+        }
+    }
+
     const fn plant(name: &'static str, label: &'static str, tile: Tile) -> BlockDef {
         BlockDef {
             targetable: true,
@@ -173,7 +197,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 17] = [
+pub const BLOCKS: [BlockDef; 22] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -200,18 +224,8 @@ pub const BLOCKS: [BlockDef; 17] = [
         falls: true,
         ..BlockDef::uniform("sand", "песок", Tile::Sand)
     },
-    BlockDef {
-        data: DataKind::Axis,
-        top: Some(Tile::LogTop),
-        side: Some(Tile::LogSide),
-        bottom: Some(Tile::LogTop),
-        ..BlockDef::uniform("log", "бревно", Tile::LogSide)
-    },
-    BlockDef {
-        opaque: false,
-        layer: RenderLayer::Cutout,
-        ..BlockDef::uniform("leaves", "листва", Tile::Leaves)
-    },
+    BlockDef::log("log", "бревно", Tile::LogSide, Tile::LogTop),
+    BlockDef::leaves("leaves", "листва", Tile::Leaves),
     BlockDef {
         solid: false,
         opaque: false,
@@ -254,10 +268,28 @@ pub const BLOCKS: [BlockDef; 17] = [
     },
     BlockDef::uniform("obsidian", "обсидиан", Tile::Obsidian),
     BlockDef::uniform("cobblestone", "булыжник", Tile::Cobblestone),
+    BlockDef::log(
+        "birch_log",
+        "берёзовое бревно",
+        Tile::BirchLogSide,
+        Tile::BirchLogTop,
+    ),
+    BlockDef::leaves("birch_leaves", "берёзовая листва", Tile::BirchLeaves),
+    BlockDef::log(
+        "spruce_log",
+        "еловое бревно",
+        Tile::SpruceLogSide,
+        Tile::SpruceLogTop,
+    ),
+    BlockDef::leaves("spruce_leaves", "хвоя", Tile::SpruceLeaves),
+    BlockDef {
+        unbreakable: true,
+        ..BlockDef::uniform("bedrock", "коренная порода", Tile::Bedrock)
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 17] = [
+    pub const ALL: [Block; 22] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -275,10 +307,19 @@ impl Block {
         Block::Lava,
         Block::Obsidian,
         Block::Cobblestone,
+        Block::BirchLog,
+        Block::BirchLeaves,
+        Block::SpruceLog,
+        Block::SpruceLeaves,
+        Block::Bedrock,
     ];
 
     pub fn def(self) -> &'static BlockDef {
         &BLOCKS[self as usize]
+    }
+
+    pub fn is_unbreakable(self) -> bool {
+        self.def().unbreakable
     }
 
     pub fn is_solid(self) -> bool {
@@ -404,6 +445,10 @@ impl Block {
 
     pub fn fluid(self) -> Option<FluidKind> {
         self.def().fluid
+    }
+
+    pub fn is_log(self) -> bool {
+        self.data_kind() == DataKind::Axis
     }
 
     pub fn is_water(self) -> bool {

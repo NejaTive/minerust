@@ -1,3 +1,4 @@
+import type { WorldType } from './kinds'
 import { checkMeta } from './meta'
 import { type SavedColumn, type WorldMeta, type WorldStorage } from './storage'
 
@@ -10,6 +11,7 @@ export interface SaveableEngine {
   seed(): number
   camera_state(): ArrayLike<number>
   time_of_day(): number
+  weather_state(): ArrayLike<number>
 }
 
 export interface PersistenceDeps {
@@ -18,13 +20,21 @@ export interface PersistenceDeps {
   notify(text: string): void
   setNewerSave(newer: boolean): void
   randomSeed(): number
+  now(): number
+  hotbar(): Pick<WorldMeta, 'hotbar' | 'hotbarSlot'>
 }
 
 export interface WorldStart {
   seed: number
+  worldType?: WorldType
   player?: number[]
   time?: number
+  weather?: number[]
+  hotbar?: unknown
+  hotbarSlot?: unknown
 }
+
+type Identity = Pick<WorldMeta, 'name' | 'mode' | 'worldType' | 'createdAt'>
 
 const columnKey = (column: { x: number; z: number }) => `${column.x},${column.z}`
 
@@ -35,8 +45,11 @@ export class WorldPersistence {
   private readonly unsaved = new Map<string, SavedColumn>()
   private saving: Promise<void> = Promise.resolve()
   private saveFailed = false
+  private identity: Identity
 
-  constructor(private readonly deps: PersistenceDeps) {}
+  constructor(private readonly deps: PersistenceDeps) {
+    this.identity = { name: 'Мир', mode: 'creative', worldType: 'standard', createdAt: deps.now() }
+  }
 
   async load(): Promise<WorldStart> {
     this.storage = await this.deps.open()
@@ -56,6 +69,7 @@ export class WorldPersistence {
     if (!saved) return { seed: DEFAULT_SEED }
     const status = checkMeta(saved.meta, this.deps.formatVersion)
     if (status === 'broken') {
+      if (typeof saved.meta.name === 'string') this.identity.name = saved.meta.name
       await this.clearStorage()
       this.deps.notify('Сохранение повреждено — начат новый мир')
       return { seed: this.deps.randomSeed() }
@@ -66,6 +80,8 @@ export class WorldPersistence {
       this.deps.notify('Сохранение из более новой версии игры — мир не загружен')
       return { seed: DEFAULT_SEED }
     }
+    const { name, mode, worldType, createdAt } = saved.meta
+    this.identity = { name, mode, worldType, createdAt }
     for (const column of saved.columns) this.worldColumns.set(columnKey(column), column)
     return saved.meta
   }
@@ -91,10 +107,14 @@ export class WorldPersistence {
     if (!engine || !store || this.newerSave) return this.saving
     this.collectColumns(engine)
     const meta: WorldMeta = {
+      ...this.identity,
+      lastPlayed: this.deps.now(),
+      ...this.deps.hotbar(),
       version: this.deps.formatVersion,
       seed: engine.seed(),
       player: Array.from(engine.camera_state()),
       time: engine.time_of_day(),
+      weather: Array.from(engine.weather_state()),
     }
     const columns = [...this.unsaved.values()]
     this.saving = store.save(meta, columns).then(
@@ -111,17 +131,6 @@ export class WorldPersistence {
       },
     )
     return this.saving
-  }
-
-  async reset() {
-    await this.saving
-    this.worldColumns.clear()
-    this.unsaved.clear()
-    await this.clearStorage()
-    if (this.storage) {
-      this.newerSave = false
-      this.deps.setNewerSave(false)
-    }
   }
 
   private collectColumns(engine: SaveableEngine) {

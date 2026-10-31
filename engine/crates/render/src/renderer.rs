@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use glam::{IVec3, Mat4, Vec2, Vec3};
 use mesh::mesher::SectionMeshes;
 use world::block::{Block, FluidKind};
-use world::clouds::CloudMask;
+use world::clouds::{CloudMask, cloud_threshold, coverage_for_rain};
 use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 
@@ -17,7 +17,11 @@ use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::pipelines::{
     BlockPass, create_block_pipeline, create_cloud_pipeline, create_depth_view,
-    create_outline_pipeline, create_sky_pipeline,
+    create_outline_pipeline, create_rain_pipeline, create_sky_pipeline,
+};
+use crate::rain::{
+    RAIN_INSTANCES, RAIN_VERTICES, create_rain_cover_texture, create_rain_tile_texture,
+    upload_rain_cover,
 };
 use crate::shaders;
 use crate::texture::{create_animation_table, create_block_textures};
@@ -39,6 +43,9 @@ pub struct FrameParams {
     pub horizon_tilt: f32,
     pub star_rotation: Vec2,
     pub clouds: bool,
+    pub rain: f32,
+    pub rain_drops: f32,
+    pub flash: f32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -67,7 +74,9 @@ pub struct Renderer {
     outline_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
+    rain_pipeline: wgpu::RenderPipeline,
     cloud_texture: wgpu::Texture,
+    rain_cover_texture: wgpu::Texture,
     outline_buffer: wgpu::Buffer,
     outline_block: Option<(IVec3, Block, u8)>,
     globals_buffer: wgpu::Buffer,
@@ -193,8 +202,32 @@ impl Renderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
+        let rain_tile_view = create_rain_tile_texture(&device, &queue);
+        let rain_cover_texture = create_rain_cover_texture(&device);
+        let rain_cover_view =
+            rain_cover_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let cloud_texture = create_cloud_texture(&device);
         let cloud_view = cloud_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -221,6 +254,14 @@ impl Renderer {
                     binding: 4,
                     resource: wgpu::BindingResource::TextureView(&cloud_view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&rain_cover_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&rain_tile_view),
+                },
             ],
         });
 
@@ -242,6 +283,7 @@ impl Renderer {
         let outline_pipeline = create_outline_pipeline(&device, &pipeline_layout, render_format);
         let sky_pipeline = create_sky_pipeline(&device, &pipeline_layout, render_format);
         let cloud_pipeline = create_cloud_pipeline(&device, &pipeline_layout, render_format);
+        let rain_pipeline = create_rain_pipeline(&device, &pipeline_layout, render_format);
         let outline_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outline"),
             size: (OUTLINE_VERTICES * OUTLINE_VERTEX_SIZE) as u64,
@@ -287,7 +329,9 @@ impl Renderer {
             outline_pipeline,
             sky_pipeline,
             cloud_pipeline,
+            rain_pipeline,
             cloud_texture,
+            rain_cover_texture,
             outline_buffer,
             outline_block: None,
             globals_buffer,
@@ -315,6 +359,10 @@ impl Renderer {
 
     pub fn set_cloud_mask(&self, mask: &CloudMask) {
         upload_cloud_mask(&self.queue, &self.cloud_texture, mask);
+    }
+
+    pub fn set_rain_cover(&self, heights: &[u8]) {
+        upload_rain_cover(&self.queue, &self.rain_cover_texture, heights);
     }
 
     pub fn aspect(&self) -> f32 {
@@ -450,7 +498,11 @@ impl Renderer {
             warm: params.warm,
             horizon_tilt: params.horizon_tilt,
             star_rotation: params.star_rotation,
-            cloud_color: cloud_color(params.night, params.warm),
+            cloud_color: cloud_color(params.night, params.warm, params.rain, params.flash),
+            rain: params.rain,
+            rain_drops: params.rain_drops,
+            flash: params.flash,
+            cloud_threshold: f32::from(cloud_threshold(coverage_for_rain(params.rain))),
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
@@ -562,6 +614,12 @@ impl Renderer {
             if params.clouds && params.eye_fluid.is_none() {
                 pass.set_pipeline(&self.cloud_pipeline);
                 pass.draw(0..CLOUD_VERTICES, 0..CLOUD_INSTANCES);
+                counts.draw_calls += 1;
+            }
+
+            if params.rain_drops > 0.0 && params.eye_fluid.is_none() {
+                pass.set_pipeline(&self.rain_pipeline);
+                pass.draw(0..RAIN_VERTICES, 0..RAIN_INSTANCES);
                 counts.draw_calls += 1;
             }
 

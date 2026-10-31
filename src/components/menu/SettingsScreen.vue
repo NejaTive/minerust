@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import type { Settings, SettingsLimits } from '../../settings/settings'
 
-defineProps<{ settings: Settings; limits: SettingsLimits }>()
+defineProps<{ settings: Settings; limits: SettingsLimits; showControls: boolean }>()
 
-const emit = defineEmits<{ 'update:settings': [patch: Partial<Settings>]; back: [] }>()
+const emit = defineEmits<{
+  'update:settings': [patch: Partial<Settings>]
+  controls: []
+  back: []
+}>()
 
 const patch = (value: Partial<Settings>) => emit('update:settings', value)
 
@@ -51,6 +55,26 @@ function checkedOf(e: Event): boolean {
       />
     </label>
 
+    <label class="row toggle">
+      <span class="name">Погода</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.weather"
+        @change="patch({ weather: checkedOf($event) })"
+      />
+    </label>
+
+    <label class="row toggle">
+      <span class="name">Автоступенька</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.autoStep"
+        @change="patch({ autoStep: checkedOf($event) })"
+      />
+    </label>
+
     <label class="row">
       <span class="name">Чувствительность мыши</span>
       <span class="value">×{{ settings.mouseSensitivity.toFixed(2) }}</span>
@@ -87,6 +111,7 @@ function checkedOf(e: Event): boolean {
       />
     </label>
   </div>
+  <button v-if="showControls" @click="emit('controls')">Управление</button>
   <button @click="emit('back')">Назад</button>
 </template>
 
@@ -106,20 +131,16 @@ function checkedOf(e: Event): boolean {
   grid-column: 1 / -1;
   width: 100%;
   margin: 0;
-  accent-color: #3f9a64;
 }
 .toggle input {
-  width: 20px;
-  height: 20px;
   margin: 0;
-  accent-color: #3f9a64;
 }
 .value {
   font-variant-numeric: tabular-nums;
-  color: #b8c0cc;
+  color: var(--px-text-dim);
 }
 .name kbd {
   margin-left: 4px;
-  color: #b8c0cc;
+  color: var(--px-text-dim);
 }
 </style>

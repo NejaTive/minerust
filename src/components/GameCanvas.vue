@@ -3,28 +3,23 @@ import { ref } from 'vue'
 import { gameState } from '../engine/state'
 import { useEngine } from '../engine/useEngine'
 
-const emit = defineEmits<{
-  'ask-new-world': []
-  'canvas-click': []
-}>()
+const props = defineProps<{ worldId: string }>()
+const emit = defineEmits<{ 'canvas-click': [] }>()
 
 const canvas = ref<HTMLCanvasElement>()
-const canvasKey = ref(0)
 
-const { requestLock, releaseCursor, newWorld } = useEngine(canvas, canvasKey, () =>
-  emit('ask-new-world'),
-)
+const { requestLock, releaseCursor, save } = useEngine(canvas, props.worldId)
 
 function onCanvasClick() {
   if (gameState.locked || gameState.inventoryOpen) return
   emit('canvas-click')
 }
 
-defineExpose({ requestLock, releaseCursor, newWorld })
+defineExpose({ requestLock, releaseCursor, save })
 </script>
 
 <template>
-  <canvas :key="canvasKey" ref="canvas" class="game" @click="onCanvasClick" @contextmenu.prevent />
+  <canvas ref="canvas" class="game" @click="onCanvasClick" @contextmenu.prevent />
   <div v-if="gameState.ready && gameState.locked" class="crosshair" />
   <div v-if="gameState.error" class="error">Не удалось запустить движок: {{ gameState.error }}</div>
 </template>
@@ -54,6 +49,7 @@ defineExpose({ requestLock, releaseCursor, newWorld })
   display: grid;
   place-items: center;
   color: #fff;
+  font-size: var(--px-fs);
   background: #400;
   padding: 16px;
 }
