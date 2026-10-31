@@ -122,6 +122,7 @@ impl Engine {
         self.streamer
             .set_ambient_occlusion(settings.ambient_occlusion, &self.game, &self.renderer);
         self.clouds = settings.clouds;
+        self.game.set_auto_step(settings.auto_step);
         self.game
             .camera_mut()
             .set_sensitivity(settings.mouse_sensitivity);

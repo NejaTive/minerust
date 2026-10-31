@@ -4,6 +4,7 @@ export const KEYS = {
   renderDistance: 'minerust.renderDistance',
   ambientOcclusion: 'minerust.ambientOcclusion',
   clouds: 'minerust.clouds',
+  autoStep: 'minerust.autoStep',
   mouseSensitivity: 'minerust.mouseSensitivity',
   fov: 'minerust.fov',
   showDebug: 'minerust.showDebug',
@@ -15,6 +16,7 @@ export interface EngineSettings {
   renderDistance: number
   ambientOcclusion: boolean
   clouds: boolean
+  autoStep: boolean
   mouseSensitivity: number
   fov: number
 }
@@ -76,6 +78,7 @@ export function loadSettings(
     ),
     ambientOcclusion: readBool(store, KEYS.ambientOcclusion, defaults.ambientOcclusion),
     clouds: readBool(store, KEYS.clouds, defaults.clouds),
+    autoStep: readBool(store, KEYS.autoStep, defaults.autoStep),
     mouseSensitivity: readNumber(
       store,
       KEYS.mouseSensitivity,
@@ -92,6 +95,7 @@ export function saveSettings(store: KeyValueStore, s: Settings) {
   store.set(KEYS.renderDistance, String(s.renderDistance))
   store.set(KEYS.ambientOcclusion, String(s.ambientOcclusion))
   store.set(KEYS.clouds, String(s.clouds))
+  store.set(KEYS.autoStep, String(s.autoStep))
   store.set(KEYS.mouseSensitivity, String(s.mouseSensitivity))
   store.set(KEYS.fov, String(s.fov))
   store.set(KEYS.showDebug, String(s.showDebug))

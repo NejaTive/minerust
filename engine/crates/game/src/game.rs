@@ -65,6 +65,7 @@ pub struct Game {
     camera: Camera,
     player: Player,
     prev_feet: Vec3,
+    prev_step_offset: f32,
     clock: Clock,
     day: DayTime,
     anim_ticks: u64,
@@ -116,6 +117,7 @@ impl Game {
             seed,
             camera,
             prev_feet: player.feet,
+            prev_step_offset: player.step_offset,
             player,
             clock: Clock::default(),
             day: DayTime::default(),
@@ -187,8 +189,8 @@ impl Game {
         self.camera.position = camera.position;
         self.camera.yaw = camera.yaw;
         self.camera.pitch = camera.pitch;
-        self.prev_feet = player.feet;
         self.player = player;
+        self.sync_prev();
         self.clock.reset();
         self.target = None;
         Ok(())
@@ -212,6 +214,10 @@ impl Game {
 
     pub fn day_phase(&self) -> &'static str {
         daytime::phase(self.day.fraction()).name()
+    }
+
+    pub fn set_auto_step(&mut self, enabled: bool) {
+        self.player.auto_step = enabled;
     }
 
     pub fn set_view_radius(&mut self, radius: i32) {
@@ -251,7 +257,7 @@ impl Game {
             self.release_all_keys();
         } else {
             self.clock.reset();
-            self.prev_feet = self.player.feet;
+            self.sync_prev();
         }
     }
 
@@ -269,6 +275,7 @@ impl Game {
             let fresh = self.keys.insert(code.to_owned());
             if fresh && code == "Space" && self.space_tap.press(self.last_time.unwrap_or(0.0)) {
                 self.player.toggle_mode();
+                self.prev_step_offset = 0.0;
             }
             if fresh && code == "KeyW" && self.sprint_tap.press(self.last_time.unwrap_or(0.0)) {
                 self.player.start_sprint();
@@ -281,6 +288,7 @@ impl Game {
     pub fn toggle_noclip(&mut self) {
         if !self.paused {
             self.player.toggle_noclip();
+            self.prev_step_offset = 0.0;
         }
     }
 
@@ -431,10 +439,10 @@ impl Game {
         for _ in 0..ticks {
             if !self.body_loaded() {
                 self.clock.reset();
-                self.prev_feet = self.player.feet;
+                self.sync_prev();
                 break;
             }
-            self.prev_feet = self.player.feet;
+            self.sync_prev();
             self.player.step(
                 &input,
                 self.camera.yaw,
@@ -442,8 +450,14 @@ impl Game {
                 |pos| self.world.fluid_height(pos),
             );
         }
-        let feet = self.prev_feet.lerp(self.player.feet, self.clock.alpha());
-        self.camera.position = feet + Vec3::Y * EYE_HEIGHT;
+        let from = self.prev_feet - Vec3::Y * self.prev_step_offset;
+        let to = self.player.feet - Vec3::Y * self.player.step_offset;
+        self.camera.position = from.lerp(to, self.clock.alpha()) + Vec3::Y * EYE_HEIGHT;
+    }
+
+    fn sync_prev(&mut self) {
+        self.prev_feet = self.player.feet;
+        self.prev_step_offset = self.player.step_offset;
     }
 
     fn advance_fluid(&mut self, ticks: u32) {

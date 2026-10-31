@@ -51,6 +51,16 @@ function checkedOf(e: Event): boolean {
       />
     </label>
 
+    <label class="row toggle">
+      <span class="name">Автоступенька</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.autoStep"
+        @change="patch({ autoStep: checkedOf($event) })"
+      />
+    </label>
+
     <label class="row">
       <span class="name">Чувствительность мыши</span>
       <span class="value">×{{ settings.mouseSensitivity.toFixed(2) }}</span>
