@@ -19,6 +19,10 @@ struct Globals {
     star_cos: f32,
     star_sin: f32,
     cloud_color: vec3<f32>,
+    rain: f32,
+    rain_drops: f32,
+    flash: f32,
+    cloud_threshold: f32,
 };
 
 @group(0) @binding(0)
@@ -58,7 +62,7 @@ struct VertexOut {
 };
 
 fn is_cloud(cell: vec2<i32>) -> bool {
-    return textureLoad(cloud_mask, cell & vec2<i32>(CLOUD_MAP - 1), 0).x != 0u;
+    return f32(textureLoad(cloud_mask, cell & vec2<i32>(CLOUD_MAP - 1), 0).x) >= globals.cloud_threshold;
 }
 
 @vertex
@@ -92,5 +96,5 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let fade = smoothstep(FADE_START, FADE_END, in.distance);
     let color = mix(globals.cloud_color * in.shade, globals.fog_color, fade);
-    return vec4<f32>(color, CLOUD_ALPHA * (1.0 - fade));
+    return vec4<f32>(color, (CLOUD_ALPHA + 0.15 * globals.rain) * (1.0 - fade));
 }

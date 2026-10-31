@@ -17,6 +17,11 @@ struct Globals {
     horizon_tilt: f32,
     star_cos: f32,
     star_sin: f32,
+    cloud_color: vec3<f32>,
+    rain: f32,
+    rain_drops: f32,
+    flash: f32,
+    cloud_threshold: f32,
 };
 
 @group(0) @binding(0)
@@ -109,16 +114,19 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     color = mix(color, DUSK_COLOR * 1.3, clamp(glow, 0.0, 1.0));
 
     let above = smoothstep(edge - 0.06, edge - 0.03, dir.y);
-    let sun = square_body(dir, globals.sun_dir, SUN_HALF);
-    let moon = square_body(dir, -globals.sun_dir, MOON_HALF);
+    let clear = 1.0 - globals.rain;
+    let sun = square_body(dir, globals.sun_dir, SUN_HALF) * clear;
+    var moon = square_body(dir, -globals.sun_dir, MOON_HALF);
+    let moon_uv = moon.zw;
+    moon = moon * vec4<f32>(clear, clear, 1.0, 1.0);
     let sun_tint = mix(SUN_LOW_COLOR, SUN_COLOR, smoothstep(0.0, 0.4, globals.sun_dir.y));
     color += sun_tint * sun.y * 0.5 * above;
     color = mix(color, sun_tint, sun.x * above);
-    let moon_color = MOON_COLOR * (1.0 - 0.5 * moon_surface(moon.zw));
+    let moon_color = MOON_COLOR * (1.0 - 0.5 * moon_surface(moon_uv));
     color += MOON_COLOR * moon.y * 0.15 * above;
     color = mix(color, moon_color, moon.x * above * (1.0 - sun.x));
 
-    let star_fade = globals.night * above * (0.4 + 0.6 * smoothstep(0.0, 0.3, dir.y));
+    let star_fade = globals.night * clear * above * (0.4 + 0.6 * smoothstep(0.0, 0.3, dir.y));
     color += vec3<f32>(0.9, 0.95, 1.0) * stars(dir) * star_fade * clamp(1.0 - moon.x - 0.5 * moon.y, 0.0, 1.0);
     let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
     let encoded = pow(max(color, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2)) + (noise - 0.5) / 255.0;

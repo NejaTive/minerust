@@ -9,6 +9,7 @@ mod layout;
 mod outline;
 mod pipelines;
 mod quad_indices;
+mod rain;
 pub mod renderer;
 pub mod shaders;
 mod slots;

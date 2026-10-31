@@ -2,6 +2,8 @@ use world::column::WORLD_HEIGHT;
 use world::section::SECTION_SIZE;
 
 const FOG_START_FRACTION: f32 = 0.65;
+const RAIN_START_CUT: f32 = 0.6;
+const RAIN_END_CUT: f32 = 0.5;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Fog {
@@ -16,6 +18,13 @@ impl Fog {
         Self {
             start: end * FOG_START_FRACTION,
             end,
+        }
+    }
+
+    pub fn in_rain(self, rain: f32) -> Self {
+        Self {
+            start: self.start * (1.0 - RAIN_START_CUT * rain),
+            end: self.end * (1.0 - RAIN_END_CUT * rain),
         }
     }
 

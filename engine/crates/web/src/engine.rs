@@ -122,6 +122,7 @@ impl Engine {
         self.streamer
             .set_ambient_occlusion(settings.ambient_occlusion, &self.game, &self.renderer);
         self.clouds = settings.clouds;
+        self.game.set_weather_enabled(settings.weather);
         self.game.set_auto_step(settings.auto_step);
         self.game
             .camera_mut()
@@ -216,6 +217,22 @@ impl Engine {
         self.game.set_time_fast(fast);
     }
 
+    pub fn cycle_weather(&mut self) {
+        self.game.cycle_weather();
+    }
+
+    pub fn weather(&self) -> String {
+        self.game.weather().name().to_owned()
+    }
+
+    pub fn weather_state(&self) -> Vec<f32> {
+        self.game.weather_state()
+    }
+
+    pub fn set_weather_state(&mut self, state: Vec<f32>) {
+        self.game.set_weather_state(&state);
+    }
+
     pub fn mouse_move(&mut self, dx: f32, dy: f32) {
         self.game.mouse_move(dx, dy);
     }
@@ -261,6 +278,9 @@ impl Engine {
             edit_started,
         );
         self.renderer.set_outline(self.game.target_block());
+        if let Some(heights) = self.game.take_rain_cover() {
+            self.renderer.set_rain_cover(heights);
+        }
 
         let params = frame_params(
             &self.game,

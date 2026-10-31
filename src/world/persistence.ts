@@ -10,6 +10,7 @@ export interface SaveableEngine {
   seed(): number
   camera_state(): ArrayLike<number>
   time_of_day(): number
+  weather_state(): ArrayLike<number>
 }
 
 export interface PersistenceDeps {
@@ -24,6 +25,7 @@ export interface WorldStart {
   seed: number
   player?: number[]
   time?: number
+  weather?: number[]
 }
 
 const columnKey = (column: { x: number; z: number }) => `${column.x},${column.z}`
@@ -95,6 +97,7 @@ export class WorldPersistence {
       seed: engine.seed(),
       player: Array.from(engine.camera_state()),
       time: engine.time_of_day(),
+      weather: Array.from(engine.weather_state()),
     }
     const columns = [...this.unsaved.values()]
     this.saving = store.save(meta, columns).then(

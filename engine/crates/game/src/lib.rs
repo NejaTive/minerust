@@ -4,6 +4,8 @@ mod double_tap;
 mod game;
 pub mod loader;
 pub mod physics;
+pub mod rain_cover;
 mod raycast;
 mod repeat;
+pub mod weather;
 pub use game::{BadCameraState, Edits, Game};

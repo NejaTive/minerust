@@ -9,7 +9,7 @@ use world::fluid::Fluid;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
 use world::random_ticks::{RandomTicks, STEP_TICKS};
-use world::terrain::Terrain;
+use world::terrain::{Biome, Terrain};
 use world::world::{World, affected_sections};
 
 use crate::camera::Camera;
@@ -17,8 +17,10 @@ use crate::daytime::{self, DayTime, SkyState};
 use crate::double_tap::DoubleTap;
 use crate::loader::DEFAULT_RADIUS;
 use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
+use crate::rain_cover::RainCover;
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
+use crate::weather::{self, Weather, WeatherState};
 
 const TIME_FAST_FACTOR: u32 = 60;
 const REACH: f32 = 6.0;
@@ -72,6 +74,9 @@ pub struct Game {
     cloud_ticks: u64,
     time_frozen: bool,
     time_fast: bool,
+    weather: WeatherState,
+    weather_enabled: bool,
+    rain_cover: RainCover,
     space_tap: DoubleTap,
     sprint_tap: DoubleTap,
     fov_scale: f32,
@@ -125,6 +130,9 @@ impl Game {
             cloud_ticks: 0,
             time_frozen: false,
             time_fast: false,
+            weather: WeatherState::new(seed),
+            weather_enabled: true,
+            rain_cover: RainCover::new(),
             space_tap: DoubleTap::new(DOUBLE_TAP_S),
             sprint_tap: DoubleTap::new(DOUBLE_TAP_S),
             fov_scale: 1.0,
@@ -233,7 +241,57 @@ impl Game {
     }
 
     pub fn sky(&self) -> SkyState {
-        daytime::sky_state(self.day.fraction())
+        weather::tint_sky(
+            daytime::sky_state(self.day.fraction()),
+            self.weather.rain(),
+            self.weather.flash(),
+        )
+    }
+
+    pub fn weather(&self) -> Weather {
+        self.weather.kind()
+    }
+
+    pub fn rain(&self) -> f32 {
+        self.weather.rain()
+    }
+
+    pub fn flash(&self) -> f32 {
+        self.weather.flash()
+    }
+
+    pub fn rain_drops(&self) -> f32 {
+        let rain = self.weather.rain();
+        let p = self.camera.position.floor().as_ivec3();
+        if rain > 0.0 && self.terrain.biome_at(p.x, p.z) != Biome::Desert {
+            rain
+        } else {
+            0.0
+        }
+    }
+
+    pub fn cycle_weather(&mut self) {
+        if self.weather_enabled {
+            self.weather.set_kind(self.weather.kind().next());
+        }
+    }
+
+    pub fn set_weather_enabled(&mut self, enabled: bool) {
+        self.weather_enabled = enabled;
+    }
+
+    pub fn weather_state(&self) -> Vec<f32> {
+        self.weather.to_state()
+    }
+
+    pub fn set_weather_state(&mut self, state: &[f32]) {
+        if let Some(restored) = WeatherState::from_state(self.seed, state) {
+            self.weather = restored;
+        }
+    }
+
+    pub fn take_rain_cover(&mut self) -> Option<&[u8]> {
+        self.rain_cover.take_dirty()
     }
 
     pub fn sun_direction(&self) -> [f32; 3] {
@@ -333,6 +391,10 @@ impl Game {
             self.update_player(dt);
         }
         self.fov_scale = next_fov_scale(self.fov_scale, self.player.sprinting, dt);
+        if self.rain_drops() > 0.0 {
+            let p = self.camera.position.floor().as_ivec3();
+            self.rain_cover.update(&self.world, p.x, p.z);
+        }
         dt
     }
 
@@ -377,6 +439,7 @@ impl Game {
     /// `add_column` пересчитывает его заново вместе с соседями.
     pub fn import_column(&mut self, key: ColumnPos, column: Column) {
         self.world.import(key, column);
+        self.rain_cover.invalidate_column(key);
         if self.light.column(key).is_some() {
             self.light.add_column(&self.world, key);
         }
@@ -416,6 +479,7 @@ impl Game {
             self.fluid.block_changed(&self.world, pos);
             self.lava.block_changed(&self.world, pos);
             self.falling.block_changed(&self.world, pos);
+            self.rain_cover.invalidate(pos);
             dirty.extend(affected_sections(pos));
             if !light_neutral.contains(&pos) {
                 lit.extend(self.light.block_changed(&self.world, pos));
@@ -432,6 +496,9 @@ impl Game {
         if !self.time_frozen {
             self.day.advance(ticks * factor);
         }
+        let weather_pace = if self.time_frozen { 0 } else { factor };
+        self.weather
+            .advance(ticks, weather_pace, self.weather_enabled);
         self.advance_fluid(ticks);
         self.advance_lava(ticks);
         self.advance_falling(ticks);
@@ -557,3 +624,6 @@ fn restore_player(state: &[f32]) -> Option<(Camera, Player)> {
     let player = Player::new(camera.position - Vec3::Y * EYE_HEIGHT, mode);
     Some((camera, player))
 }
+
+#[cfg(test)]
+mod tests;

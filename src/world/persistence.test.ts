@@ -40,6 +40,7 @@ function fakeEngine(dirty: number[] = [], bytes = new Uint8Array([1])): Saveable
     seed: () => 7,
     camera_state: () => [1, 2, 3, 0, 0, 0],
     time_of_day: () => 0.25,
+    weather_state: () => [1, 500, 0.5, 0, 3],
   }
 }
 
@@ -117,7 +118,13 @@ describe('WorldPersistence.save / importInto', () => {
     const { persistence } = setup(storage)
     await persistence.load()
     await persistence.save(fakeEngine([3, -4]))
-    expect(written[0].meta).toEqual({ version: 2, seed: 7, player: [1, 2, 3, 0, 0, 0], time: 0.25 })
+    expect(written[0].meta).toEqual({
+      version: 2,
+      seed: 7,
+      player: [1, 2, 3, 0, 0, 0],
+      time: 0.25,
+      weather: [1, 500, 0.5, 0, 3],
+    })
     expect(written[0].columns.map((c) => [c.x, c.z])).toEqual([[3, -4]])
   })
 

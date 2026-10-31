@@ -51,6 +51,13 @@ describe('classifyKeyDown', () => {
     expect(classifyKeyDown(key('KeyT', { altKey: true }), true, true)).toEqual({ type: 'key' })
   })
 
+  it('R меняет погоду только с отладкой и без модификаторов', () => {
+    expect(classifyKeyDown(key('KeyR'), true, true)).toEqual({ type: 'weather' })
+    expect(classifyKeyDown(key('KeyR'), true, false)).toEqual({ type: 'key' })
+    expect(classifyKeyDown(key('KeyR', { metaKey: true }), true, true)).toEqual({ type: 'key' })
+    expect(classifyKeyDown(key('KeyR'), false, true)).toEqual({ type: 'none' })
+  })
+
   it('автоповтор обычной клавиши игнорируется, остальное уходит в движок', () => {
     expect(classifyKeyDown(key('KeyW', { repeat: true }), true, false)).toEqual({ type: 'none' })
     expect(classifyKeyDown(key('KeyW'), true, false)).toEqual({ type: 'key' })

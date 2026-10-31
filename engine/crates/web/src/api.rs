@@ -91,6 +91,7 @@ pub struct EngineSettings {
     #[wasm_bindgen(js_name = ambientOcclusion)]
     pub ambient_occlusion: bool,
     pub clouds: bool,
+    pub weather: bool,
     #[wasm_bindgen(js_name = autoStep)]
     pub auto_step: bool,
     #[wasm_bindgen(js_name = mouseSensitivity)]
@@ -105,6 +106,7 @@ impl EngineSettings {
         render_distance: i32,
         ambient_occlusion: bool,
         clouds: bool,
+        weather: bool,
         auto_step: bool,
         mouse_sensitivity: f32,
         fov: f32,
@@ -113,6 +115,7 @@ impl EngineSettings {
             render_distance,
             ambient_occlusion,
             clouds,
+            weather,
             auto_step,
             mouse_sensitivity,
             fov,
@@ -126,6 +129,7 @@ pub fn default_settings() -> EngineSettings {
         render_distance: DEFAULT_RADIUS,
         ambient_occlusion: MeshOptions::default().ambient_occlusion,
         clouds: true,
+        weather: true,
         auto_step: true,
         mouse_sensitivity: DEFAULT_SENSITIVITY,
         fov: DEFAULT_FOV,
