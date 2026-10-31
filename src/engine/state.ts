@@ -4,7 +4,7 @@ import type { PlayerInfo, TimeInfo } from './types'
 
 const NOTICE_MS = 2500
 
-export const gameState = shallowReactive({
+const initialState = () => ({
   fps: 0,
   stats: undefined as WorldStats | undefined,
   time: undefined as TimeInfo | undefined,
@@ -19,6 +19,13 @@ export const gameState = shallowReactive({
   busy: true,
   error: undefined as string | undefined,
 })
+
+export const gameState = shallowReactive(initialState())
+
+export function resetGameState() {
+  const { noWebGpu } = gameState
+  Object.assign(gameState, initialState(), { noWebGpu })
+}
 
 let noticeTimer = 0
 

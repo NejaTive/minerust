@@ -27,7 +27,7 @@ watch(
     <div
       v-for="(name, index) in slots"
       :key="index"
-      class="slot"
+      class="slot px-slot"
       :class="{ selected: index === slotIndex }"
       :title="name ? blockLabel(name) : undefined"
     >
@@ -47,7 +47,6 @@ watch(
   gap: 4px;
   padding: 4px;
   background: rgb(0 0 0 / 0.45);
-  border-radius: 4px;
   pointer-events: none;
   z-index: 10;
 }
@@ -55,16 +54,9 @@ watch(
   position: relative;
   width: 48px;
   height: 48px;
-  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(0 0 0 / 0.35);
-  border: 3px solid rgb(255 255 255 / 0.25);
-}
-.slot.selected {
-  border-color: #fff;
-  background: rgb(255 255 255 / 0.2);
 }
 canvas {
   width: 32px;
@@ -73,11 +65,11 @@ canvas {
 }
 .number {
   position: absolute;
-  left: 2px;
-  top: 0;
+  left: 0;
+  top: -2px;
   color: #fff;
-  font-size: 10px;
-  line-height: 1.2;
-  text-shadow: 1px 1px 0 #000;
+  font-size: var(--px-fs-s);
+  line-height: 1;
+  text-shadow: 2px 2px 0 #000;
 }
 </style>

@@ -1,5 +1,5 @@
 import type { Engine } from '@engine'
-import { nextTick, onBeforeUnmount, onMounted, shallowRef, watch, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, shallowRef, watch, type Ref } from 'vue'
 import { BENCH, BENCH_POINTS, BENCH_SEED, BENCH_TIME, BENCH_WORKERS } from '../bench/config'
 import { FrameRecorder } from '../bench/recorder'
 import { runBench } from '../bench/run'
@@ -12,30 +12,27 @@ import { clamp, columnsWord } from '../settings/settings'
 import { useSettings } from '../settings/useSettings'
 import { startAutosave } from '../world/autosave'
 import { WorldPersistence } from '../world/persistence'
-import { openStorage } from '../world/storage'
+import { worldsStore } from '../world/useWorlds'
 import { applyBlock, applySettings } from './apply'
 import { NoWebGpuError, hasWebGpu } from './gpu'
 import { FrameLoop, createEngine } from './host'
 import { MeshPool } from './mesh-pool'
 import { engineInfo } from './info'
-import { gameState as state, notify } from './state'
+import { gameState as state, notify, resetGameState } from './state'
 
 const randomSeed = () => crypto.getRandomValues(new Int32Array(1))[0]
 
-export function useEngine(
-  canvas: Ref<HTMLCanvasElement | undefined>,
-  canvasKey: Ref<number>,
-  askNewWorld: () => void,
-) {
-  const { settings, limits, slot, block, resetHotbar } = useSettings()
+export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: string) {
+  const { settings, limits, slot, block } = useSettings()
   const info = engineInfo()
   const benchFrames = new FrameRecorder()
   const persistence = new WorldPersistence({
-    open: openStorage,
+    open: async () => (await worldsStore()).open(worldId),
     formatVersion: info.formatVersion,
     notify,
     setNewerSave: (newer) => (state.newerSave = newer),
     randomSeed,
+    now: Date.now,
   })
   const engine = shallowRef<Engine>()
   let loop: FrameLoop | undefined
@@ -79,14 +76,6 @@ export function useEngine(
       if (columns === settings.renderDistance) return
       settings.renderDistance = columns
       notify(`Дальность: ${columns} ${columnsWord(columns)}`)
-    },
-    askNewWorld() {
-      if (mode === 'inventory' || mode === 'closing' || mode === 'lock-lost') {
-        setMode('idle')
-        engine.value?.release_all_keys()
-        engine.value?.set_paused(true)
-      }
-      if (!switching) askNewWorld()
     },
     lockChanged(locked) {
       state.locked = locked
@@ -191,25 +180,6 @@ export function useEngine(
     engine.value = undefined
   }
 
-  async function newWorld() {
-    if (switching || !engine.value) return
-    setSwitching(true)
-    try {
-      resetHotbar()
-      stop()
-      await persistence.reset()
-      canvasKey.value++
-      await nextTick()
-      await start(randomSeed())
-      void save()
-      notify('Новый мир')
-    } catch (e) {
-      state.error = String(e)
-    } finally {
-      setSwitching(false)
-    }
-  }
-
   onMounted(async () => {
     if (!hasWebGpu()) {
       state.noWebGpu = ''
@@ -223,7 +193,7 @@ export function useEngine(
       } else {
         const world = await persistence.load()
         await start(world.seed, world.player, world.time, world.weather)
-        stopAutosave = startAutosave(() => void save())
+        if (!disposed) stopAutosave = startAutosave(() => void save())
       }
     } catch (e) {
       if (e instanceof NoWebGpuError) state.noWebGpu = e.message
@@ -239,12 +209,13 @@ export function useEngine(
     void save()
     stop()
     input.unbind()
+    resetGameState()
   })
 
   return {
     engine,
     requestLock: () => requestPointerLock(canvas.value),
     releaseCursor: releasePointerLock,
-    newWorld,
+    save,
   }
 }

@@ -91,14 +91,14 @@ const k = (n: number) => `${(n / 1000).toFixed(0)}k`
   top: 8px;
   left: 8px;
   color: #fff;
-  font-size: 14px;
+  font-size: var(--px-fs-s);
   line-height: 1.4;
-  text-shadow: 1px 1px 0 #000;
+  text-shadow: 2px 2px 0 #000;
   pointer-events: none;
   z-index: 20;
 }
 .notice {
   margin-top: 4px;
-  color: #ffd75e;
+  color: var(--px-warn);
 }
 </style>

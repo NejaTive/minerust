@@ -1,7 +1,7 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import { loadEngineInfo } from './engine/info'
-import './style.css'
+import './ui/pixel.css'
 
 loadEngineInfo().then(
   () => createApp(App).mount('#app'),
