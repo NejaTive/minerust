@@ -6,6 +6,7 @@ export function applySettings(engine: Engine, s: Settings) {
     s.renderDistance,
     s.ambientOcclusion,
     s.clouds,
+    s.autoStep,
     s.mouseSensitivity,
     s.fov,
   )

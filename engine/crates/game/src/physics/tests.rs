@@ -651,3 +651,119 @@ fn lava_is_more_viscous_than_water() {
     assert!((water_swim - SWIM_SPEED).abs() < 1e-3);
     assert!((lava_swim - LAVA_SWIM_SPEED).abs() < 1e-3);
 }
+
+fn ledge(height: i32) -> Vec<IVec3> {
+    (GROUND as i32..GROUND as i32 + height)
+        .flat_map(|y| (2..20).flat_map(move |x| (-5..5).map(move |z| IVec3::new(x, y, z))))
+        .collect()
+}
+
+#[test]
+fn auto_step_climbs_one_block_without_jump() {
+    let solid = world(&ledge(1));
+    let mut player = standing();
+    run(&mut player, FORWARD, 0.0, 60, &solid);
+    assert_eq!(player.feet.y, GROUND + 1.0);
+    assert!(player.feet.x > 2.3);
+    assert!(player.on_ground);
+}
+
+#[test]
+fn auto_step_does_not_climb_two_blocks() {
+    let solid = world(&ledge(2));
+    let mut player = standing();
+    run(&mut player, FORWARD, 0.0, 60, &solid);
+    assert_eq!(player.feet.y, GROUND);
+    assert_eq!(player.feet.x, 2.0 - PLAYER_WIDTH / 2.0);
+}
+
+#[test]
+fn auto_step_needs_headroom() {
+    let mut blocks = ledge(1);
+    blocks.extend((2..20).flat_map(|x| (-5..5).map(move |z| IVec3::new(x, GROUND as i32 + 2, z))));
+    let solid = world(&blocks);
+    let mut player = standing();
+    run(&mut player, FORWARD, 0.0, 60, &solid);
+    assert_eq!(player.feet.y, GROUND);
+    assert_eq!(player.feet.x, 2.0 - PLAYER_WIDTH / 2.0);
+}
+
+#[test]
+fn auto_step_disabled_by_setting() {
+    let solid = world(&ledge(1));
+    let mut player = standing();
+    player.auto_step = false;
+    run(&mut player, FORWARD, 0.0, 60, &solid);
+    assert_eq!(player.feet.y, GROUND);
+    assert_eq!(player.step_offset, 0.0);
+}
+
+#[test]
+fn auto_step_does_not_work_in_flight() {
+    let solid = world(&ledge(1));
+    let mut player = Player::new(Vec3::new(0.5, GROUND, 0.5), Mode::Flying);
+    run(&mut player, FORWARD, 0.0, 60, &solid);
+    assert_eq!(player.feet.y, GROUND);
+    assert_eq!(player.step_offset, 0.0);
+}
+
+#[test]
+fn auto_step_does_not_work_in_air() {
+    let solid = world(&ledge(1));
+    let mut player = Player::new(Vec3::new(0.5, GROUND + 0.5, 0.5), Mode::Walking);
+    player.step(&FORWARD, 0.0, &solid, dry);
+    assert!(!player.on_ground);
+    run(&mut player, FORWARD, 0.0, 3, &solid);
+    assert_eq!(player.step_offset, 0.0);
+    assert!(player.feet.y < GROUND + 0.5);
+}
+
+#[test]
+fn auto_step_does_not_work_in_water() {
+    let solid = world(&ledge(1));
+    let water = pool(GROUND as i32 + 1);
+    let mut player = standing();
+    for _ in 0..20 {
+        player.step(&FORWARD, 0.0, &solid, &water);
+    }
+    assert_eq!(player.step_offset, 0.0);
+    assert!(player.feet.x <= 2.0 - PLAYER_WIDTH / 2.0);
+}
+
+#[test]
+fn auto_step_keeps_diagonal_wall_slide() {
+    let solid = world(&wall_x(2));
+    let mut player = standing();
+    run(&mut player, FORWARD, FRAC_PI_4, 60, &solid);
+    assert_eq!(player.feet.y, GROUND);
+    assert_eq!(player.feet.x, 2.0 - PLAYER_WIDTH / 2.0);
+    assert_eq!(player.step_offset, 0.0);
+}
+
+#[test]
+fn auto_step_keeps_sprint_but_wall_still_stops_it() {
+    let solid = world(&ledge(1));
+    let mut player = standing();
+    player.start_sprint();
+    run(&mut player, FORWARD, 0.0, 60, &solid);
+    assert!(player.sprinting);
+
+    let solid = world(&wall_x(2));
+    let mut player = standing();
+    player.start_sprint();
+    run(&mut player, FORWARD, 0.0, 60, &solid);
+    assert!(!player.sprinting);
+}
+
+#[test]
+fn step_offset_decays_to_zero() {
+    let solid = world(&ledge(1));
+    let mut player = standing();
+    let mut peak = 0.0_f32;
+    for _ in 0..60 {
+        player.step(&FORWARD, 0.0, &solid, dry);
+        peak = peak.max(player.step_offset);
+    }
+    assert!(peak > 0.5, "peak = {peak}");
+    assert_eq!(player.step_offset, 0.0);
+}

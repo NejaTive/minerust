@@ -24,6 +24,7 @@ function create() {
       renderDistance: BENCH_RENDER_DISTANCE,
       ambientOcclusion: true,
       clouds: true,
+      autoStep: true,
       showDebug: BENCH_DEBUG,
     })
   }
