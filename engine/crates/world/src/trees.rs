@@ -4,7 +4,7 @@ use crate::block::{AXIS_X, AXIS_Y, AXIS_Z, Block};
 use crate::column::Column;
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
-use crate::terrain::{Biome, Terrain, WATER_LEVEL};
+use crate::terrain::{Biome, Terrain, WATER_LEVEL, WorldType};
 
 pub const MAX_REACH: i32 = 6;
 const FOREST_DENSITY: f32 = 0.04;
@@ -248,6 +248,9 @@ impl Candidate {
 }
 
 pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
+    if terrain.world_type() == WorldType::Flat {
+        return None;
+    }
     let own = candidate(terrain, x, z)?;
     let reach = MAX_SPACING - 1;
     for dz in -reach..=reach {

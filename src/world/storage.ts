@@ -17,6 +17,8 @@ export interface WorldMeta {
   player?: number[]
   time?: number
   weather?: number[]
+  hotbar?: (string | null)[]
+  hotbarSlot?: number
 }
 
 export interface StoredWorld extends WorldMeta {

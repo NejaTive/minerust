@@ -1,3 +1,4 @@
+import type { WorldType } from './kinds'
 import { checkMeta } from './meta'
 import { type SavedColumn, type WorldMeta, type WorldStorage } from './storage'
 
@@ -20,13 +21,17 @@ export interface PersistenceDeps {
   setNewerSave(newer: boolean): void
   randomSeed(): number
   now(): number
+  hotbar(): Pick<WorldMeta, 'hotbar' | 'hotbarSlot'>
 }
 
 export interface WorldStart {
   seed: number
+  worldType?: WorldType
   player?: number[]
   time?: number
   weather?: number[]
+  hotbar?: unknown
+  hotbarSlot?: unknown
 }
 
 type Identity = Pick<WorldMeta, 'name' | 'mode' | 'worldType' | 'createdAt'>
@@ -104,6 +109,7 @@ export class WorldPersistence {
     const meta: WorldMeta = {
       ...this.identity,
       lastPlayed: this.deps.now(),
+      ...this.deps.hotbar(),
       version: this.deps.formatVersion,
       seed: engine.seed(),
       player: Array.from(engine.camera_state()),

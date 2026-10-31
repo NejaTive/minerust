@@ -6,7 +6,7 @@ use world::block::{ATTACH_NEG_X, ATTACH_NEG_Z, ATTACH_POS_X, ATTACH_POS_Z, AXIS_
 use world::column::{Column, WORLD_HEIGHT};
 use world::light::LightMap;
 use world::pos::ColumnPos;
-use world::terrain::Terrain;
+use world::terrain::{Terrain, WorldType};
 use world::world::World;
 
 const SEED: i32 = 1337;
@@ -41,6 +41,22 @@ fn generated_blocks_match_golden() {
         })
         .collect();
     assert_eq!(hashes, GOLDEN_BLOCKS, "blocks: {hashes:#x?}");
+}
+
+#[test]
+fn flat_blocks_match_golden() {
+    let terrain = Terrain::of(SEED, WorldType::Flat);
+    let column = terrain.generate(ColumnPos::new(2, -3));
+    let mut hash = FNV_START;
+    for y in 0..WORLD_HEIGHT {
+        for lz in 0..16 {
+            for lx in 0..16 {
+                let at = IVec3::new(lx, y, lz);
+                fnv(&mut hash, &[column.get(at) as u8, column.get_data(at)]);
+            }
+        }
+    }
+    assert_eq!(hash, GOLDEN_FLAT, "flat: {hash:#x}");
 }
 
 #[test]
@@ -148,10 +164,10 @@ fn oriented_scene_matches_golden() {
 
 const GOLDEN_ORIENTED: u64 = 0xeff95ad1fdd8c92b;
 const GOLDEN_BLOCKS: [u64; 4] = [
-    0x9abcf302903cbfa7,
-    0xa8228d59edcc3d62,
-    0x379f9328de36f1ee,
-    0x0ac62a258542b464,
+    0x9f755dba3546bd87,
+    0xcb4e6f9702519a12,
+    0xc2a569649910afde,
+    0x6de35b0df2692d0e,
 ];
 const GOLDEN_MESHES: [u64; 4] = [
     0xa94f0518d27d0c4a,
@@ -159,3 +175,4 @@ const GOLDEN_MESHES: [u64; 4] = [
     0x2f6e2ca0accc1b54,
     0xbf0d189f2d53fcc5,
 ];
+const GOLDEN_FLAT: u64 = 0x37dceff88f4c0f25;

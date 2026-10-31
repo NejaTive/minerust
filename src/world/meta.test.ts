@@ -23,6 +23,10 @@ describe('checkMeta', () => {
 describe('isReadable', () => {
   it('принимает целый мир', () => expect(isReadable(meta({ time: 0.3 }))).toBe(true))
 
+  it('читает плоский мир', () => {
+    expect(isReadable(meta({ worldType: 'flat' }))).toBe(true)
+  })
+
   it.each([
     ['версия 0', { version: 0 }],
     ['версия дробная', { version: 1.5 }],
@@ -33,7 +37,7 @@ describe('isReadable', () => {
     ['игрок с NaN', { player: [0, NaN, 0, 0, 0, 0] }],
     ['нет названия', { name: undefined as unknown as string }],
     ['неизвестный режим', { mode: 'survival' as unknown as 'creative' }],
-    ['неизвестный тип мира', { worldType: 'flat' as unknown as 'standard' }],
+    ['неизвестный тип мира', { worldType: 'hollow' as unknown as 'standard' }],
     ['дата не число', { lastPlayed: 'вчера' as unknown as number }],
     ['игрок с текстом', { player: [0, 'a', 0, 0, 0, 0] as unknown as number[] }],
   ])('отклоняет: %s', (_name, patch) => {

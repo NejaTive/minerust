@@ -19,5 +19,6 @@
   { "name": "birch_log", "label": "берёзовое бревно", "placeable": true },
   { "name": "birch_leaves", "label": "берёзовая листва", "placeable": true },
   { "name": "spruce_log", "label": "еловое бревно", "placeable": true },
-  { "name": "spruce_leaves", "label": "хвоя", "placeable": true }
+  { "name": "spruce_leaves", "label": "хвоя", "placeable": true },
+  { "name": "bedrock", "label": "коренная порода", "placeable": true }
 ]

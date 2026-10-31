@@ -1,4 +1,5 @@
 import { Engine, type WorldStats } from '@engine'
+import type { WorldType } from '../world/kinds'
 import { NoWebGpuError } from './gpu'
 import type { PlayerInfo, TimeInfo } from './types'
 
@@ -21,11 +22,17 @@ export function fitCanvas(canvas: HTMLCanvasElement, engine?: Engine) {
 export async function createEngine(
   canvas: HTMLCanvasElement,
   seed: number,
+  worldType: WorldType,
   camera?: ArrayLike<number>,
 ): Promise<Engine> {
   fitCanvas(canvas)
   try {
-    return await Engine.create(canvas, camera ? Float32Array.from(camera) : undefined, seed)
+    return await Engine.create(
+      canvas,
+      camera ? Float32Array.from(camera) : undefined,
+      seed,
+      worldType,
+    )
   } catch (e) {
     const text = e instanceof Error ? e.message : String(e)
     throw text.startsWith('WebGPU ') ? new NoWebGpuError(text) : e
@@ -64,7 +71,11 @@ export class FrameLoop {
       if (now - lastFpsTime >= 1000) {
         sink.fps(frames)
         sink.stats(engine.stats())
-        sink.time({ time: engine.time_of_day(), phase: engine.day_phase(), weather: engine.weather() })
+        sink.time({
+          time: engine.time_of_day(),
+          phase: engine.day_phase(),
+          weather: engine.weather(),
+        })
         frames = 0
         lastFpsTime = now
       }

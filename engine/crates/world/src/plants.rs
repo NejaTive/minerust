@@ -2,7 +2,7 @@ use crate::block::Block;
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
-use crate::terrain::{Biome, Terrain, WATER_LEVEL};
+use crate::terrain::{Biome, Terrain, WATER_LEVEL, WorldType};
 use crate::trees::hash;
 
 const GRASS_DENSITY: f32 = 0.12;
@@ -12,6 +12,9 @@ const SALT_PLANT: u64 = 11;
 const SALT_KIND: u64 = 12;
 
 fn plant_at(terrain: &Terrain, x: i32, z: i32) -> Option<Block> {
+    if terrain.world_type() == WorldType::Flat {
+        return None;
+    }
     let roll = (hash(terrain.seed(), x, z, SALT_PLANT) >> 8) as f32 / (1 << 24) as f32;
     if roll >= GRASS_DENSITY + FLOWER_DENSITY {
         return None;

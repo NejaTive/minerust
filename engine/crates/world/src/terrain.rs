@@ -6,6 +6,7 @@ use crate::caves::Caves;
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
+use crate::trees::hash;
 use crate::{plants, trees};
 
 const DIRT_DEPTH: i32 = 3;
@@ -18,6 +19,27 @@ const PLAINS_AMPLITUDE: f32 = 6.0;
 const DESERT_AMPLITUDE: f32 = 4.0;
 const FOREST_AMPLITUDE: f32 = 14.0;
 const HILLS_AMPLITUDE: f32 = 34.0;
+
+const BEDROCK_SCATTER: i32 = 3;
+const SALT_BEDROCK: u64 = 30;
+pub const FLAT_SURFACE: i32 = 4;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum WorldType {
+    #[default]
+    Standard,
+    Flat,
+}
+
+impl WorldType {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "standard" => Some(Self::Standard),
+            "flat" => Some(Self::Flat),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Biome {
@@ -47,6 +69,7 @@ impl BiomeWeights {
 
 pub struct Terrain {
     seed: i32,
+    world_type: WorldType,
     height: FastNoiseLite,
     hilliness: FastNoiseLite,
     temperature: FastNoiseLite,
@@ -56,6 +79,10 @@ pub struct Terrain {
 
 impl Terrain {
     pub fn new(seed: i32) -> Self {
+        Self::of(seed, WorldType::Standard)
+    }
+
+    pub fn of(seed: i32, world_type: WorldType) -> Self {
         let mut height = FastNoiseLite::with_seed(seed);
         height.set_noise_type(Some(NoiseType::OpenSimplex2));
         height.set_fractal_type(Some(FractalType::FBm));
@@ -75,6 +102,7 @@ impl Terrain {
 
         Self {
             seed,
+            world_type,
             height,
             hilliness,
             temperature: climate(2),
@@ -87,7 +115,18 @@ impl Terrain {
         self.seed
     }
 
+    pub fn world_type(&self) -> WorldType {
+        self.world_type
+    }
+
     pub fn biome_weights(&self, x: i32, z: i32) -> BiomeWeights {
+        if self.world_type == WorldType::Flat {
+            return BiomeWeights {
+                plains: 1.0,
+                desert: 0.0,
+                forest: 0.0,
+            };
+        }
         let (x, z) = (x as f32, z as f32);
         let temperature = self.temperature.get_noise_2d(x, z);
         let humidity = self.humidity.get_noise_2d(x, z);
@@ -109,6 +148,9 @@ impl Terrain {
     }
 
     pub(crate) fn surface(&self, x: i32, z: i32, w: BiomeWeights) -> i32 {
+        if self.world_type == WorldType::Flat {
+            return FLAT_SURFACE;
+        }
         let (x, z) = (x as f32, z as f32);
         let hills = smoothstep(-0.2, 0.4, self.hilliness.get_noise_2d(x, z));
         let amplitude = w.plains * PLAINS_AMPLITUDE
@@ -136,6 +178,9 @@ impl Terrain {
     #[doc(hidden)]
     pub fn generate_carved(&self, key: ColumnPos) -> Column {
         let mut column = self.generate_ground(key);
+        if self.world_type == WorldType::Flat {
+            return column;
+        }
         self.caves.carve(
             key,
             &mut column,
@@ -147,6 +192,9 @@ impl Terrain {
 
     #[doc(hidden)]
     pub fn generate_ground(&self, key: ColumnPos) -> Column {
+        if self.world_type == WorldType::Flat {
+            return Self::generate_flat();
+        }
         let mut column = Column::new();
         let origin = key.origin();
         for z in 0..SECTION_SIZE {
@@ -170,6 +218,10 @@ impl Terrain {
                     Block::Grass
                 };
                 for y in 0..=surface {
+                    if self.is_bedrock(wx, y, wz) {
+                        column.set(IVec3::new(x, y, z), Block::Bedrock);
+                        continue;
+                    }
                     let block = match (desert, surface - y) {
                         (_, d) if d < sand_depth => Block::Sand,
                         (false, 0) => top,
@@ -180,6 +232,36 @@ impl Terrain {
                 }
                 for y in surface + 1..=WATER_LEVEL {
                     column.set(IVec3::new(x, y, z), Block::Water);
+                }
+            }
+        }
+        column
+    }
+}
+
+impl Terrain {
+    fn is_bedrock(&self, x: i32, y: i32, z: i32) -> bool {
+        match y {
+            0 => true,
+            1..=BEDROCK_SCATTER => {
+                hash(self.seed, x, z, SALT_BEDROCK + y as u64) % 4 < (4 - y) as u32
+            }
+            _ => false,
+        }
+    }
+
+    fn generate_flat() -> Column {
+        let mut column = Column::new();
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                for y in 0..=FLAT_SURFACE {
+                    let block = match y {
+                        0 => Block::Bedrock,
+                        1 => Block::Stone,
+                        FLAT_SURFACE => Block::Grass,
+                        _ => Block::Dirt,
+                    };
+                    column.set(IVec3::new(x, y, z), block);
                 }
             }
         }

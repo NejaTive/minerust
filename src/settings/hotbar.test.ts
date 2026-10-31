@@ -6,14 +6,11 @@ import {
   HOTBAR_SIZE,
   clearHotbar,
   clearHotbarSlot,
-  loadHotbarContents,
-  loadHotbarSlot,
+  parseHotbarContents,
+  parseHotbarSlot,
   putHotbarSlot,
-  saveHotbarContents,
-  saveHotbarSlot,
   swapHotbarSlots,
 } from './hotbar'
-import { memoryStore } from './store'
 
 const known = new Set(blocks.map((b) => b.name))
 const placeable = new Set(blocks.filter((b) => b.placeable).map((b) => b.name))
@@ -53,61 +50,42 @@ describe('DEFAULT_HOTBAR', () => {
 })
 
 describe('слот хотбара', () => {
-  it('читает сохранённый слот', () => {
-    const store = memoryStore()
-    saveHotbarSlot(store, 3)
-    expect(loadHotbarSlot(store)).toBe(3)
-  })
+  it('принимает допустимый слот', () => expect(parseHotbarSlot(3)).toBe(3))
 
-  it.each(['-1', '99', '1.5', 'abc', ''])('значение «%s» даёт первый слот', (raw) => {
-    expect(loadHotbarSlot(memoryStore({ 'minerust.hotbarSlot': raw }))).toBe(0)
-  })
-
-  it('без записи — первый слот', () => {
-    expect(loadHotbarSlot(memoryStore())).toBe(0)
-  })
+  it.each([-1, 99, 1.5, 'abc', '', null, undefined, Number.NaN])(
+    'значение «%s» даёт первый слот',
+    (raw) => {
+      expect(parseHotbarSlot(raw)).toBe(0)
+    },
+  )
 })
 
 describe('содержимое хотбара', () => {
-  it('без записи — пустое умолчание', () => {
-    expect(loadHotbarContents(memoryStore(), known)).toEqual([...DEFAULT_HOTBAR])
+  it('нет значения — пустое умолчание', () => {
+    expect(parseHotbarContents(undefined, known)).toEqual([...DEFAULT_HOTBAR])
   })
 
-  it('читает сохранённые слоты', () => {
-    const store = memoryStore()
+  it('читает слоты как есть', () => {
     const slots = [...SAMPLE]
     slots[0] = 'dandelion'
     slots[1] = null
-    saveHotbarContents(store, slots)
-    expect(loadHotbarContents(store, known)).toEqual(slots)
-  })
-
-  it('сохраняет пустой хотбар и переживает перечитывание', () => {
-    const store = memoryStore()
-    const slots = Array.from({ length: HOTBAR_SIZE }, () => null)
-    saveHotbarContents(store, slots)
-    expect(loadHotbarContents(store, known)).toEqual(slots)
+    expect(parseHotbarContents(slots, known)).toEqual(slots)
   })
 
   it.each([
-    ['не JSON', '{'],
-    ['не массив', '{"a":1}'],
-    ['короткий массив', '["grass"]'],
-    ['длинный массив', JSON.stringify([...SAMPLE, 'dirt'])],
-    ['неизвестное имя', JSON.stringify(['no_such_block', ...SAMPLE.slice(1)])],
-    ['не строка и не null', JSON.stringify([1, ...SAMPLE.slice(1)])],
+    ['не массив', { a: 1 }],
+    ['короткий массив', ['grass']],
+    ['длинный массив', [...SAMPLE, 'dirt']],
+    ['неизвестное имя', ['no_such_block', ...SAMPLE.slice(1)]],
+    ['не строка и не null', [1, ...SAMPLE.slice(1)]],
   ])('мусор «%s» → умолчание', (_label, raw) => {
-    expect(loadHotbarContents(memoryStore({ 'minerust.hotbar': raw }), known)).toEqual([
-      ...DEFAULT_HOTBAR,
-    ])
+    expect(parseHotbarContents(raw, known)).toEqual([...DEFAULT_HOTBAR])
   })
 
   it('имя из blocks() (в т.ч. неразмещаемое) принимается', () => {
-    const store = memoryStore()
     const slots = [...SAMPLE]
     slots[0] = 'air'
-    saveHotbarContents(store, slots)
-    expect(loadHotbarContents(store, known)[0]).toBe('air')
+    expect(parseHotbarContents(slots, known)[0]).toBe('air')
   })
 })
 

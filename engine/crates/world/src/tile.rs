@@ -27,10 +27,11 @@ pub enum Tile {
     SpruceLogSide,
     SpruceLogTop,
     SpruceLeaves,
+    Bedrock,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 24] = [
+    pub const ALL: [Tile; 25] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -55,6 +56,7 @@ impl Tile {
         Tile::SpruceLogSide,
         Tile::SpruceLogTop,
         Tile::SpruceLeaves,
+        Tile::Bedrock,
     ];
 
     pub const fn frames(self) -> u32 {
@@ -157,7 +159,7 @@ impl Tile {
             Cobblestone => "cobblestone", BirchLogSide => "birch_log_side",
             BirchLogTop => "birch_log_top", BirchLeaves => "birch_leaves",
             SpruceLogSide => "spruce_log_side", SpruceLogTop => "spruce_log_top",
-            SpruceLeaves => "spruce_leaves",
+            SpruceLeaves => "spruce_leaves", Bedrock => "bedrock",
         }
     }
 }
