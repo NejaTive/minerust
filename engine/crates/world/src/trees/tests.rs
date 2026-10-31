@@ -1,9 +1,34 @@
 use glam::IVec2;
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use super::*;
+use crate::block::{AXIS_X, AXIS_Z};
 use crate::column::WORLD_HEIGHT;
+
+fn forest_trees() -> &'static [Tree] {
+    static TREES: OnceLock<Vec<Tree>> = OnceLock::new();
+    TREES.get_or_init(|| {
+        let terrain = Terrain::new(1337);
+        (-1024..1024)
+            .flat_map(|z| (-1024..1024).map(move |x| (x, z)))
+            .filter_map(|(x, z)| tree_at(&terrain, x, z))
+            .collect()
+    })
+}
+
+fn of_kind(kind: TreeKind) -> impl Iterator<Item = &'static Tree> {
+    forest_trees().iter().filter(move |t| t.kind == kind)
+}
+
+fn spread(tree: &Tree) -> i32 {
+    tree.leaves()
+        .iter()
+        .map(|l| (l.x - tree.base.x).abs().max((l.z - tree.base.z).abs()))
+        .max()
+        .unwrap()
+}
 
 #[test]
 fn same_seed_same_trees() {
@@ -22,36 +47,235 @@ fn same_seed_same_trees() {
 }
 
 #[test]
-fn trees_keep_their_distance_and_shape() {
+fn tree_geometry_is_deterministic() {
+    for tree in forest_trees().iter().take(300) {
+        let copy = *tree;
+        assert_eq!(tree.logs(), copy.logs());
+        assert_eq!(tree.leaves(), copy.leaves());
+        assert_eq!(tree.branches(), copy.branches());
+    }
+}
+
+#[test]
+fn every_kind_grows() {
+    for kind in [
+        TreeKind::Oak,
+        TreeKind::Birch,
+        TreeKind::Spruce,
+        TreeKind::BigOak,
+    ] {
+        assert!(of_kind(kind).count() > 50, "{kind:?}");
+    }
+}
+
+#[test]
+fn trees_stand_on_the_surface_with_a_vertical_trunk() {
     let terrain = Terrain::new(1337);
-    let mut trunks = HashSet::new();
-    for z in -512..512 {
-        for x in -512..512 {
-            if let Some(tree) = tree_at(&terrain, x, z) {
-                assert!((MIN_TRUNK..=MAX_TRUNK).contains(&tree.height));
-                assert_eq!(tree.base.y, terrain.surface_height(x, z) + 1);
-                let leaves: Vec<IVec3> = tree.leaves().collect();
-                let spread = leaves
-                    .iter()
-                    .map(|l| (l.x - x).abs().max((l.z - z).abs()))
-                    .max();
-                assert_eq!(spread, Some(CROWN_RADIUS));
-                let top = tree.base.y + tree.height - 1;
-                assert!(leaves.contains(&IVec3::new(x, top + 1, z)));
-                assert!(leaves.iter().all(|l| (top - 2..=top + 1).contains(&l.y)));
-                trunks.insert((x, z));
-            }
+    for tree in forest_trees() {
+        assert_eq!(
+            tree.base.y,
+            terrain.surface_height(tree.base.x, tree.base.z) + 1
+        );
+        let trunk: Vec<_> = tree.logs().into_iter().take(tree.height as usize).collect();
+        assert_eq!(trunk.len(), tree.height as usize);
+        for (dy, (pos, axis)) in trunk.into_iter().enumerate() {
+            assert_eq!((pos, axis), (tree.base + IVec3::Y * dy as i32, AXIS_Y));
         }
     }
-    assert!(trunks.len() > 500, "only {} trees", trunks.len());
-    for &(x, z) in &trunks {
-        for dz in -(MIN_SPACING - 1)..MIN_SPACING {
-            for dx in -(MIN_SPACING - 1)..MIN_SPACING {
+}
+
+#[test]
+fn oak_has_a_round_crown_of_radius_two() {
+    for tree in of_kind(TreeKind::Oak) {
+        assert!((4..=6).contains(&tree.height));
+        assert!(tree.branches().is_empty());
+        assert_eq!(tree.logs().len(), tree.height as usize);
+        let leaves = tree.leaves();
+        assert_eq!(spread(tree), 2);
+        let top = tree.top();
+        assert!(leaves.contains(&IVec3::new(tree.base.x, top + 1, tree.base.z)));
+        assert!(leaves.iter().all(|l| (top - 2..=top + 1).contains(&l.y)));
+    }
+}
+
+#[test]
+fn birch_is_taller_with_a_narrower_crown() {
+    let radii: HashSet<i32> = of_kind(TreeKind::Birch).map(spread).collect();
+    assert_eq!(radii, HashSet::from([1, 2]));
+    for tree in of_kind(TreeKind::Birch) {
+        assert!((5..=7).contains(&tree.height));
+        assert!(tree.branches().is_empty());
+        let top = tree.top();
+        assert!(
+            tree.leaves()
+                .contains(&IVec3::new(tree.base.x, top + 1, tree.base.z))
+        );
+        assert!(
+            tree.leaves()
+                .iter()
+                .all(|l| (top - 2..=top + 1).contains(&l.y))
+        );
+    }
+    let heights: HashSet<i32> = of_kind(TreeKind::Birch).map(|t| t.height).collect();
+    assert_eq!(heights, HashSet::from([5, 6, 7]));
+}
+
+#[test]
+fn spruce_is_a_cone_of_layers_with_gaps() {
+    for tree in of_kind(TreeKind::Spruce) {
+        assert!((7..=10).contains(&tree.height));
+        assert!(tree.branches().is_empty());
+        let leaves = tree.leaves();
+        let radius_at = |y: i32| {
+            leaves
+                .iter()
+                .filter(|l| l.y == y)
+                .map(|l| (l.x - tree.base.x).abs().max((l.z - tree.base.z).abs()))
+                .max()
+        };
+        let top = tree.top();
+        let caps = leaves.iter().filter(|l| l.y > top).count();
+        assert!((1..=2).contains(&caps), "{caps} cap blocks");
+        assert!(leaves.contains(&IVec3::new(tree.base.x, top + 1, tree.base.z)));
+        let layers: Vec<i32> = (tree.base.y..=top)
+            .filter(|&y| radius_at(y).is_some())
+            .collect();
+        assert_eq!(layers.last(), Some(&top));
+        assert!(layers.windows(2).all(|w| w[1] - w[0] >= 2), "{layers:?}");
+        assert!(layers.iter().all(|&y| y >= tree.base.y + 2));
+        let radii: Vec<i32> = layers.iter().map(|&y| radius_at(y).unwrap()).collect();
+        assert!(radii.windows(2).all(|w| w[0] >= w[1]), "{radii:?}");
+        assert_eq!(radii.last(), Some(&1));
+        assert!((2..=3).contains(&radii[0]), "{radii:?}");
+    }
+    let bottoms: HashSet<i32> = of_kind(TreeKind::Spruce).map(spread).collect();
+    assert_eq!(bottoms, HashSet::from([2, 3]));
+}
+
+#[test]
+fn big_oak_has_diagonal_branches_with_leaf_balls() {
+    let mut branch_counts = HashSet::new();
+    for tree in of_kind(TreeKind::BigOak) {
+        assert!((6..=9).contains(&tree.height));
+        let branches = tree.branches();
+        assert!((2..=4).contains(&branches.len()));
+        branch_counts.insert(branches.len());
+        let dirs: HashSet<IVec3> = branches.iter().map(|b| b.dir).collect();
+        assert_eq!(dirs.len(), branches.len());
+        let logs = tree.logs();
+        let leaves: HashSet<IVec3> = tree.leaves().into_iter().collect();
+        for branch in &branches {
+            let expected = if branch.dir.x != 0 { AXIS_X } else { AXIS_Z };
+            assert_eq!(branch.axis, expected);
+            assert!((2..=3).contains(&branch.length));
+            assert!((2..=3).contains(&branch.radius));
+            assert!(branch.start.y >= tree.base.y + tree.height / 2);
+            assert!(branch.start.y < tree.top());
+            let mut previous = branch.start;
+            for (log, axis) in branch.logs() {
+                assert_eq!(axis, expected);
+                assert!(logs.contains(&(log, axis)));
+                assert_eq!(log.y - previous.y, 1);
+                assert_eq!((log - previous).abs().x + (log - previous).abs().z, 1);
+                previous = log;
+            }
+            assert_eq!(previous, branch.tip());
+            let r = branch.radius;
+            for offset in [IVec3::Y * r, IVec3::NEG_Y * r, branch.dir * r] {
+                assert!(
+                    leaves.contains(&(branch.tip() + offset))
+                        || logs.iter().any(|l| l.0 == branch.tip() + offset)
+                );
+            }
+        }
+        let top_center = IVec3::new(tree.base.x, tree.base.y + tree.height, tree.base.z);
+        assert!(leaves.contains(&top_center));
+        assert!(leaves.contains(&(top_center + IVec3::Y * 2)));
+        assert!(spread(tree) <= MAX_REACH);
+    }
+    assert_eq!(branch_counts, HashSet::from([2, 3, 4]));
+}
+
+#[test]
+fn trees_keep_their_distance() {
+    let trees = forest_trees();
+    assert!(trees.len() > 500, "only {} trees", trees.len());
+    let by_pos: std::collections::HashMap<(i32, i32), TreeKind> = trees
+        .iter()
+        .map(|t| ((t.base.x, t.base.z), t.kind))
+        .collect();
+    for tree in trees {
+        let (x, z) = (tree.base.x, tree.base.z);
+        for dz in -(MAX_SPACING - 1)..MAX_SPACING {
+            for dx in -(MAX_SPACING - 1)..MAX_SPACING {
+                let Some(&other) = by_pos.get(&(x + dx, z + dz)) else {
+                    continue;
+                };
                 if (dx, dz) != (0, 0) {
-                    assert!(!trunks.contains(&(x + dx, z + dz)), "{x}, {z} +{dx}, {dz}");
+                    let near = dx.abs().max(dz.abs());
+                    assert!(near >= spacing(tree.kind, other), "{x}, {z} +{dx}, {dz}");
                 }
             }
         }
+    }
+}
+
+#[test]
+fn forest_mix_matches_the_shares() {
+    let terrain = Terrain::new(1337);
+    let forest: Vec<&Tree> = forest_trees()
+        .iter()
+        .filter(|t| {
+            terrain.biome_at(t.base.x, t.base.z) == Biome::Forest && t.base.y <= HIGHLAND_HEIGHT
+        })
+        .collect();
+    assert!(forest.len() > 2000, "{} forest trees", forest.len());
+    let share =
+        |kind| forest.iter().filter(|t| t.kind == kind).count() as f32 / forest.len() as f32;
+    let (oak, birch, spruce, big) = (
+        share(TreeKind::Oak),
+        share(TreeKind::Birch),
+        share(TreeKind::Spruce),
+        share(TreeKind::BigOak),
+    );
+    assert!((0.45..0.55).contains(&oak), "oak {oak}");
+    assert!((0.25..0.35).contains(&birch), "birch {birch}");
+    assert!((0.06..0.14).contains(&spruce), "spruce {spruce}");
+    assert!((0.06..0.14).contains(&big), "big oak {big}");
+}
+
+#[test]
+fn plains_grow_only_oak_and_birch_below_the_hills() {
+    let terrain = Terrain::new(1337);
+    let plains: Vec<&Tree> = forest_trees()
+        .iter()
+        .filter(|t| {
+            terrain.biome_at(t.base.x, t.base.z) == Biome::Plains && t.base.y <= HIGHLAND_HEIGHT
+        })
+        .collect();
+    assert!(plains.len() > 20, "{} plains trees", plains.len());
+    assert!(
+        plains
+            .iter()
+            .all(|t| matches!(t.kind, TreeKind::Oak | TreeKind::Birch))
+    );
+}
+
+#[test]
+fn hills_are_mostly_spruce_in_forest_and_plains() {
+    let terrain = Terrain::new(1337);
+    for biome in [Biome::Forest, Biome::Plains] {
+        let hills: Vec<&Tree> = forest_trees()
+            .iter()
+            .filter(|t| t.base.y > HIGHLAND_HEIGHT && terrain.biome_at(t.base.x, t.base.z) == biome)
+            .collect();
+        assert!(hills.len() > 10, "{biome:?}: {} trees", hills.len());
+        let spruce = hills.iter().filter(|t| t.kind == TreeKind::Spruce).count();
+        assert!(
+            spruce * 10 >= hills.len() * 7,
+            "{biome:?}: {spruce}/{}",
+            hills.len()
+        );
     }
 }
 
@@ -90,17 +314,31 @@ fn forest_is_denser_than_plains_and_desert_is_empty() {
     let [plains, desert, forest] = [0, 1, 2].map(|b| trees[b] as f32 / area[b] as f32);
     assert!(area.iter().all(|&a| a > 10_000), "{area:?}");
     assert_eq!(trees[Biome::Desert as usize], 0, "{desert}");
-    assert!(forest > 0.02 && plains > 0.0005, "{forest} {plains}");
+    assert!(forest > 0.01 && plains > 0.0003, "{forest} {plains}");
     assert!(forest > plains * 5.0, "{forest} {plains}");
 }
 
+const KINDS: [TreeKind; 4] = [
+    TreeKind::Oak,
+    TreeKind::Birch,
+    TreeKind::Spruce,
+    TreeKind::BigOak,
+];
+
 #[test]
 fn crowns_cross_columns_seamlessly() {
+    for kind in KINDS {
+        assert_seamless(kind);
+    }
+}
+
+fn assert_seamless(kind: TreeKind) {
     let terrain = Terrain::new(1337);
-    let tree = border_tree(&terrain);
+    let tree = border_tree(&terrain, kind);
     let center = ColumnPos::of_block(tree.base);
     let leaf_columns: HashSet<_> = tree
         .leaves()
+        .iter()
         .map(|l| (l.x.div_euclid(SECTION_SIZE), l.z.div_euclid(SECTION_SIZE)))
         .collect();
     assert!(leaf_columns.len() > 1, "{tree:?} does not cross a border");
@@ -133,14 +371,18 @@ fn crowns_cross_columns_seamlessly() {
         .flat_map(|z| (min.x..min.x + size).map(move |x| (x, z)))
         .filter_map(|(x, z)| tree_at(&terrain, x, z))
         .collect();
-    for log in trees.iter().flat_map(Tree::logs) {
-        if inside(log) {
-            window[index(log)] = Block::Log;
+    for tree in &trees {
+        for (log, _) in tree.logs() {
+            if inside(log) {
+                window[index(log)] = tree.kind.log();
+            }
         }
     }
-    for leaf in trees.iter().flat_map(Tree::leaves) {
-        if inside(leaf) && window[index(leaf)] == Block::Air {
-            window[index(leaf)] = Block::Leaves;
+    for tree in &trees {
+        for leaf in tree.leaves() {
+            if inside(leaf) && window[index(leaf)] == Block::Air {
+                window[index(leaf)] = tree.kind.leaves();
+            }
         }
     }
 
@@ -159,7 +401,7 @@ fn crowns_cross_columns_seamlessly() {
                             .into_iter()
                             .min()
                             .unwrap();
-                        if from_edge >= CROWN_RADIUS {
+                        if from_edge >= MAX_REACH {
                             assert_eq!(column.get(local), window[index(world)], "{world}");
                             compared += 1;
                         }
@@ -174,13 +416,19 @@ fn crowns_cross_columns_seamlessly() {
 #[test]
 fn leaves_do_not_replace_logs_or_ground() {
     let terrain = Terrain::new(1337);
-    let tree = border_tree(&terrain);
+    let tree = border_tree(&terrain, TreeKind::BigOak);
     let key = ColumnPos::of_block(tree.base);
     let ground = terrain.generate_carved(key);
     let column = terrain.generate_trees(key);
     let origin = key.origin();
-    for log in tree.logs() {
-        assert_eq!(column.get(log - origin), Block::Log);
+    for (log, axis) in tree.logs() {
+        let local = log - origin;
+        if Column::contains(local) {
+            assert_eq!(
+                (column.get(local), column.get_data(local)),
+                (Block::Log, axis)
+            );
+        }
     }
     assert_eq!(column.get(tree.base - origin - IVec3::Y), Block::Grass);
     for y in 0..WORLD_HEIGHT {

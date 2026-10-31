@@ -45,7 +45,7 @@ var block_sampler: sampler;
 // Запись на слой: (кадры, кадров в секунду, прокрутка боковых граней в блоках в секунду, 0).
 // Строит `world::tile::animation_table`; размер — `LAYER_COUNT`.
 @group(0) @binding(3)
-var<uniform> animation: array<vec4<f32>, 48>;
+var<uniform> animation: array<vec4<f32>, 54>;
 
 @group(1) @binding(0)
 var<storage, read> quads: array<u32>;

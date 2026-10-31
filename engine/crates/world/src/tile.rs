@@ -21,10 +21,16 @@ pub enum Tile {
     Lava,
     Obsidian,
     Cobblestone,
+    BirchLogSide,
+    BirchLogTop,
+    BirchLeaves,
+    SpruceLogSide,
+    SpruceLogTop,
+    SpruceLeaves,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 18] = [
+    pub const ALL: [Tile; 24] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -43,6 +49,12 @@ impl Tile {
         Tile::Lava,
         Tile::Obsidian,
         Tile::Cobblestone,
+        Tile::BirchLogSide,
+        Tile::BirchLogTop,
+        Tile::BirchLeaves,
+        Tile::SpruceLogSide,
+        Tile::SpruceLogTop,
+        Tile::SpruceLeaves,
     ];
 
     pub const fn frames(self) -> u32 {
@@ -79,7 +91,13 @@ impl Tile {
     pub fn is_cutout(self) -> bool {
         matches!(
             self,
-            Tile::Leaves | Tile::TallGrass | Tile::Poppy | Tile::Dandelion | Tile::Torch
+            Tile::Leaves
+                | Tile::BirchLeaves
+                | Tile::SpruceLeaves
+                | Tile::TallGrass
+                | Tile::Poppy
+                | Tile::Dandelion
+                | Tile::Torch
         )
     }
 }
@@ -136,7 +154,10 @@ impl Tile {
             Leaves => "leaves", Water => "water", Glowstone => "glowstone",
             TallGrass => "tall_grass", Poppy => "poppy", Dandelion => "dandelion",
             Torch => "torch", Gravel => "gravel", Lava => "lava", Obsidian => "obsidian",
-            Cobblestone => "cobblestone",
+            Cobblestone => "cobblestone", BirchLogSide => "birch_log_side",
+            BirchLogTop => "birch_log_top", BirchLeaves => "birch_leaves",
+            SpruceLogSide => "spruce_log_side", SpruceLogTop => "spruce_log_top",
+            SpruceLeaves => "spruce_leaves",
         }
     }
 }

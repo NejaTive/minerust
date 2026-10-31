@@ -1,6 +1,6 @@
 use super::*;
 
-const ALL: [Block; 17] = Block::ALL;
+const ALL: [Block; 21] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -8,7 +8,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(17), Err(17));
+    assert_eq!(Block::try_from(21), Err(21));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -57,7 +57,12 @@ fn solid_and_opaque() {
         assert_eq!(block.is_solid(), solid, "{block:?}");
         let opaque = !matches!(
             block,
-            Block::Air | Block::Leaves | Block::Water | Block::Lava
+            Block::Air
+                | Block::Leaves
+                | Block::BirchLeaves
+                | Block::SpruceLeaves
+                | Block::Water
+                | Block::Lava
         ) && !plant;
         assert_eq!(block.is_targetable(), solid || plant, "{block:?}");
         assert_eq!(block.needs_support(), plant, "{block:?}");
@@ -70,9 +75,13 @@ fn solid_and_opaque() {
 fn render_layers() {
     for block in ALL {
         let layer = match block {
-            Block::Leaves | Block::TallGrass | Block::Poppy | Block::Dandelion | Block::Torch => {
-                RenderLayer::Cutout
-            }
+            Block::Leaves
+            | Block::BirchLeaves
+            | Block::SpruceLeaves
+            | Block::TallGrass
+            | Block::Poppy
+            | Block::Dandelion
+            | Block::Torch => RenderLayer::Cutout,
             Block::Water => RenderLayer::Translucent,
             _ => RenderLayer::Opaque,
         };
@@ -212,7 +221,7 @@ fn support_direction_by_block() {
 fn only_log_torch_and_water_use_data() {
     for block in ALL {
         let expected = match block {
-            Block::Log => DataKind::Axis,
+            Block::Log | Block::BirchLog | Block::SpruceLog => DataKind::Axis,
             Block::Torch => DataKind::Attachment,
             Block::Water | Block::Lava => DataKind::Fluid,
             _ => DataKind::None,
@@ -261,4 +270,49 @@ fn lava_is_an_emissive_fluid_and_hardened_blocks_are_cubes() {
     assert_eq!(Block::from_name("lava"), Some(Block::Lava));
     assert_eq!(Block::from_name("obsidian"), Some(Block::Obsidian));
     assert_eq!(Block::from_name("cobblestone"), Some(Block::Cobblestone));
+}
+
+#[test]
+fn tree_blocks_are_selectable_with_russian_labels() {
+    for (name, block, label) in [
+        ("birch_log", Block::BirchLog, "берёзовое бревно"),
+        ("birch_leaves", Block::BirchLeaves, "берёзовая листва"),
+        ("spruce_log", Block::SpruceLog, "еловое бревно"),
+        ("spruce_leaves", Block::SpruceLeaves, "хвоя"),
+    ] {
+        assert_eq!(Block::from_name(name), Some(block));
+        assert_eq!(block.def().label, label);
+        assert!(block.icon_pixels().is_some(), "{name}");
+    }
+}
+
+#[test]
+fn tree_logs_are_axis_blocks_with_their_own_tiles() {
+    for (block, side, end) in [
+        (Block::BirchLog, Tile::BirchLogSide, Tile::BirchLogTop),
+        (Block::SpruceLog, Tile::SpruceLogSide, Tile::SpruceLogTop),
+    ] {
+        assert!(block.is_log() && block.is_solid() && block.is_opaque());
+        assert_eq!(block.tile(Facing::Side), Some(side));
+        assert_eq!(block.tile(Facing::Top), Some(end));
+        assert_eq!(block.tile(Facing::Bottom), Some(end));
+        assert_eq!(block.placement_data(IVec3::Y), Some(AXIS_Y));
+        assert_eq!(block.placement_data(IVec3::NEG_X), Some(AXIS_X));
+        assert_eq!(block.placement_data(IVec3::Z), Some(AXIS_Z));
+    }
+    assert!(Block::Log.is_log() && !Block::Leaves.is_log() && !Block::Stone.is_log());
+}
+
+#[test]
+fn tree_leaves_are_translucent_cubes_like_oak_leaves() {
+    for (block, tile) in [
+        (Block::BirchLeaves, Tile::BirchLeaves),
+        (Block::SpruceLeaves, Tile::SpruceLeaves),
+    ] {
+        assert!(block.is_solid() && !block.is_opaque());
+        assert_eq!(block.render_layer(), RenderLayer::Cutout);
+        assert_eq!(block.tile(Facing::Side), Some(tile));
+        assert!(tile.is_cutout());
+        assert_eq!(block.emission(), 0);
+    }
 }

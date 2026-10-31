@@ -3,7 +3,7 @@ use glam::IVec3;
 use mesh::mesh::quad_bytes;
 use mesh::mesher::{MeshOptions, mesh_world_column};
 use world::block::{ATTACH_NEG_X, ATTACH_NEG_Z, ATTACH_POS_X, ATTACH_POS_Z, AXIS_X, AXIS_Z, Block};
-use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
+use world::column::{Column, WORLD_HEIGHT};
 use world::light::LightMap;
 use world::pos::ColumnPos;
 use world::terrain::Terrain;
@@ -28,12 +28,12 @@ fn generated_blocks_match_golden() {
         .iter()
         .map(|&(x, z)| {
             let column = terrain.generate(ColumnPos::new(x, z));
-            assert!((0..COLUMN_SECTIONS).all(|sy| column.section(sy).data().is_none()));
             let mut hash = FNV_START;
             for y in 0..WORLD_HEIGHT {
                 for lz in 0..16 {
                     for lx in 0..16 {
-                        fnv(&mut hash, &[column.get(IVec3::new(lx, y, lz)) as u8]);
+                        let at = IVec3::new(lx, y, lz);
+                        fnv(&mut hash, &[column.get(at) as u8, column.get_data(at)]);
                     }
                 }
             }
@@ -148,14 +148,14 @@ fn oriented_scene_matches_golden() {
 
 const GOLDEN_ORIENTED: u64 = 0xeff95ad1fdd8c92b;
 const GOLDEN_BLOCKS: [u64; 4] = [
-    0xab405e38f0b2b8e5,
-    0x828fe77fdb94e88f,
-    0xe69a701bfc6595d0,
-    0x2df855bcc2d3a74d,
+    0x9abcf302903cbfa7,
+    0xa8228d59edcc3d62,
+    0x379f9328de36f1ee,
+    0x0ac62a258542b464,
 ];
 const GOLDEN_MESHES: [u64; 4] = [
-    0x86fd391b3bb4f912,
-    0x9a40f74908ce2166,
+    0xa94f0518d27d0c4a,
+    0x92ef8c3c82ed38f5,
     0x2f6e2ca0accc1b54,
-    0x8a0f36638becbe17,
+    0xbf0d189f2d53fcc5,
 ];

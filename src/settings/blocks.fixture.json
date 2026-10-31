@@ -15,5 +15,9 @@
   { "name": "gravel", "label": "гравий", "placeable": true },
   { "name": "lava", "label": "лава", "placeable": true },
   { "name": "obsidian", "label": "обсидиан", "placeable": true },
-  { "name": "cobblestone", "label": "булыжник", "placeable": true }
+  { "name": "cobblestone", "label": "булыжник", "placeable": true },
+  { "name": "birch_log", "label": "берёзовое бревно", "placeable": true },
+  { "name": "birch_leaves", "label": "берёзовая листва", "placeable": true },
+  { "name": "spruce_log", "label": "еловое бревно", "placeable": true },
+  { "name": "spruce_leaves", "label": "хвоя", "placeable": true }
 ]
