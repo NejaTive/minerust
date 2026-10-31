@@ -25,7 +25,7 @@ defineProps<{
   place-items: center;
   padding: 16px;
   color: #fff;
-  background: #1b1f27;
+  background: #1b1b1b;
 }
 .card {
   max-width: 480px;
@@ -33,14 +33,14 @@ defineProps<{
 }
 h1 {
   margin: 0 0 12px;
-  font-size: 24px;
+  font-size: var(--px-fs);
 }
 p {
   margin: 0 0 10px;
 }
 .reason {
-  color: #b8c0cc;
-  font-size: 13px;
+  color: var(--px-text-dim);
+  font-size: var(--px-fs-s);
   word-break: break-word;
 }
 </style>

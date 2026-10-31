@@ -22,14 +22,13 @@ describe('classifyKeyDown', () => {
     })
   })
 
-  it('N — новый мир один раз, автоповтор гасится', () => {
-    expect(classifyKeyDown(key('KeyN'), true, false)).toEqual({ type: 'new-world' })
-    expect(classifyKeyDown(key('KeyN', { repeat: true }), true, false)).toEqual({ type: 'none' })
-  })
-
   it('хоткей с модификатором — системное сочетание, идёт как обычная клавиша', () => {
-    expect(classifyKeyDown(key('KeyN', { ctrlKey: true }), true, false)).toEqual({ type: 'key' })
-    expect(classifyKeyDown(key('KeyN', { metaKey: true }), false, false)).toEqual({ type: 'none' })
+    expect(classifyKeyDown(key('BracketLeft', { ctrlKey: true }), true, false)).toEqual({
+      type: 'key',
+    })
+    expect(classifyKeyDown(key('BracketLeft', { metaKey: true }), false, false)).toEqual({
+      type: 'none',
+    })
   })
 
   it('без захвата курсора игровые клавиши игнорируются', () => {

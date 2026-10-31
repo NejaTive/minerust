@@ -14,7 +14,6 @@ const CONTROLS = [
   { keys: ['ПКМ'], action: 'поставить блок' },
   { keys: ['1–9', 'колесо'], action: 'слот хотбара (пусто — рука пуста)' },
   { keys: ['E'], action: 'креатив-инвентарь' },
-  { keys: ['N'], action: 'новый мир (хотбар очищается)' },
   { keys: ['[', ']'], action: 'дальность прорисовки' },
 ]
 </script>
@@ -46,6 +45,6 @@ dt {
 }
 dd {
   margin: 0;
-  color: #d5dae2;
+  color: var(--px-text);
 }
 </style>

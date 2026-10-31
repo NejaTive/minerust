@@ -11,7 +11,6 @@ export interface InputTarget {
   slotCount: number
   selectSlot(slot: number): void
   changeRenderDistance(delta: number): void
-  askNewWorld(): void
   lockChanged(locked: boolean): void
   lockLostAfterInventory(): void
   inventoryGrace(): boolean
@@ -106,8 +105,6 @@ export function bindInput(target: InputTarget): { unbind(): void; isLocked(): bo
       switch (command.type) {
         case 'distance':
           return target.changeRenderDistance(command.delta)
-        case 'new-world':
-          return target.askNewWorld()
         default:
           return
       }
@@ -118,8 +115,6 @@ export function bindInput(target: InputTarget): { unbind(): void; isLocked(): bo
     switch (command.type) {
       case 'distance':
         return target.changeRenderDistance(command.delta)
-      case 'new-world':
-        return target.askNewWorld()
       case 'noclip':
         return target.engine()?.toggle_noclip()
       case 'time-fast':

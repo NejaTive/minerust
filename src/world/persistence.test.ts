@@ -7,7 +7,17 @@ import {
 } from './persistence'
 import type { SavedColumn, SavedWorld, WorldMeta, WorldStorage } from './storage'
 
-const goodMeta: WorldMeta = { version: 2, seed: 7, player: [1, 2, 3, 0, 0, 0], time: 0.5 }
+const goodMeta: WorldMeta = {
+  version: 2,
+  seed: 7,
+  name: 'Мир 1',
+  mode: 'creative',
+  worldType: 'standard',
+  createdAt: 100,
+  lastPlayed: 200,
+  player: [1, 2, 3, 0, 0, 0],
+  time: 0.5,
+}
 
 function fakeStorage(saved: SavedWorld | null = null) {
   const written: { meta: WorldMeta; columns: SavedColumn[] }[] = []
@@ -28,6 +38,7 @@ function setup(storage: WorldStorage | null, formatVersion = 2) {
     notify: (text) => notes.push(text),
     setNewerSave: (value) => newer.push(value),
     randomSeed: () => 42,
+    now: () => 5000,
   }
   return { persistence: new WorldPersistence(deps), notes, newer }
 }
@@ -75,18 +86,6 @@ describe('WorldPersistence.load', () => {
     expect(storage.clear).not.toHaveBeenCalled()
   })
 
-  it('«Новый мир» снимает защиту нового сохранения', async () => {
-    const meta = { ...goodMeta, version: 9 }
-    const { storage, written } = fakeStorage({ meta, columns: [] })
-    const { persistence, newer } = setup(storage)
-    await persistence.load()
-    await persistence.reset()
-    expect(storage.clear).toHaveBeenCalled()
-    expect(newer).toEqual([true, false])
-    await persistence.save(fakeEngine())
-    expect(written).toHaveLength(1)
-  })
-
   it('битые метаданные — база очищается, сид случайный', async () => {
     const meta = { ...goodMeta, seed: Number.NaN }
     const { storage } = fakeStorage({ meta, columns: [] })
@@ -114,11 +113,16 @@ describe('WorldPersistence.load', () => {
 
 describe('WorldPersistence.save / importInto', () => {
   it('записывает изменённые колонки и состояние игрока', async () => {
-    const { storage, written } = fakeStorage()
+    const { storage, written } = fakeStorage({ meta: goodMeta, columns: [] })
     const { persistence } = setup(storage)
     await persistence.load()
     await persistence.save(fakeEngine([3, -4]))
     expect(written[0].meta).toEqual({
+      name: 'Мир 1',
+      mode: 'creative',
+      worldType: 'standard',
+      createdAt: 100,
+      lastPlayed: 5000,
       version: 2,
       seed: 7,
       player: [1, 2, 3, 0, 0, 0],
