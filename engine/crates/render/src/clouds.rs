@@ -9,12 +9,16 @@ pub(crate) const CLOUD_VERTICES: u32 = 36;
 const DAY_CLOUD: Vec3 = Vec3::new(1.0, 1.0, 1.0);
 const DUSK_CLOUD: Vec3 = Vec3::new(1.0, 0.6, 0.42);
 const NIGHT_CLOUD: Vec3 = Vec3::new(0.1, 0.11, 0.16);
+const RAIN_CLOUD: Vec3 = Vec3::new(0.38, 0.4, 0.45);
+const FLASH_CLOUD: Vec3 = Vec3::new(0.9, 0.93, 1.0);
 const DUSK_STRENGTH: f32 = 0.8;
 
-pub(crate) fn cloud_color(night: f32, warm: f32) -> Vec3 {
-    DAY_CLOUD
+pub(crate) fn cloud_color(night: f32, warm: f32, rain: f32, flash: f32) -> Vec3 {
+    let dull = DAY_CLOUD
         .lerp(NIGHT_CLOUD, night)
-        .lerp(DUSK_CLOUD, warm * DUSK_STRENGTH)
+        .lerp(DUSK_CLOUD, warm * DUSK_STRENGTH);
+    dull.lerp(RAIN_CLOUD * (1.0 - 0.7 * night), rain)
+        .lerp(FLASH_CLOUD, flash * 0.8)
 }
 
 pub(crate) fn create_cloud_texture(device: &wgpu::Device) -> wgpu::Texture {

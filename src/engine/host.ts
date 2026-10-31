@@ -64,7 +64,7 @@ export class FrameLoop {
       if (now - lastFpsTime >= 1000) {
         sink.fps(frames)
         sink.stats(engine.stats())
-        sink.time({ time: engine.time_of_day(), phase: engine.day_phase() })
+        sink.time({ time: engine.time_of_day(), phase: engine.day_phase(), weather: engine.weather() })
         frames = 0
         lastFpsTime = now
       }

@@ -1,7 +1,12 @@
 use super::*;
 
+fn fraction_at(mask: &CloudMask, coverage: f32) -> f32 {
+    let threshold = cloud_threshold(coverage);
+    mask.cells().iter().filter(|&&c| c >= threshold).count() as f32 / mask.cells().len() as f32
+}
+
 fn fraction(mask: &CloudMask) -> f32 {
-    mask.cells().iter().map(|&c| f32::from(c)).sum::<f32>() / mask.cells().len() as f32
+    fraction_at(mask, COVERAGE)
 }
 
 #[test]
@@ -23,8 +28,22 @@ fn coverage_is_within_bounds() {
 }
 
 #[test]
-fn cells_are_binary() {
-    assert!(CloudMask::new(3).cells().iter().all(|&c| c <= 1));
+fn cells_hold_uniform_ranks() {
+    let mut counts = [0; 256];
+    for &c in CloudMask::new(3).cells() {
+        counts[usize::from(c)] += 1;
+    }
+    assert!(counts.iter().all(|&n| n == CLOUD_MAP * CLOUD_MAP / 256));
+}
+
+#[test]
+fn rain_raises_coverage_through_threshold() {
+    let mask = CloudMask::new(5);
+    assert!(cloud_threshold(coverage_for_rain(1.0)) < cloud_threshold(coverage_for_rain(0.0)));
+    assert_eq!(coverage_for_rain(0.0), COVERAGE);
+    assert_eq!(coverage_for_rain(1.0), RAIN_COVERAGE);
+    let rainy = fraction_at(&mask, coverage_for_rain(1.0));
+    assert!((0.65..=0.75).contains(&rainy), "{rainy}");
 }
 
 #[test]

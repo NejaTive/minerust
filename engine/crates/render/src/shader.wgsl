@@ -9,6 +9,19 @@ struct Globals {
     darkness: f32,
     anim_time: f32,
     cloud_drift: f32,
+    view_dir: mat4x4<f32>,
+    sun_dir: vec3<f32>,
+    night: f32,
+    zenith: vec3<f32>,
+    warm: f32,
+    horizon_tilt: f32,
+    star_cos: f32,
+    star_sin: f32,
+    cloud_color: vec3<f32>,
+    rain: f32,
+    rain_drops: f32,
+    flash: f32,
+    cloud_threshold: f32,
 };
 
 // Яркость уровня света — как `light::level_brightness`: 0.8^(15 − уровень), не ниже
@@ -19,6 +32,8 @@ const MAX_LIGHT: f32 = 15.0;
 
 const UNDERWATER_TINT: vec3<f32> = vec3<f32>(0.35, 0.6, 1.0);
 const LAVA_TINT: vec3<f32> = vec3<f32>(1.0, 0.45, 0.2);
+const RAIN_DIM: f32 = 0.35;
+const FLASH_GAIN: f32 = 1.5;
 
 @group(0) @binding(0)
 var<uniform> globals: Globals;
@@ -122,6 +137,7 @@ fn animated_layer(base: u32) -> u32 {
 
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
     var color = texel * in.shade;
+    color *= (1.0 - RAIN_DIM * globals.rain * (1.0 - globals.night)) * (1.0 + FLASH_GAIN * globals.flash);
     var distance = length(in.world_pos.xz - globals.camera_pos.xz);
     if globals.eye_fluid > 0.5 {
         color *= select(UNDERWATER_TINT, LAVA_TINT, globals.eye_fluid > 1.5);

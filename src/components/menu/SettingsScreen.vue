@@ -52,6 +52,16 @@ function checkedOf(e: Event): boolean {
     </label>
 
     <label class="row toggle">
+      <span class="name">Погода</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.weather"
+        @change="patch({ weather: checkedOf($event) })"
+      />
+    </label>
+
+    <label class="row toggle">
       <span class="name">Автоступенька</span>
       <input
         type="checkbox"

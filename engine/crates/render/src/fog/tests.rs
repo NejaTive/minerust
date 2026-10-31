@@ -56,3 +56,12 @@ fn far_plane_covers_everything_before_fog_end() {
         }
     }
 }
+
+#[test]
+fn rain_pulls_fog_closer() {
+    let fog = Fog::for_radius(8);
+    assert_eq!(fog.in_rain(0.0), fog);
+    let rainy = fog.in_rain(1.0);
+    assert!(rainy.end < fog.end * 0.6 && rainy.start < fog.start * 0.5);
+    assert!(rainy.start < rainy.end);
+}

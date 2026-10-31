@@ -9,6 +9,7 @@ export interface WorldMeta {
   seed: number
   player: number[]
   time?: number
+  weather?: number[]
 }
 
 export interface SavedColumn {

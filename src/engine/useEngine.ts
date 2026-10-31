@@ -132,7 +132,12 @@ export function useEngine(
   )
   watch([slot, block], () => engine.value && applyBlock(engine.value, block.value))
 
-  async function start(seed: number, player?: ArrayLike<number>, time?: number) {
+  async function start(
+    seed: number,
+    player?: ArrayLike<number>,
+    time?: number,
+    weather?: ArrayLike<number>,
+  ) {
     const el = canvas.value!
     const created = await createEngine(el, seed, player)
     if (disposed) {
@@ -147,6 +152,7 @@ export function useEngine(
     } else if (time !== undefined && Number.isFinite(time)) {
       created.set_time_of_day(time)
     }
+    if (!BENCH && weather) created.set_weather_state(Float32Array.from(weather))
     applySettings(created, settings)
     setMode('idle')
     created.set_paused(BENCH ? false : !input.isLocked())
@@ -216,7 +222,7 @@ export function useEngine(
         void runBench(() => engine.value!, benchFrames, canvas.value!, settings)
       } else {
         const world = await persistence.load()
-        await start(world.seed, world.player, world.time)
+        await start(world.seed, world.player, world.time, world.weather)
         stopAutosave = startAutosave(() => void save())
       }
     } catch (e) {

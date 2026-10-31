@@ -24,9 +24,13 @@ fn layout_matches_shader() {
         horizon_tilt: 308.0,
         star_rotation: Vec2::new(309.0, 310.0),
         cloud_color: Vec3::new(311.0, 312.0, 313.0),
+        rain: 314.0,
+        rain_drops: 315.0,
+        flash: 316.0,
+        cloud_threshold: 317.0,
     };
     let bytes = globals.to_bytes();
-    assert_eq!(bytes.len(), 240);
+    assert_eq!(bytes.len(), 256);
     assert_eq!(f32_at(&bytes, 0), 0.0);
     assert_eq!(f32_at(&bytes, 60), 15.0);
     assert_eq!(f32_at(&bytes, 64), 100.0);
@@ -54,7 +58,11 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 224), 311.0);
     assert_eq!(f32_at(&bytes, 228), 312.0);
     assert_eq!(f32_at(&bytes, 232), 313.0);
-    assert!(bytes[236..].iter().all(|&b| b == 0));
+    assert_eq!(f32_at(&bytes, 236), 314.0);
+    assert_eq!(f32_at(&bytes, 240), 315.0);
+    assert_eq!(f32_at(&bytes, 244), 316.0);
+    assert_eq!(f32_at(&bytes, 248), 317.0);
+    assert!(bytes[252..].iter().all(|&b| b == 0));
 }
 
 #[test]

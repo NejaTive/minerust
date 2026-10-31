@@ -3,6 +3,7 @@
 pub const BLOCK_SHADER: &str = include_str!("shader.wgsl");
 pub const SKY_SHADER: &str = include_str!("sky.wgsl");
 pub const CLOUDS_SHADER: &str = include_str!("clouds.wgsl");
+pub const RAIN_SHADER: &str = include_str!("rain.wgsl");
 pub const OUTLINE_SHADER: &str = include_str!("outline.wgsl");
 
 pub fn module(device: &wgpu::Device, label: &str, source: &str) -> wgpu::ShaderModule {
