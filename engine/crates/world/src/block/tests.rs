@@ -1,6 +1,6 @@
 use super::*;
 
-const ALL: [Block; 21] = Block::ALL;
+const ALL: [Block; 22] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -8,7 +8,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(21), Err(21));
+    assert_eq!(Block::try_from(22), Err(22));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -315,4 +315,15 @@ fn tree_leaves_are_translucent_cubes_like_oak_leaves() {
         assert!(tile.is_cutout());
         assert_eq!(block.emission(), 0);
     }
+}
+
+#[test]
+fn only_bedrock_is_unbreakable() {
+    for block in Block::ALL {
+        assert_eq!(block.is_unbreakable(), block == Block::Bedrock, "{block:?}");
+    }
+    let def = Block::Bedrock.def();
+    assert!(def.solid && def.opaque && def.selectable);
+    assert_eq!(def.label, "коренная порода");
+    assert_eq!(Block::from_name("bedrock"), Some(Block::Bedrock));
 }

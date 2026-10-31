@@ -27,6 +27,7 @@ pub enum Block {
     BirchLeaves,
     SpruceLog,
     SpruceLeaves,
+    Bedrock,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -119,6 +120,7 @@ pub struct BlockDef {
     pub replaceable: bool,
     pub needs_support: bool,
     pub falls: bool,
+    pub unbreakable: bool,
     pub random_ticks: bool,
     pub data: DataKind,
     pub fluid: Option<FluidKind>,
@@ -141,6 +143,7 @@ impl BlockDef {
         replaceable: false,
         needs_support: false,
         falls: false,
+        unbreakable: false,
         random_ticks: false,
         data: DataKind::None,
         fluid: None,
@@ -194,7 +197,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 21] = [
+pub const BLOCKS: [BlockDef; 22] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -279,10 +282,14 @@ pub const BLOCKS: [BlockDef; 21] = [
         Tile::SpruceLogTop,
     ),
     BlockDef::leaves("spruce_leaves", "хвоя", Tile::SpruceLeaves),
+    BlockDef {
+        unbreakable: true,
+        ..BlockDef::uniform("bedrock", "коренная порода", Tile::Bedrock)
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 21] = [
+    pub const ALL: [Block; 22] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -304,10 +311,15 @@ impl Block {
         Block::BirchLeaves,
         Block::SpruceLog,
         Block::SpruceLeaves,
+        Block::Bedrock,
     ];
 
     pub fn def(self) -> &'static BlockDef {
         &BLOCKS[self as usize]
+    }
+
+    pub fn is_unbreakable(self) -> bool {
+        self.def().unbreakable
     }
 
     pub fn is_solid(self) -> bool {

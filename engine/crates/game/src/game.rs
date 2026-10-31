@@ -9,7 +9,7 @@ use world::fluid::Fluid;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
 use world::random_ticks::{RandomTicks, STEP_TICKS};
-use world::terrain::{Biome, Terrain};
+use world::terrain::{Biome, Terrain, WorldType};
 use world::world::{World, affected_sections};
 
 use crate::camera::Camera;
@@ -91,7 +91,15 @@ pub struct Game {
 
 impl Game {
     pub fn new(seed: i32, state: Option<&[f32]>) -> Result<Game, BadCameraState> {
-        let terrain = Terrain::new(seed);
+        Self::of(seed, WorldType::Standard, state)
+    }
+
+    pub fn of(
+        seed: i32,
+        world_type: WorldType,
+        state: Option<&[f32]>,
+    ) -> Result<Game, BadCameraState> {
+        let terrain = Terrain::of(seed, world_type);
         let (camera, player) = match state {
             Some(state) => restore_player(state).ok_or(BadCameraState)?,
             None => {
@@ -408,6 +416,7 @@ impl Game {
         if self.breaking.fire(time)
             && let Some(hit) = target
             && hit.block.y >= 0
+            && !self.world.block(hit.block).is_unbreakable()
             && let changed = self.world.set_block_supported(hit.block, Block::Air)
             && !changed.is_empty()
         {

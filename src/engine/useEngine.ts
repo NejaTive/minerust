@@ -2,6 +2,7 @@ import type { Engine } from '@engine'
 import { onBeforeUnmount, onMounted, shallowRef, watch, type Ref } from 'vue'
 import { BENCH, BENCH_POINTS, BENCH_SEED, BENCH_TIME, BENCH_WORKERS } from '../bench/config'
 import { FrameRecorder } from '../bench/recorder'
+import type { WorldType } from '../world/kinds'
 import { runBench } from '../bench/run'
 import { beginInventory, bindInput, endInventory } from '../input/bind'
 import { inventoryFlags, type InventoryMode } from '../input/inventory-mode'
@@ -23,7 +24,7 @@ import { gameState as state, notify, resetGameState } from './state'
 const randomSeed = () => crypto.getRandomValues(new Int32Array(1))[0]
 
 export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: string) {
-  const { settings, limits, slot, block } = useSettings()
+  const { settings, limits, slot, slots, block, setHotbar, resetHotbar } = useSettings()
   const info = engineInfo()
   const benchFrames = new FrameRecorder()
   const persistence = new WorldPersistence({
@@ -33,6 +34,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     setNewerSave: (newer) => (state.newerSave = newer),
     randomSeed,
     now: Date.now,
+    hotbar: () => ({ hotbar: [...slots], hotbarSlot: slot.value }),
   })
   const engine = shallowRef<Engine>()
   let loop: FrameLoop | undefined
@@ -48,7 +50,10 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     mode = next
     clearTimeout(graceTimer)
     if (next === 'grace') {
-      graceTimer = window.setTimeout(() => mode === 'grace' && setMode('idle'), INVENTORY_LOCK_GRACE_MS)
+      graceTimer = window.setTimeout(
+        () => mode === 'grace' && setMode('idle'),
+        INVENTORY_LOCK_GRACE_MS,
+      )
     }
     Object.assign(state, inventoryFlags(next))
   }
@@ -123,12 +128,13 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
 
   async function start(
     seed: number,
+    worldType: WorldType,
     player?: ArrayLike<number>,
     time?: number,
     weather?: ArrayLike<number>,
   ) {
     const el = canvas.value!
-    const created = await createEngine(el, seed, player)
+    const created = await createEngine(el, seed, worldType, player)
     if (disposed) {
       created.free()
       return
@@ -188,11 +194,18 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     }
     try {
       if (BENCH) {
-        await start(BENCH_SEED, BENCH_POINTS[0].camera)
+        await start(BENCH_SEED, 'standard', BENCH_POINTS[0].camera)
         void runBench(() => engine.value!, benchFrames, canvas.value!, settings)
       } else {
         const world = await persistence.load()
-        await start(world.seed, world.player, world.time, world.weather)
+        setHotbar(world.hotbar, world.hotbarSlot)
+        await start(
+          world.seed,
+          world.worldType ?? 'standard',
+          world.player,
+          world.time,
+          world.weather,
+        )
         if (!disposed) stopAutosave = startAutosave(() => void save())
       }
     } catch (e) {
@@ -209,6 +222,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     void save()
     stop()
     input.unbind()
+    resetHotbar()
     resetGameState()
   })
 

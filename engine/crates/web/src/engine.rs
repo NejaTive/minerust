@@ -6,6 +6,7 @@ use world::block::Block;
 use world::clouds::CloudMask;
 use world::pos::ColumnPos;
 use world::save::{FORMAT_VERSION, decode_column, encode_column};
+use world::terrain::WorldType;
 
 use crate::api::{EngineSettings, WorldStats};
 use crate::frame::frame_params;
@@ -29,11 +30,14 @@ impl Engine {
         canvas: HtmlCanvasElement,
         camera: Option<Vec<f32>>,
         seed: i32,
+        world_type: &str,
     ) -> Result<Engine, JsError> {
         console_error_panic_hook::set_once();
 
-        let mut game =
-            Game::new(seed, camera.as_deref()).map_err(|_| JsError::new(BAD_CAMERA_STATE))?;
+        let world_type = WorldType::from_name(world_type)
+            .ok_or_else(|| JsError::new(&format!("unknown world type: {world_type}")))?;
+        let mut game = Game::of(seed, world_type, camera.as_deref())
+            .map_err(|_| JsError::new(BAD_CAMERA_STATE))?;
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
 

@@ -133,7 +133,7 @@ fn grass_dirt_stone_outside_desert() {
         assert!(
             layers[DIRT_DEPTH as usize + 1..]
                 .iter()
-                .all(|&b| b == Block::Stone)
+                .all(|&b| matches!(b, Block::Stone | Block::Bedrock))
         );
     }
 }
@@ -145,7 +145,11 @@ fn sand_over_stone_in_desert() {
     let (_, layers) = ground_layers(&terrain, x, z);
     let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
     assert!((3..=4).contains(&sand), "{sand} sand blocks");
-    assert!(layers[sand..].iter().all(|&b| b == Block::Stone));
+    assert!(
+        layers[sand..]
+            .iter()
+            .all(|&b| matches!(b, Block::Stone | Block::Bedrock))
+    );
 }
 
 #[test]
@@ -240,4 +244,139 @@ fn deep_water_floor_is_gravel() {
         }
     }
     assert!(deep > 0);
+}
+
+fn flat() -> Terrain {
+    Terrain::of(42, WorldType::Flat)
+}
+
+#[test]
+fn flat_column_has_fixed_layers() {
+    let column = flat().generate(ColumnPos::new(-5, 9));
+    for (x, z) in [(0, 0), (7, 3), (15, 15)] {
+        let at = |y| column.get(IVec3::new(x, y, z));
+        assert_eq!(at(0), Block::Bedrock);
+        assert_eq!(at(1), Block::Stone);
+        assert_eq!((at(2), at(3)), (Block::Dirt, Block::Dirt));
+        assert_eq!(at(4), Block::Grass);
+        assert!((5..WORLD_HEIGHT).all(|y| at(y) == Block::Air));
+    }
+}
+
+#[test]
+fn flat_world_has_no_features() {
+    let terrain = flat();
+    for key in [
+        ColumnPos::ZERO,
+        ColumnPos::new(-30, 17),
+        ColumnPos::new(8, 8),
+    ] {
+        let column = terrain.generate(key);
+        assert!(same_columns(&column, &terrain.generate_ground(key)));
+        let counts = |block| {
+            (0..WORLD_HEIGHT)
+                .flat_map(|y| (0..16).flat_map(move |z| (0..16).map(move |x| (x, y, z))))
+                .filter(|&(x, y, z)| column.get(IVec3::new(x, y, z)) == block)
+                .count()
+        };
+        for block in [
+            Block::Water,
+            Block::Lava,
+            Block::Gravel,
+            Block::Sand,
+            Block::Log,
+            Block::Leaves,
+            Block::TallGrass,
+            Block::Poppy,
+            Block::Dandelion,
+        ] {
+            assert_eq!(counts(block), 0, "{block:?}");
+        }
+        assert_eq!(counts(Block::Air), (WORLD_HEIGHT as usize - 5) * 256);
+    }
+}
+
+#[test]
+fn flat_terrain_answers_with_a_plain() {
+    let terrain = flat();
+    for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
+        assert_eq!(terrain.surface_height(x, z), FLAT_SURFACE);
+        assert_eq!(terrain.biome_at(x, z), Biome::Plains);
+        assert!(crate::trees::tree_at(&terrain, x, z).is_none());
+    }
+}
+
+#[test]
+fn standard_type_is_the_default() {
+    let (a, b) = (Terrain::new(42), Terrain::of(42, WorldType::Standard));
+    assert_eq!(a.world_type(), WorldType::Standard);
+    assert!(same_columns(
+        &a.generate(ColumnPos::new(3, 4)),
+        &b.generate(ColumnPos::new(3, 4))
+    ));
+    assert_eq!(WorldType::from_name("flat"), Some(WorldType::Flat));
+    assert_eq!(WorldType::from_name("standard"), Some(WorldType::Standard));
+    assert_eq!(WorldType::from_name("x"), None);
+}
+
+fn bedrock_columns() -> Vec<Column> {
+    let terrain = Terrain::new(7);
+    [(0, 0), (-9, 4), (30, -22), (5, 61)]
+        .into_iter()
+        .map(|(x, z)| terrain.generate(ColumnPos::new(x, z)))
+        .collect()
+}
+
+#[test]
+fn standard_floor_is_solid_bedrock() {
+    for column in bedrock_columns() {
+        for z in 0..16 {
+            for x in 0..16 {
+                assert_eq!(column.get(IVec3::new(x, 0, z)), Block::Bedrock);
+            }
+        }
+    }
+}
+
+#[test]
+fn bedrock_scatter_thins_out_upwards() {
+    let columns = bedrock_columns();
+    let share = |y| {
+        let hits = columns
+            .iter()
+            .flat_map(|c| (0..256).map(move |i| c.get(IVec3::new(i % 16, y, i / 16))))
+            .filter(|&b| b == Block::Bedrock)
+            .count();
+        hits as f32 / (columns.len() * 256) as f32
+    };
+    for (y, expected) in [(1, 0.75), (2, 0.5), (3, 0.25)] {
+        assert!((share(y) - expected).abs() < 0.07, "y={y}: {}", share(y));
+    }
+    assert_eq!(share(4), 0.0);
+}
+
+#[test]
+fn caves_and_lava_leave_bedrock_alone() {
+    let terrain = Terrain::new(7);
+    let ground = terrain.generate_ground(ColumnPos::new(2, 2));
+    let carved = terrain.generate(ColumnPos::new(2, 2));
+    for y in 0..=3 {
+        for z in 0..16 {
+            for x in 0..16 {
+                let at = IVec3::new(x, y, z);
+                if ground.get(at) == Block::Bedrock {
+                    assert_eq!(carved.get(at), Block::Bedrock);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn bedrock_is_deterministic() {
+    let key = ColumnPos::new(-4, 9);
+    assert!(same_columns(
+        &Terrain::new(3).generate(key),
+        &Terrain::new(3).generate(key)
+    ));
 }
