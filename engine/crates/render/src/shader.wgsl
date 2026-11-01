@@ -287,7 +287,7 @@ fn sky_color(dir: vec3<f32>) -> vec3<f32> {
 }
 
 fn cell_hash(c: vec2<i32>) -> f32 {
-    var h = u32(c.x) * 0x27d4eb2du ^ u32(c.y) * 0x165667b1u;
+    var h = (u32(c.x) * 0x27d4eb2du) ^ (u32(c.y) * 0x165667b1u);
     h = (h ^ (h >> 15u)) * 0x85ebca6bu;
     h = h ^ (h >> 13u);
     return f32(h & 0xffffffu) / 16777215.0;
