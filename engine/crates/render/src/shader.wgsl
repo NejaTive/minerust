@@ -46,6 +46,9 @@ const FOG_DENSITY: f32 = 0.7;
 const FOG_FALLOFF: f32 = 0.03;
 const FOG_RAIN_DENSITY: f32 = 1.0;
 const FOG_GLOW_HEIGHT: f32 = 0.05;
+const LEAF_SWAY: f32 = 0.025;
+const GRASS_SWAY: f32 = 0.065;
+const RAIN_SWAY_GAIN: f32 = 1.5;
 const WATER_F0: f32 = 0.02;
 const WATER_TOP_ALPHA: f32 = 0.8;
 const RIPPLE_STRENGTH: f32 = 0.05;
@@ -60,7 +63,8 @@ var block_textures: texture_2d_array<f32>;
 @group(0) @binding(2)
 var block_sampler: sampler;
 
-// Запись на слой: (кадры, кадров в секунду, прокрутка боковых граней в блоках в секунду, 0).
+// Запись на слой: (кадры, кадров в секунду, прокрутка боковых граней в блоках в секунду,
+// колыхание: 0 нет, 1 листва, 2 трава и цветы).
 // Строит `world::tile::animation_table`; размер — `LAYER_COUNT`.
 @group(0) @binding(3)
 var<uniform> animation: array<vec4<f32>, 58>;
@@ -106,6 +110,24 @@ fn level_brightness(level: f32) -> f32 {
     return max(pow(LIGHT_BASE, MAX_LIGHT - level), MIN_BRIGHTNESS);
 }
 
+// Только от мировой позиции: общие вершины соседних блоков смещаются одинаково.
+fn sway_offset(p: vec3<f32>, kind: f32, free: bool) -> vec3<f32> {
+    let gust = 1.0 + RAIN_SWAY_GAIN * globals.rain;
+    let t = globals.anim_time;
+    let wave = vec3<f32>(
+        sin(t * 1.9 + p.x * 0.9 + p.z * 0.7 + p.y * 0.5),
+        sin(t * 2.3 + p.x * 0.6 + p.y * 0.8 - p.z * 0.4 + 1.7),
+        sin(t * 1.7 - p.x * 0.5 + p.z * 0.9 + p.y * 0.6 + 3.1),
+    );
+    if kind > 1.5 && free {
+        return vec3<f32>(wave.x, 0.0, wave.z) * GRASS_SWAY * gust;
+    }
+    if kind > 0.5 && kind < 1.5 {
+        return wave * LEAF_SWAY * gust;
+    }
+    return vec3<f32>(0.0);
+}
+
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
     let at = in.first_word + (in.vertex / 4u) * 3u;
@@ -135,18 +157,20 @@ fn vs_main(in: VertexIn) -> VertexOut {
         }
         offset.y = top;
     }
-    let world_pos = in.origin + cell + offset / 16.0;
+    var world_pos = in.origin + cell + offset / 16.0;
+    let layer = (w0 >> 18u) & 0xFFu;
+    world_pos += sway_offset(world_pos, animation[layer].w, offset.y > 0.0);
     let ao = (w1 >> (2u * corner)) & 3u;
     let sun = (w1 >> (8u + 5u * corner)) & 0x1Fu;
     let block = (w2 >> (5u * corner)) & 0x1Fu;
     var out: VertexOut;
     out.position = globals.view_proj * vec4<f32>(world_pos, 1.0);
     out.uv = vec2<f32>(f32((packed >> 15u) & 0x1Fu), v) / 16.0;
-    out.uv.y -= table.shapes[shape].shade.y * fract(globals.anim_time * animation[(w0 >> 18u) & 0xFFu].z);
+    out.uv.y -= table.shapes[shape].shade.y * fract(globals.anim_time * animation[layer].z);
     out.shade = table.shapes[shape].shade.x * table.ao[ao];
     out.sun_light = level_brightness(f32(sun) * 0.5 - globals.darkness);
     out.block_light = level_brightness(f32(block) * 0.5);
-    out.layer = (w0 >> 18u) & 0xFFu;
+    out.layer = layer;
     out.world_pos = world_pos;
     return out;
 }
