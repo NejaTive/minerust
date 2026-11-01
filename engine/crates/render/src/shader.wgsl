@@ -35,6 +35,11 @@ const LAVA_TINT: vec3<f32> = vec3<f32>(1.0, 0.45, 0.2);
 const RAIN_DIM: f32 = 0.35;
 const FLASH_GAIN: f32 = 1.5;
 
+const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.25, 0.85, 0.5);
+const DAY_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
+const NIGHT_LIGHT_TINT: vec3<f32> = vec3<f32>(0.7, 0.82, 1.15);
+const WARM_LIGHT_TINT: vec3<f32> = vec3<f32>(1.2, 0.95, 0.7);
+
 @group(0) @binding(0)
 var<uniform> globals: Globals;
 @group(0) @binding(1)
@@ -77,13 +82,14 @@ struct VertexOut {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) shade: f32,
+    @location(4) sun_light: f32,
+    @location(5) block_light: f32,
     // Целые varying нельзя интерполировать.
     @location(2) @interpolate(flat) layer: u32,
     @location(3) world_pos: vec3<f32>,
 };
 
-fn vertex_brightness(sun_halves: u32, block_halves: u32) -> f32 {
-    let level = max(f32(sun_halves) * 0.5 - globals.darkness, f32(block_halves) * 0.5);
+fn level_brightness(level: f32) -> f32 {
     return max(pow(LIGHT_BASE, MAX_LIGHT - level), MIN_BRIGHTNESS);
 }
 
@@ -124,7 +130,9 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.position = globals.view_proj * vec4<f32>(world_pos, 1.0);
     out.uv = vec2<f32>(f32((packed >> 15u) & 0x1Fu), v) / 16.0;
     out.uv.y -= table.shapes[shape].shade.y * fract(globals.anim_time * animation[(w0 >> 18u) & 0xFFu].z);
-    out.shade = table.shapes[shape].shade.x * table.ao[ao] * vertex_brightness(sun, block);
+    out.shade = table.shapes[shape].shade.x * table.ao[ao];
+    out.sun_light = level_brightness(f32(sun) * 0.5 - globals.darkness);
+    out.block_light = level_brightness(f32(block) * 0.5);
     out.layer = (w0 >> 18u) & 0xFFu;
     out.world_pos = world_pos;
     return out;
@@ -135,8 +143,21 @@ fn animated_layer(base: u32) -> u32 {
     return base + u32(floor(globals.anim_time * entry.y)) % u32(entry.x);
 }
 
+fn luma_normalized(tint: vec3<f32>) -> vec3<f32> {
+    return tint / dot(tint, vec3<f32>(0.299, 0.587, 0.114));
+}
+
+fn light_tint(in: VertexOut) -> vec3<f32> {
+    var sun_tint = mix(DAY_LIGHT_TINT, NIGHT_LIGHT_TINT, globals.night);
+    sun_tint = mix(sun_tint, WARM_LIGHT_TINT, globals.warm);
+    let block = in.block_light - MIN_BRIGHTNESS;
+    let sun = in.sun_light - MIN_BRIGHTNESS;
+    let share = smoothstep(0.3, 0.7, block / (block + sun + 1e-4));
+    return luma_normalized(mix(luma_normalized(sun_tint), luma_normalized(BLOCK_LIGHT_TINT), share));
+}
+
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
-    var color = texel * in.shade;
+    var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in);
     color *= (1.0 - RAIN_DIM * globals.rain * (1.0 - globals.night)) * (1.0 + FLASH_GAIN * globals.flash);
     var distance = length(in.world_pos.xz - globals.camera_pos.xz);
     if globals.eye_fluid > 0.5 {
