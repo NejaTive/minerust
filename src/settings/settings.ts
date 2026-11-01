@@ -18,10 +18,11 @@ export const KEYS = {
   sunRays: 'minerust.sunRays',
   shadows: 'minerust.shadows',
   shadowQualityHigh: 'minerust.shadowQualityHigh',
+  cloudShadows: 'minerust.cloudShadows',
   showDebug: 'minerust.showDebug',
 } as const
 // Ключи убранных настроек (панель управления, выбор графического API): чистим, чтобы не копился мусор.
-const OBSOLETE_KEYS = ['minerust.controlsHidden', 'minerust.graphicsApi']
+const OBSOLETE_KEYS = ['minerust.controlsHidden', 'minerust.graphicsApi', 'minerust.fxaa']
 
 export interface EngineSettings {
   renderDistance: number
@@ -41,6 +42,7 @@ export interface EngineSettings {
   sunRays: boolean
   shadows: boolean
   shadowQualityHigh: boolean
+  cloudShadows: boolean
 }
 
 export interface Settings extends EngineSettings {
@@ -120,6 +122,7 @@ export function loadSettings(
     sunRays: readBool(store, KEYS.sunRays, defaults.sunRays),
     shadows: readBool(store, KEYS.shadows, defaults.shadows),
     shadowQualityHigh: readBool(store, KEYS.shadowQualityHigh, defaults.shadowQualityHigh),
+    cloudShadows: readBool(store, KEYS.cloudShadows, defaults.cloudShadows),
     showDebug: readBool(store, KEYS.showDebug, defaults.showDebug),
   }
 }
@@ -142,6 +145,7 @@ export function saveSettings(store: KeyValueStore, s: Settings) {
   store.set(KEYS.sunRays, String(s.sunRays))
   store.set(KEYS.shadows, String(s.shadows))
   store.set(KEYS.shadowQualityHigh, String(s.shadowQualityHigh))
+  store.set(KEYS.cloudShadows, String(s.cloudShadows))
   store.set(KEYS.showDebug, String(s.showDebug))
 }
 
