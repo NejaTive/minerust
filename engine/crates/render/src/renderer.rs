@@ -10,6 +10,7 @@ use world::section::SECTION_SIZE;
 use crate::clouds::{
     CLOUD_INSTANCES, CLOUD_VERTICES, cloud_color, create_cloud_texture, upload_cloud_mask,
 };
+use crate::effects::Effects;
 use crate::frustum::Frustum;
 use crate::globals::{Globals, view_dir_matrix};
 use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_section};
@@ -43,6 +44,7 @@ pub struct FrameParams {
     pub horizon_tilt: f32,
     pub star_rotation: Vec2,
     pub clouds: bool,
+    pub effects: Effects,
     pub rain: f32,
     pub rain_drops: f32,
     pub snow: f32,
@@ -517,6 +519,7 @@ impl Renderer {
             warm: params.warm,
             horizon_tilt: params.horizon_tilt,
             star_rotation: params.star_rotation,
+            effects: params.effects.bits(),
             cloud_color: cloud_color(params.night, params.warm, params.rain, params.flash),
             rain: params.rain,
             rain_drops: params.rain_drops,

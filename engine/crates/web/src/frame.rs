@@ -1,7 +1,7 @@
 use game::Game;
 use glam::{Vec2, Vec3};
-use render::FrameParams;
 use render::fog::Fog;
+use render::{Effects, FrameParams};
 use world::block::FluidKind;
 use world::terrain::WATER_LEVEL;
 
@@ -16,7 +16,13 @@ const LAVA_FOG: Fog = Fog {
 };
 const LAVA_COLOR: [f32; 3] = [0.784, 0.314, 0.102];
 
-pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32, clouds: bool) -> FrameParams {
+pub(crate) fn frame_params(
+    game: &Game,
+    radius: i32,
+    aspect: f32,
+    clouds: bool,
+    effects: Effects,
+) -> FrameParams {
     let rain = game.rain();
     let camera = game.camera();
     let fog = Fog::for_radius(radius);
@@ -48,6 +54,7 @@ pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32, clouds: bool) 
         horizon_tilt: (camera.position.y - (WATER_LEVEL + 1) as f32).max(0.0) / fog.end.max(1.0),
         star_rotation: Vec2::from(game.star_rotation()),
         clouds,
+        effects,
         rain,
         rain_drops: game.rain_drops(),
         flash: game.flash(),

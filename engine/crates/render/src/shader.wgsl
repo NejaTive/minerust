@@ -17,6 +17,7 @@ struct Globals {
     horizon_tilt: f32,
     star_cos: f32,
     star_sin: f32,
+    effects: u32,
     cloud_color: vec3<f32>,
     rain: f32,
     rain_drops: f32,
@@ -29,6 +30,16 @@ struct Globals {
 const LIGHT_BASE: f32 = 0.8;
 const MIN_BRIGHTNESS: f32 = 0.05;
 const MAX_LIGHT: f32 = 15.0;
+
+// Биты `Globals.effects`, как `Effects::bits` в effects.rs.
+const FX_COLORED_LIGHT: u32 = 1u;
+const FX_WATER_REFLECTIONS: u32 = 2u;
+const FX_GROUND_FOG: u32 = 4u;
+const FX_PLANT_SWAY: u32 = 8u;
+
+fn effect(bit: u32) -> bool {
+    return (globals.effects & bit) != 0u;
+}
 
 const UNDERWATER_TINT: vec3<f32> = vec3<f32>(0.35, 0.6, 1.0);
 const LAVA_TINT: vec3<f32> = vec3<f32>(1.0, 0.45, 0.2);
@@ -113,6 +124,9 @@ fn level_brightness(level: f32) -> f32 {
 
 // Только от мировой позиции: общие вершины соседних блоков смещаются одинаково.
 fn sway_offset(p: vec3<f32>, kind: f32, free: bool) -> vec3<f32> {
+    if !effect(FX_PLANT_SWAY) {
+        return vec3<f32>(0.0);
+    }
     let gust = 1.0 + RAIN_SWAY_GAIN * globals.rain;
     let t = globals.anim_time;
     let wave = vec3<f32>(
@@ -187,6 +201,9 @@ fn luma_normalized(tint: vec3<f32>) -> vec3<f32> {
 }
 
 fn light_tint(in: VertexOut) -> vec3<f32> {
+    if !effect(FX_COLORED_LIGHT) {
+        return vec3<f32>(1.0);
+    }
     var sun_tint = mix(DAY_LIGHT_TINT, NIGHT_LIGHT_TINT, globals.night);
     sun_tint = mix(sun_tint, WARM_LIGHT_TINT, globals.warm);
     let block = in.block_light - MIN_BRIGHTNESS;
@@ -203,7 +220,11 @@ fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
     let distance = length(to_pos.xz);
     let thickness = FOG_DENSITY * (1.0 + FOG_RAIN_DENSITY * globals.rain)
         * exp(-FOG_FALLOFF * max(world_pos.y - FOG_BASE_Y, 0.0)) / globals.fog_end;
-    let fog = max(1.0 - exp(-thickness * distance), smoothstep(globals.fog_start, globals.fog_end, distance));
+    let linear_fog = smoothstep(globals.fog_start, globals.fog_end, distance);
+    var fog = linear_fog;
+    if effect(FX_GROUND_FOG) {
+        fog = max(1.0 - exp(-thickness * distance), linear_fog);
+    }
     let tint = mix(globals.fog_color, DUSK_COLOR * 1.3, dusk_glow(to_pos, FOG_GLOW_HEIGHT));
     return mix(color, tint, fog);
 }
@@ -270,7 +291,7 @@ fn ripple_normal(p: vec2<f32>) -> vec3<f32> {
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
     let flat_normal = normalize(cross(dpdx(in.world_pos), dpdy(in.world_pos)));
-    if globals.eye_fluid > 0.5 {
+    if globals.eye_fluid > 0.5 || !effect(FX_WATER_REFLECTIONS) {
         return vec4<f32>(shaded(in, texel.rgb), texel.a);
     }
     let view = normalize(globals.camera_pos - in.world_pos);

@@ -17,6 +17,7 @@ struct Globals {
     horizon_tilt: f32,
     star_cos: f32,
     star_sin: f32,
+    effects: u32,
     cloud_color: vec3<f32>,
     rain: f32,
     rain_drops: f32,

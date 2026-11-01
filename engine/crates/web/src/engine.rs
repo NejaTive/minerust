@@ -1,5 +1,5 @@
 use game::Game;
-use render::Renderer;
+use render::{Effects, Renderer};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 use world::block::Block;
@@ -22,6 +22,7 @@ pub struct Engine {
     streamer: Streamer,
     profiler: Profiler,
     clouds: bool,
+    effects: Effects,
 }
 
 #[wasm_bindgen]
@@ -66,6 +67,7 @@ impl Engine {
             streamer,
             profiler,
             clouds: true,
+            effects: Effects::default(),
         })
     }
 
@@ -126,6 +128,12 @@ impl Engine {
         self.streamer
             .set_ambient_occlusion(settings.ambient_occlusion, &self.game, &self.renderer);
         self.clouds = settings.clouds;
+        self.effects = Effects {
+            colored_light: settings.colored_light,
+            water_reflections: settings.water_reflections,
+            ground_fog: settings.ground_fog,
+            plant_sway: settings.plant_sway,
+        };
         self.game.set_weather_enabled(settings.weather);
         self.game.set_auto_step(settings.auto_step);
         self.game
@@ -291,6 +299,7 @@ impl Engine {
             self.streamer.radius(),
             self.renderer.aspect(),
             self.clouds,
+            self.effects,
         );
         let Some(pending) = self.renderer.begin(&params).map_err(|e| JsError::new(&e))? else {
             return Ok(());

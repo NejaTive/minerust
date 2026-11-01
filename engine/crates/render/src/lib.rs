@@ -1,5 +1,6 @@
 mod arena;
 mod clouds;
+mod effects;
 pub mod fog;
 mod frustum;
 mod globals;
@@ -15,4 +16,5 @@ pub mod shaders;
 mod slots;
 mod texture;
 
+pub use effects::Effects;
 pub use renderer::{FrameCounts, FrameParams, PendingFrame, Renderer};

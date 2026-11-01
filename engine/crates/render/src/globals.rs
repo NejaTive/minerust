@@ -19,6 +19,7 @@ pub struct Globals {
     pub warm: f32,
     pub horizon_tilt: f32,
     pub star_rotation: Vec2,
+    pub effects: u32,
     pub cloud_color: Vec3,
     pub rain: f32,
     pub rain_drops: f32,
@@ -63,7 +64,7 @@ impl Globals {
             .chain(self.zenith.to_array())
             .chain([self.warm, self.horizon_tilt])
             .chain(self.star_rotation.to_array())
-            .chain([0.0])
+            .chain([f32::from_bits(self.effects)])
             .chain(self.cloud_color.to_array())
             .chain([self.rain, self.rain_drops, self.flash, self.cloud_threshold])
             .chain([self.snow]);
