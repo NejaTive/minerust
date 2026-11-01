@@ -20,6 +20,7 @@ export function applySettings(engine: Engine, s: Settings) {
     s.sunRays,
     s.shadows,
     s.shadowQualityHigh,
+    s.cloudShadows,
   )
   try {
     engine.apply_settings(payload)

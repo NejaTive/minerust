@@ -50,6 +50,7 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
       sunRays: defaults.sunRays,
       shadows: defaults.shadows,
       shadowQualityHigh: defaults.shadowQualityHigh,
+      cloudShadows: defaults.cloudShadows,
     },
   }
   list.forEach((block) => block.free())

@@ -162,6 +162,16 @@ function checkedOf(e: Event): boolean {
         <option value="high">Высокое</option>
       </select>
     </label>
+
+    <label class="row toggle">
+      <span class="name">Тени облаков</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.cloudShadows"
+        @change="patch({ cloudShadows: checkedOf($event) })"
+      />
+    </label>
   </div>
   <button @click="emit('back')">Назад</button>
 </template>

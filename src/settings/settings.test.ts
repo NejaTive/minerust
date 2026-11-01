@@ -35,6 +35,7 @@ const defaults = defaultSettings({
   sunRays: true,
   shadows: true,
   shadowQualityHigh: true,
+  cloudShadows: true,
 })
 
 const load = (data: Record<string, string> = {}) =>
@@ -59,7 +60,8 @@ describe('loadSettings', () => {
       s.sunRays,
       s.shadows,
       s.shadowQualityHigh,
-    ]).toEqual([true, true, true, true, true, true, true, true, true, true, true])
+      s.cloudShadows,
+    ]).toEqual([true, true, true, true, true, true, true, true, true, true, true, true])
   })
 
   it('читает сохранённые значения', () => {
@@ -81,6 +83,7 @@ describe('loadSettings', () => {
       [KEYS.sunRays]: 'false',
       [KEYS.shadows]: 'false',
       [KEYS.shadowQualityHigh]: 'false',
+      [KEYS.cloudShadows]: 'false',
       [KEYS.showDebug]: 'true',
     }
     expect(load(data)).toEqual({
@@ -101,6 +104,7 @@ describe('loadSettings', () => {
       sunRays: false,
       shadows: false,
       shadowQualityHigh: false,
+      cloudShadows: false,
       showDebug: true,
     })
   })

@@ -164,6 +164,7 @@ fn layout_matches_shader() {
             strength: 0.25,
         },
         quality: ShadowQuality::Low,
+        cloud_strength: 0.4,
     };
     let bytes = data.to_bytes();
     let f = |offset: usize| f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
@@ -177,4 +178,5 @@ fn layout_matches_shader() {
     assert_eq!(f(240), 2.0);
     assert_eq!(f(244), 2.0);
     assert_eq!(f(248), 1.0 / 1024.0);
+    assert_eq!(f(252), 0.4);
 }

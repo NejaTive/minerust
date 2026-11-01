@@ -197,10 +197,25 @@ pub struct ShadowData {
     pub cascades: Cascades,
     pub light: ShadowLight,
     pub quality: ShadowQuality,
+    pub cloud_strength: f32,
 }
 
 impl ShadowData {
     pub const SIZE: usize = 256;
+
+    pub fn cloud_only(light: ShadowLight, cloud_strength: f32) -> Self {
+        Self {
+            cascades: Cascades {
+                count: 0,
+                matrices: [Mat4::ZERO; MAX_CASCADES],
+                splits: [0.0; MAX_CASCADES],
+                texel_world: [0.0; MAX_CASCADES],
+            },
+            light,
+            quality: ShadowQuality::default(),
+            cloud_strength,
+        }
+    }
 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let c = &self.cascades;
@@ -218,7 +233,7 @@ impl ShadowData {
                 c.count as f32,
                 self.quality.pcf_taps() as f32,
                 1.0 / self.quality.resolution() as f32,
-                0.0,
+                self.cloud_strength,
             ]);
         let mut bytes = [0; Self::SIZE];
         for (chunk, f) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(floats) {
