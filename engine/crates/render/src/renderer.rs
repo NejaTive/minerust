@@ -4,6 +4,7 @@ use glam::{IVec3, Mat4, Vec2, Vec3};
 use mesh::mesher::SectionMeshes;
 use world::block::{Block, FluidKind};
 use world::clouds::{CloudMask, cloud_threshold, coverage_for_rain};
+use world::column::WORLD_HEIGHT;
 use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 
@@ -17,7 +18,9 @@ use crate::globals::{Globals, view_dir_matrix};
 use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_section};
 use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
-use crate::pipelines::{HDR_FORMAT, SceneLayouts, ScenePipelines, create_depth_target};
+use crate::pipelines::{
+    HDR_FORMAT, SceneLayouts, ScenePipelines, ShadowPipelines, create_depth_target,
+};
 use crate::post::{
     HdrTargets, PostLayouts, create_post_pipeline, create_rays_pipeline, create_scene_copy_stub,
     sun_rays,
@@ -27,6 +30,11 @@ use crate::rain::{
     upload_rain_cover,
 };
 use crate::shaders;
+use crate::shadow::MAX_CASCADES;
+use crate::shadow::{
+    ShadowData, ShadowQuality, compute_cascades, quantize_light_dir, shadow_light,
+};
+use crate::shadow_map::{ShadowMap, comparison_sampler};
 use crate::texture::{create_animation_table, create_block_textures};
 
 pub struct FrameParams {
@@ -63,6 +71,87 @@ pub struct FrameCounts {
     pub draw_calls: u32,
 }
 
+struct GlobalSources {
+    block_textures: wgpu::TextureView,
+    block_sampler: wgpu::Sampler,
+    animation_table: wgpu::Buffer,
+    cloud_view: wgpu::TextureView,
+    rain_cover_view: wgpu::TextureView,
+    rain_tile_view: wgpu::TextureView,
+    shadow_buffer: wgpu::Buffer,
+    shadow_sampler: wgpu::Sampler,
+}
+
+impl GlobalSources {
+    fn bind_group(
+        &self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        globals_buffer: &wgpu::Buffer,
+        shadow_view: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("globals"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.block_textures),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.block_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.animation_table.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&self.cloud_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&self.rain_cover_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&self.rain_tile_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: self.shadow_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
+                },
+            ],
+        })
+    }
+}
+
+fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
 pub struct PendingFrame {
     frame: wgpu::SurfaceTexture,
     encoder: wgpu::CommandEncoder,
@@ -91,6 +180,12 @@ pub struct Renderer {
     outline_block: Option<(IVec3, Block, u8)>,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
+    global_sources: GlobalSources,
+    shadow_map: ShadowMap,
+    shadow_dir: Option<Vec3>,
+    shadow_pipelines: ShadowPipelines,
+    shadow_pass_buffers: [wgpu::Buffer; MAX_CASCADES],
+    shadow_pass_groups: [wgpu::BindGroup; MAX_CASCADES],
     column_meshes: HashMap<ColumnPos, ColumnMeshes>,
     buffers: SceneBuffers,
     failed_uploads: u32,
@@ -275,6 +370,23 @@ impl Renderer {
                     },
                     count: None,
                 },
+                uniform_entry(7, wgpu::ShaderStages::FRAGMENT),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
             ],
         });
         let rain_tile_view = create_rain_tile_texture(&device, &queue);
@@ -283,40 +395,25 @@ impl Renderer {
             rain_cover_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let cloud_texture = create_cloud_texture(&device);
         let cloud_view = cloud_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals"),
-            layout: &globals_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: globals_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&block_textures),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&block_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: animation_table.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(&cloud_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&rain_cover_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(&rain_tile_view),
-                },
-            ],
+        let shadow_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadows"),
+            size: ShadowData::SIZE as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
+        let global_sources = GlobalSources {
+            block_textures,
+            block_sampler,
+            animation_table,
+            cloud_view,
+            rain_cover_view,
+            rain_tile_view,
+            shadow_buffer,
+            shadow_sampler: comparison_sampler(&device),
+        };
+        let shadow_map = ShadowMap::new(&device, None);
+        let globals_bind_group =
+            global_sources.bind_group(&device, &globals_layout, &globals_buffer, &shadow_map.view);
 
         let shader = shaders::module(&device, "shader", shaders::BLOCK_SHADER);
         let buffers = SceneBuffers::new(&device);
@@ -355,6 +452,79 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let shadow_pass_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shadow pass"),
+                entries: &[
+                    uniform_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    uniform_entry(3, wgpu::ShaderStages::VERTEX_FRAGMENT),
+                    uniform_entry(10, wgpu::ShaderStages::VERTEX),
+                ],
+            });
+        let shadow_pass_layout_pipeline =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("shadow"),
+                bind_group_layouts: &[
+                    Some(&shadow_pass_layout),
+                    Some(buffers.arena.bind_group_layout()),
+                ],
+                ..Default::default()
+            });
+        let shadow_pipelines = ShadowPipelines::new(&device, &shadow_pass_layout_pipeline, &shader);
+        let shadow_pass_buffers: [wgpu::Buffer; MAX_CASCADES] = std::array::from_fn(|_| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shadow pass"),
+                size: 64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let shadow_pass_groups = std::array::from_fn(|i| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("shadow pass"),
+                layout: &shadow_pass_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: globals_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                            &global_sources.block_textures,
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&global_sources.block_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: global_sources.animation_table.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: shadow_pass_buffers[i].as_entire_binding(),
+                    },
+                ],
+            })
+        });
         let sdr_pipelines = ScenePipelines::new(&device, &scene_layouts, &shader, render_format);
 
         let gpu_timer = device
@@ -384,6 +554,12 @@ impl Renderer {
             outline_block: None,
             globals_buffer,
             globals_bind_group,
+            global_sources,
+            shadow_map,
+            shadow_dir: None,
+            shadow_pipelines,
+            shadow_pass_buffers,
+            shadow_pass_groups,
             column_meshes: HashMap::new(),
             buffers,
             failed_uploads: 0,
@@ -449,6 +625,19 @@ impl Renderer {
             self.bloom_pipelines =
                 Some(BloomPipelines::new(&self.device, &self.post_layouts.bloom));
         }
+    }
+
+    fn sync_shadow_map(&mut self, quality: Option<ShadowQuality>) {
+        if self.shadow_map.quality == quality {
+            return;
+        }
+        self.shadow_map = ShadowMap::new(&self.device, quality);
+        self.globals_bind_group = self.global_sources.bind_group(
+            &self.device,
+            &self.globals_layout,
+            &self.globals_buffer,
+            &self.shadow_map.view,
+        );
     }
 
     pub fn set_cloud_mask(&self, mask: &CloudMask) {
@@ -581,6 +770,34 @@ impl Renderer {
         } else {
             (Vec2::ZERO, 0.0)
         };
+        let light = params
+            .effects
+            .shadows
+            .then(|| shadow_light(params.sun_dir, params.warm, params.rain))
+            .flatten()
+            .map(|mut light| {
+                light.dir = quantize_light_dir(self.shadow_dir, light.dir);
+                light
+            });
+        self.shadow_dir = light.map(|light| light.dir);
+        let quality = params.effects.shadow_quality;
+        self.sync_shadow_map(light.map(|_| quality));
+        let shadow = light.map(|light| ShadowData {
+            cascades: compute_cascades(
+                params.view_proj,
+                params.near,
+                params.fog_end.min(params.far),
+                light.dir,
+                quality,
+                WORLD_HEIGHT as f32,
+            ),
+            light,
+            quality,
+        });
+        let effects = Effects {
+            shadows: shadow.is_some(),
+            ..params.effects
+        };
         let [r, g, b] = params.background.to_array().map(f64::from);
         let clear = wgpu::Color { r, g, b, a: 1.0 };
         let globals = Globals {
@@ -604,7 +821,7 @@ impl Renderer {
             warm: params.warm,
             horizon_tilt: params.horizon_tilt,
             star_rotation: params.star_rotation,
-            effects: params.effects.bits(),
+            effects: effects.bits(),
             cloud_color: cloud_color(params.night, params.warm, params.rain, params.flash),
             rain: params.rain,
             rain_drops: params.rain_drops,
@@ -619,6 +836,22 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
+        if let Some(shadow) = &shadow {
+            self.queue
+                .write_buffer(&self.global_sources.shadow_buffer, 0, &shadow.to_bytes());
+            for (buffer, matrix) in self
+                .shadow_pass_buffers
+                .iter()
+                .zip(shadow.cascades.matrices)
+            {
+                let bytes: Vec<u8> = matrix
+                    .to_cols_array()
+                    .into_iter()
+                    .flat_map(f32::to_le_bytes)
+                    .collect();
+                self.queue.write_buffer(buffer, 0, &bytes);
+            }
+        }
         let frustum = Frustum::from_view_proj(params.view_proj);
 
         let frame = match self.surface.get_current_texture() {
@@ -651,6 +884,9 @@ impl Renderer {
             Some(timer) if self.gpu_timing => timer.acquire(),
             _ => None,
         };
+        if let Some(shadow) = &shadow {
+            self.encode_shadows(&mut encoder, shadow);
+        }
         let hdr = self.hdr_targets.as_ref();
         let split;
         let pipes = match (&self.hdr_pipelines, hdr) {
@@ -875,6 +1111,47 @@ impl Renderer {
             encoder,
             timer_slot,
         }))
+    }
+
+    fn encode_shadows(&self, encoder: &mut wgpu::CommandEncoder, shadow: &ShadowData) {
+        for cascade in 0..shadow.cascades.count {
+            let frustum = Frustum::from_view_proj(shadow.cascades.matrices[cascade]);
+            let casters: Vec<&SectionMesh> = self
+                .column_meshes
+                .values()
+                .flatten()
+                .flatten()
+                .filter(|mesh| frustum.intersects_aabb(mesh.min, mesh.max))
+                .collect();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_map.layers[cascade],
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(0, &self.shadow_pass_groups[cascade], &[]);
+            pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
+            pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
+            pass.set_index_buffer(
+                self.buffers.indices.buffer().slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.set_pipeline(&self.shadow_pipelines.solid);
+            for mesh in casters.iter().filter_map(|section| section.solid.as_ref()) {
+                mesh.draw(&mut pass);
+            }
+            pass.set_pipeline(&self.shadow_pipelines.cutout);
+            for mesh in casters.iter().filter_map(|section| section.cutout.as_ref()) {
+                mesh.draw(&mut pass);
+            }
+        }
     }
 
     pub fn submit(&mut self, pending: PendingFrame) {

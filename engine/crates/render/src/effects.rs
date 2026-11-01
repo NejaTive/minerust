@@ -1,3 +1,5 @@
+use crate::shadow::ShadowQuality;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Effects {
     pub colored_light: bool,
@@ -8,6 +10,8 @@ pub struct Effects {
     pub bloom: bool,
     pub water_depth: bool,
     pub sun_rays: bool,
+    pub shadows: bool,
+    pub shadow_quality: ShadowQuality,
 }
 
 impl Default for Effects {
@@ -21,6 +25,8 @@ impl Default for Effects {
             bloom: true,
             water_depth: true,
             sun_rays: true,
+            shadows: true,
+            shadow_quality: ShadowQuality::default(),
         }
     }
 }
@@ -36,5 +42,6 @@ impl Effects {
             | u32::from(self.bloom && self.hdr) << 5
             | u32::from(self.water_depth && self.hdr) << 6
             | u32::from(self.sun_rays && self.hdr) << 7
+            | u32::from(self.shadows) << 8
     }
 }

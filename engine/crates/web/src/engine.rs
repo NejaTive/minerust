@@ -1,5 +1,5 @@
 use game::Game;
-use render::{Effects, Renderer};
+use render::{Effects, Renderer, ShadowQuality};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 use world::block::Block;
@@ -137,6 +137,12 @@ impl Engine {
             bloom: settings.bloom,
             water_depth: settings.water_depth,
             sun_rays: settings.sun_rays,
+            shadows: settings.shadows,
+            shadow_quality: if settings.shadow_quality_high {
+                ShadowQuality::High
+            } else {
+                ShadowQuality::Low
+            },
         };
         self.game.set_weather_enabled(settings.weather);
         self.game.set_auto_step(settings.auto_step);

@@ -130,6 +130,62 @@ pub(crate) fn create_block_pipeline(
     })
 }
 
+pub(crate) struct ShadowPipelines {
+    pub solid: wgpu::RenderPipeline,
+    pub cutout: wgpu::RenderPipeline,
+}
+
+impl ShadowPipelines {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        layout: &wgpu::PipelineLayout,
+        shader: &wgpu::ShaderModule,
+    ) -> Self {
+        let pipeline = |cutout: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(if cutout { "shadow cutout" } else { "shadow" }),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("vs_shadow"),
+                    buffers: &[Some(slot_layout())],
+                    compilation_options: Default::default(),
+                },
+                fragment: cutout.then_some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some("fs_shadow_cutout"),
+                    targets: &[],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState {
+                        constant: 2,
+                        slope_scale: 2.0,
+                        clamp: 0.0,
+                    },
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        Self {
+            solid: pipeline(false),
+            cutout: pipeline(true),
+        }
+    }
+}
+
 pub(crate) fn create_outline_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
