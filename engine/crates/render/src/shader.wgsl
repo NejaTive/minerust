@@ -67,8 +67,11 @@ const RIPPLE_CALM: f32 = 0.12;
 const RIPPLE_RAIN_GAIN: f32 = 1.2;
 const RIPPLE_FADE_START: f32 = 24.0;
 const RIPPLE_FADE_END: f32 = 90.0;
-const RIPPLE_WARP: f32 = 2.5;
-const RIPPLE_WARP_SCALE: f32 = 0.12;
+const RIPPLE_WIND_ANGLE: f32 = 0.6;
+const RIPPLE_WIND_SWING: f32 = 0.15;
+const RIPPLE_PHASE_WARP: f32 = 5.0;
+const RIPPLE_WAVE_SPEED: f32 = 0.5;
+const RIPPLE_DETAIL: f32 = 0.3;
 const RIPPLE_WIND_SCALE: f32 = 0.025;
 const SPECULAR_POWER: f32 = 220.0;
 const MOON_SPECULAR: f32 = 0.3;
@@ -318,18 +321,43 @@ fn ripple_octave(q: vec2<f32>, scale: f32, angle: f32, drift: vec2<f32>, weight:
     return slope * (weight * resolved / scale);
 }
 
+// Направленная волна с острым гребнем; шум сдвигает фазу и ломает гребни.
+// phase_noise — (значение, d/dx, d/dy) в координатах шума, noise_scale — его масштаб.
+fn ripple_wave(
+    p: vec2<f32>,
+    angle: f32,
+    wavelength: f32,
+    weight: f32,
+    phase_noise: vec3<f32>,
+    noise_scale: f32,
+    footprint: f32,
+) -> vec2<f32> {
+    let dir = vec2<f32>(cos(angle), sin(angle));
+    let k = 6.2831853 / wavelength;
+    let phase = k * dot(dir, p) - k * RIPPLE_WAVE_SPEED * sqrt(wavelength) * globals.anim_time
+        + (phase_noise.x - 0.5) * RIPPLE_PHASE_WARP;
+    let dphase = k * dir + phase_noise.yz * (noise_scale * RIPPLE_PHASE_WARP);
+    let crest = exp(sin(phase) - 1.0) * cos(phase);
+    let resolved = 1.0 - smoothstep(0.25, 0.6, footprint / wavelength);
+    return dphase * (crest * weight * resolved / k);
+}
+
 // footprint = length(fwidth(p)) считается снаружи: производные нельзя брать в неоднородном ветвлении.
 fn ripple_normal(p: vec2<f32>, dist: f32, footprint: f32) -> vec3<f32> {
     let t = globals.anim_time;
-    let warp = value_noise(p * RIPPLE_WARP_SCALE + vec2<f32>(t * 0.03, -t * 0.02));
-    let q = p + vec2<f32>(warp.z, -warp.y) * RIPPLE_WARP;
     let wind = value_noise(p * RIPPLE_WIND_SCALE + vec2<f32>(t * 0.004, t * 0.006)).x;
-    let patch_strength = mix(RIPPLE_CALM, 1.0, smoothstep(0.3, 0.7, wind));
+    let gust = mix(RIPPLE_CALM, 1.0, smoothstep(0.3, 0.7, wind));
     let distance_fade = 1.0 - smoothstep(RIPPLE_FADE_START, RIPPLE_FADE_END, dist);
-    let strength = RIPPLE_STRENGTH * patch_strength * distance_fade * (1.0 + RIPPLE_RAIN_GAIN * globals.rain);
-    let slope = ripple_octave(q, 0.9, 0.35, vec2<f32>(0.10, 0.04), 1.0, footprint)
-        + ripple_octave(q, 1.9, 1.9, vec2<f32>(-0.17, 0.09), 0.6, footprint)
-        + ripple_octave(q, 3.7, 4.1, vec2<f32>(0.12, -0.25), 0.35, footprint);
+    let strength = RIPPLE_STRENGTH * gust * distance_fade * (1.0 + RIPPLE_RAIN_GAIN * globals.rain);
+    let heading = RIPPLE_WIND_ANGLE + RIPPLE_WIND_SWING * sin(t * 0.02);
+    let coarse = value_noise(p * 0.35 + vec2<f32>(t * 0.05, -t * 0.03));
+    let fine = value_noise(p * 0.8 + vec2<f32>(-t * 0.08, t * 0.06) + vec2<f32>(31.7, 12.3));
+    let slope = ripple_wave(p, heading - 0.65, 3.1, 1.0, coarse, 0.35, footprint)
+        + ripple_wave(p, heading - 0.28, 2.1, 0.8, fine, 0.8, footprint)
+        + ripple_wave(p, heading + 0.08, 1.4, 0.6, coarse, 0.35, footprint)
+        + ripple_wave(p, heading + 0.4, 0.95, 0.45, fine, 0.8, footprint)
+        + ripple_wave(p, heading + 0.66, 0.62, 0.3, coarse, 0.35, footprint)
+        + ripple_octave(p, 6.0, 1.3, vec2<f32>(0.2, -0.1), RIPPLE_DETAIL, footprint);
     let r = slope * strength * 2.0;
     return normalize(vec3<f32>(-r.x, 1.0, -r.y));
 }
