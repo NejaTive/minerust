@@ -14,6 +14,10 @@ function numberOf(e: Event): number {
   return (e.target as HTMLInputElement).valueAsNumber
 }
 
+function qualityOf(e: Event): boolean {
+  return (e.target as HTMLSelectElement).value === 'high'
+}
+
 function checkedOf(e: Event): boolean {
   return (e.target as HTMLInputElement).checked
 }
@@ -135,6 +139,28 @@ function checkedOf(e: Event): boolean {
         :disabled="!settings.hdr"
         @change="patch({ sunRays: checkedOf($event) })"
       />
+    </label>
+
+    <label class="row toggle">
+      <span class="name">Тени</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.shadows"
+        @change="patch({ shadows: checkedOf($event) })"
+      />
+    </label>
+
+    <label class="row toggle" :class="{ disabled: !settings.shadows }">
+      <span class="name">Качество теней</span>
+      <select
+        :value="settings.shadowQualityHigh ? 'high' : 'low'"
+        :disabled="!settings.shadows"
+        @change="patch({ shadowQualityHigh: qualityOf($event) })"
+      >
+        <option value="low">Низкое</option>
+        <option value="high">Высокое</option>
+      </select>
     </label>
   </div>
   <button @click="emit('back')">Назад</button>
