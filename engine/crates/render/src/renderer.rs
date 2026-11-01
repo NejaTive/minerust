@@ -23,7 +23,7 @@ use crate::pipelines::{
 };
 use crate::post::{
     HdrTargets, PostLayouts, create_post_pipeline, create_rays_pipeline, create_scene_copy_stub,
-    sun_rays,
+    light_rays,
 };
 use crate::rain::{
     RAIN_INSTANCES, RAIN_VERTICES, create_rain_cover_texture, create_rain_tile_texture,
@@ -759,7 +759,7 @@ impl Renderer {
 
     pub fn begin(&mut self, params: &FrameParams) -> Result<Option<PendingFrame>, String> {
         let (sun_screen, sun_ray) = if params.effects.hdr && params.effects.sun_rays {
-            sun_rays(
+            light_rays(
                 params.view_proj,
                 params.camera_pos,
                 params.sun_dir,

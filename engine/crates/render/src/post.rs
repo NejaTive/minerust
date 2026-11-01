@@ -336,8 +336,9 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Позиция солнца в UV экрана и сила лучей: гаснут ночью, в дождь, под водой и когда солнце далеко за кадром.
-pub(crate) fn sun_rays(
+/// Позиция источника света (солнце, ночью луна) в UV экрана и сила лучей: гаснут около
+/// горизонта, в дождь, под водой и когда источник далеко за кадром. Лунные слабее солнечных.
+pub(crate) fn light_rays(
     view_proj: Mat4,
     camera_pos: Vec3,
     sun_dir: Vec3,
@@ -345,17 +346,25 @@ pub(crate) fn sun_rays(
     rain: f32,
     underwater: bool,
 ) -> (Vec2, f32) {
-    let clip = view_proj * (camera_pos + sun_dir.normalize() * SUN_DISTANCE).extend(1.0);
+    let sun_up = sun_dir.y >= 0.0;
+    let dir = if sun_up { sun_dir } else { -sun_dir };
+    let clip = view_proj * (camera_pos + dir.normalize() * SUN_DISTANCE).extend(1.0);
     if clip.w <= 0.0 || underwater {
         return (Vec2::ZERO, 0.0);
     }
     let ndc = Vec2::new(clip.x, clip.y) / clip.w;
     let uv = Vec2::new(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     let on_screen = 1.0 - smoothstep(1.0, 1.8, ndc.abs().max_element());
-    let day = smoothstep(0.0, 0.25, sun_dir.y);
-    (uv, on_screen * day * (1.0 - night) * (1.0 - rain))
+    let elevation = smoothstep(0.0, 0.25, dir.y);
+    let source = if sun_up {
+        1.0 - night
+    } else {
+        MOON_RAY_GAIN * night
+    };
+    (uv, on_screen * elevation * source * (1.0 - rain))
 }
 
+const MOON_RAY_GAIN: f32 = 0.3;
 const SUN_DISTANCE: f32 = 100.0;
 
 #[cfg(test)]

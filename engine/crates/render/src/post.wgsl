@@ -48,6 +48,7 @@ const FX_SUN_RAYS: u32 = 128u;
 const RAY_STRENGTH: f32 = 0.35;
 const RAY_DAY_COLOR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.8);
 const RAY_DUSK_COLOR: vec3<f32> = vec3<f32>(1.0, 0.55, 0.25);
+const RAY_MOON_COLOR: vec3<f32> = vec3<f32>(0.55, 0.7, 1.0);
 
 const EXPOSURE: f32 = 1.2;
 const NIGHT_GRADE: vec3<f32> = vec3<f32>(0.85, 0.95, 1.2);
@@ -107,7 +108,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
     if (globals.effects & FX_SUN_RAYS) != 0u {
         let shafts = textureSampleLevel(rays, post_sampler, in.uv, 0.0).r;
-        hdr += mix(RAY_DAY_COLOR, RAY_DUSK_COLOR, globals.warm) * (shafts * globals.sun_ray * RAY_STRENGTH);
+        hdr += mix(mix(RAY_DAY_COLOR, RAY_DUSK_COLOR, globals.warm), RAY_MOON_COLOR, globals.night) * (shafts * globals.sun_ray * RAY_STRENGTH);
     }
     var color = aces_fitted(hdr * EXPOSURE);
     color = grade(color) * vignette(in.uv);
