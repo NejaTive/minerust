@@ -142,3 +142,17 @@ fn bitwise_lint_catches_the_bad_pattern() {
     assert!(mixes_bitwise_with_arithmetic("let a = x * 3u ^ y;"));
     assert!(!mixes_bitwise_with_arithmetic("let a = (x * 3u) ^ y;"));
 }
+
+#[test]
+fn shadow_data_size_matches_rust_layout() {
+    let module = module();
+    let (_, data) = module
+        .types
+        .iter()
+        .find(|(_, t)| t.name.as_deref() == Some("ShadowData"))
+        .expect("ShadowData");
+    let naga::TypeInner::Struct { span, .. } = data.inner else {
+        panic!("ShadowData is not a struct");
+    };
+    assert_eq!(span as usize, crate::shadow::ShadowData::SIZE);
+}
