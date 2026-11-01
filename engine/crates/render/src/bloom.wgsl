@@ -4,7 +4,7 @@ var src: texture_2d<f32>;
 @group(0) @binding(1)
 var src_sampler: sampler;
 
-const THRESHOLD: f32 = 1.0;
+const THRESHOLD: f32 = 1.05;
 const KNEE: f32 = 0.3;
 
 struct VertexOut {

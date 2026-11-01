@@ -83,8 +83,9 @@ const RIPPLE_DETAIL: f32 = 0.3;
 const RIPPLE_WIND_SCALE: f32 = 0.025;
 const SPECULAR_POWER: f32 = 220.0;
 const MOON_SPECULAR: f32 = 0.3;
-// В HDR яркий блочный свет (факелы, лава, светокамень) выходит за 1.0 и даёт свечение.
-const HDR_EMISSIVE_GAIN: f32 = 2.0;
+// Светящиеся тайлы (лава, светокамень, факел) в HDR ярче 1.0 и дают свечение.
+const HDR_EMISSIVE_LEVEL: f32 = 2.0;
+const EMISSIVE_FLAG: f32 = 4.0;
 const HDR_GLINT_GAIN: f32 = 4.0;
 const REFRACT_STRENGTH: f32 = 0.06;
 const MAX_WATER_THICKNESS: f32 = 48.0;
@@ -104,7 +105,7 @@ var block_textures: texture_2d_array<f32>;
 var block_sampler: sampler;
 
 // Запись на слой: (кадры, кадров в секунду, прокрутка боковых граней в блоках в секунду,
-// колыхание: 0 нет, 1 листва, 2 трава и цветы).
+// колыхание: 0 нет, 1 листва, 2 трава и цветы; плюс 4 — светящийся тайл, EMISSIVE_FLAG в tile.rs).
 // Строит `world::tile::animation_table`; размер — `LAYER_COUNT`.
 @group(0) @binding(3)
 var<uniform> animation: array<vec4<f32>, 58>;
@@ -154,6 +155,14 @@ struct VertexOut {
     @location(2) @interpolate(flat) layer: u32,
     @location(3) world_pos: vec3<f32>,
 };
+
+fn is_emissive(flags: f32) -> bool {
+    return flags >= EMISSIVE_FLAG - 0.5;
+}
+
+fn sway_kind(flags: f32) -> f32 {
+    return select(flags, flags - EMISSIVE_FLAG, is_emissive(flags));
+}
 
 fn level_brightness(level: f32) -> f32 {
     return max(pow(LIGHT_BASE, MAX_LIGHT - level), MIN_BRIGHTNESS);
@@ -211,7 +220,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     }
     var world_pos = in.origin + cell + offset / 16.0;
     let layer = (w0 >> 18u) & 0xFFu;
-    world_pos += sway_offset(world_pos, animation[layer].w, offset.y > 0.0);
+    world_pos += sway_offset(world_pos, sway_kind(animation[layer].w), offset.y > 0.0);
     let ao = (w1 >> (2u * corner)) & 3u;
     let sun = (w1 >> (8u + 5u * corner)) & 0x1Fu;
     let block = (w2 >> (5u * corner)) & 0x1Fu;
@@ -270,17 +279,12 @@ fn weather_exposure() -> f32 {
     return (1.0 - RAIN_DIM * globals.rain * (1.0 - globals.night)) * (1.0 + FLASH_GAIN * globals.flash);
 }
 
-fn emissive_boost(in: VertexOut) -> f32 {
-    if !effect(FX_HDR) {
-        return 1.0;
-    }
-    let block_share = smoothstep(0.0, 0.2, in.block_light - in.sun_light);
-    return 1.0 + HDR_EMISSIVE_GAIN * block_share * smoothstep(0.55, 1.0, in.block_light);
-}
-
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
-    var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in) * emissive_boost(in);
+    var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in);
     color *= weather_exposure();
+    if effect(FX_HDR) && is_emissive(animation[in.layer].w) {
+        color = max(color, texel * HDR_EMISSIVE_LEVEL);
+    }
     if globals.eye_fluid > 0.5 {
         color *= select(UNDERWATER_TINT, LAVA_TINT, globals.eye_fluid > 1.5);
     }
