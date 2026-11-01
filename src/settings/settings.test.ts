@@ -33,6 +33,8 @@ const defaults = defaultSettings({
   bloom: true,
   waterDepth: true,
   sunRays: true,
+  shadows: true,
+  shadowQualityHigh: true,
 })
 
 const load = (data: Record<string, string> = {}) =>
@@ -55,7 +57,9 @@ describe('loadSettings', () => {
       s.bloom,
       s.waterDepth,
       s.sunRays,
-    ]).toEqual([true, true, true, true, true, true, true, true, true])
+      s.shadows,
+      s.shadowQualityHigh,
+    ]).toEqual([true, true, true, true, true, true, true, true, true, true, true])
   })
 
   it('читает сохранённые значения', () => {
@@ -75,6 +79,8 @@ describe('loadSettings', () => {
       [KEYS.bloom]: 'false',
       [KEYS.waterDepth]: 'false',
       [KEYS.sunRays]: 'false',
+      [KEYS.shadows]: 'false',
+      [KEYS.shadowQualityHigh]: 'false',
       [KEYS.showDebug]: 'true',
     }
     expect(load(data)).toEqual({
@@ -93,6 +99,8 @@ describe('loadSettings', () => {
       bloom: false,
       waterDepth: false,
       sunRays: false,
+      shadows: false,
+      shadowQualityHigh: false,
       showDebug: true,
     })
   })

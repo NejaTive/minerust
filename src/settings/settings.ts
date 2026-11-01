@@ -16,6 +16,8 @@ export const KEYS = {
   bloom: 'minerust.bloom',
   waterDepth: 'minerust.waterDepth',
   sunRays: 'minerust.sunRays',
+  shadows: 'minerust.shadows',
+  shadowQualityHigh: 'minerust.shadowQualityHigh',
   showDebug: 'minerust.showDebug',
 } as const
 // Ключи убранных настроек (панель управления, выбор графического API): чистим, чтобы не копился мусор.
@@ -37,6 +39,8 @@ export interface EngineSettings {
   bloom: boolean
   waterDepth: boolean
   sunRays: boolean
+  shadows: boolean
+  shadowQualityHigh: boolean
 }
 
 export interface Settings extends EngineSettings {
@@ -114,6 +118,8 @@ export function loadSettings(
     bloom: readBool(store, KEYS.bloom, defaults.bloom),
     waterDepth: readBool(store, KEYS.waterDepth, defaults.waterDepth),
     sunRays: readBool(store, KEYS.sunRays, defaults.sunRays),
+    shadows: readBool(store, KEYS.shadows, defaults.shadows),
+    shadowQualityHigh: readBool(store, KEYS.shadowQualityHigh, defaults.shadowQualityHigh),
     showDebug: readBool(store, KEYS.showDebug, defaults.showDebug),
   }
 }
@@ -134,6 +140,8 @@ export function saveSettings(store: KeyValueStore, s: Settings) {
   store.set(KEYS.bloom, String(s.bloom))
   store.set(KEYS.waterDepth, String(s.waterDepth))
   store.set(KEYS.sunRays, String(s.sunRays))
+  store.set(KEYS.shadows, String(s.shadows))
+  store.set(KEYS.shadowQualityHigh, String(s.shadowQualityHigh))
   store.set(KEYS.showDebug, String(s.showDebug))
 }
 

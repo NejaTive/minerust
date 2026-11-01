@@ -18,6 +18,8 @@ export function applySettings(engine: Engine, s: Settings) {
     s.bloom,
     s.waterDepth,
     s.sunRays,
+    s.shadows,
+    s.shadowQualityHigh,
   )
   try {
     engine.apply_settings(payload)

@@ -44,6 +44,7 @@ const FX_GROUND_FOG: u32 = 4u;
 const FX_PLANT_SWAY: u32 = 8u;
 const FX_HDR: u32 = 16u;
 const FX_WATER_DEPTH: u32 = 64u;
+const FX_SHADOWS: u32 = 256u;
 
 fn effect(bit: u32) -> bool {
     return (globals.effects & bit) != 0u;
@@ -107,6 +108,31 @@ var block_sampler: sampler;
 // Строит `world::tile::animation_table`; размер — `LAYER_COUNT`.
 @group(0) @binding(3)
 var<uniform> animation: array<vec4<f32>, 58>;
+
+// Каскадные тени от солнца (или луны). Раскладка байтов — `ShadowData` в shadow.rs.
+// matrices — мировая позиция в клип каскада; splits — дальняя граница каскада в линейной
+// глубине камеры; light — (направление на источник, сила тени); texel_world — размер
+// текселя карты в блоках; params — (каскадов, отсчётов PCF на сторону, 1 / разрешение).
+struct ShadowData {
+    matrices: array<mat4x4<f32>, 3>,
+    splits: vec4<f32>,
+    light: vec4<f32>,
+    texel_world: vec4<f32>,
+    params: vec4<f32>,
+};
+@group(0) @binding(7)
+var<uniform> shadows: ShadowData;
+@group(0) @binding(8)
+var shadow_map: texture_depth_2d_array;
+@group(0) @binding(9)
+var shadow_sampler: sampler_comparison;
+
+// Только проход теней: матрица каскада, отдельный буфер на каскад.
+struct ShadowPass {
+    view_proj: mat4x4<f32>,
+};
+@group(0) @binding(10)
+var<uniform> shadow_pass: ShadowPass;
 
 // Сцена без воды: цвет и глубина копируются перед проходом воды (renderer.rs).
 @group(2) @binding(0)
@@ -187,8 +213,7 @@ fn sway_offset(p: vec3<f32>, kind: f32, free: bool) -> vec3<f32> {
     return vec3<f32>(0.0);
 }
 
-@vertex
-fn vs_main(in: VertexIn) -> VertexOut {
+fn block_vertex(in: VertexIn) -> VertexOut {
     let at = in.first_word + (in.vertex / 4u) * 3u;
     let w0 = quads[at];
     let w1 = quads[at + 1u];
@@ -235,6 +260,36 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
+@vertex
+fn vs_main(in: VertexIn) -> VertexOut {
+    return block_vertex(in);
+}
+
+struct ShadowOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) layer: u32,
+};
+
+// Те же вершины, что в vs_main (вместе с колыханием), но с матрицей каскада.
+@vertex
+fn vs_shadow(in: VertexIn) -> ShadowOut {
+    let v = block_vertex(in);
+    var out: ShadowOut;
+    out.position = shadow_pass.view_proj * vec4<f32>(v.world_pos, 1.0);
+    out.uv = v.uv;
+    out.layer = v.layer;
+    return out;
+}
+
+@fragment
+fn fs_shadow_cutout(in: ShadowOut) {
+    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
+    if texel.a < 0.5 {
+        discard;
+    }
+}
+
 fn animated_layer(base: u32) -> u32 {
     let entry = animation[base];
     return base + u32(floor(globals.anim_time * entry.y)) % u32(entry.x);
@@ -277,8 +332,107 @@ fn weather_exposure() -> f32 {
     return (1.0 - RAIN_DIM * globals.rain * (1.0 - globals.night)) * (1.0 + FLASH_GAIN * globals.flash);
 }
 
-fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
-    var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in);
+const SHADOW_FLOOR: f32 = 0.45;
+const SHADOW_NORMAL_OFFSET: f32 = 1.5;
+const SHADOW_BLEND: f32 = 0.9;
+const TWO_SIDED_LIFT: f32 = 0.03;
+
+// Плоская нормаль по производным, лицом к камере. Только в однородном потоке управления.
+fn flat_normal(world_pos: vec3<f32>) -> vec3<f32> {
+    let normal = normalize(cross(dpdx(world_pos), dpdy(world_pos)));
+    return select(-normal, normal, dot(normal, globals.camera_pos - world_pos) >= 0.0);
+}
+
+// lift — сдвиг приёмника к свету в блоках: колышущаяся листва неплоская, и без него её
+// квады затеняют сами себя пятнами по треугольникам.
+fn shadow_cascade(c: u32, world_pos: vec3<f32>, normal: vec3<f32>, facing: f32, lift: f32) -> f32 {
+    let offset = normal * (shadows.texel_world[c] * SHADOW_NORMAL_OFFSET * (1.0 - facing))
+        + shadows.light.xyz * lift;
+    let clip = shadows.matrices[c] * vec4<f32>(world_pos + offset, 1.0);
+    let uv = vec2<f32>(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5);
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || clip.z > 1.0 {
+        return 1.0;
+    }
+    let taps = i32(shadows.params.y);
+    let start = f32(taps - 1) * 0.5;
+    var lit = 0.0;
+    for (var i = 0; i < taps; i++) {
+        for (var j = 0; j < taps; j++) {
+            let shift = (vec2<f32>(f32(i), f32(j)) - vec2<f32>(start)) * shadows.params.z;
+            lit += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + shift, c, clip.z);
+        }
+    }
+    return lit / f32(taps * taps);
+}
+
+// 1 — солнце видно, меньше — тень (с учётом силы тени).
+// Не использует производные: нормаль считается снаружи.
+fn sun_visibility(in: VertexOut, geometric: vec3<f32>, cutout: bool) -> f32 {
+    if !effect(FX_SHADOWS) {
+        return 1.0;
+    }
+    let strength = shadows.light.w;
+    var normal = geometric;
+    var lift = 0.0;
+    var facing = dot(geometric, shadows.light.xyz);
+    let kind = sway_kind(animation[in.layer].w);
+    let sways = effect(FX_PLANT_SWAY);
+    let gust = 1.0 + RAIN_SWAY_GAIN * globals.rain;
+    // Кресты, трава, факел: тонкая двусторонняя геометрия, света «от солнца» у них нет.
+    // Освещаются с обеих сторон, приёмник сдвигается к свету, а не по нормали.
+    let two_sided = cutout && (kind < 0.5 || kind > 1.5);
+    if two_sided {
+        facing = 1.0;
+        lift = TWO_SIDED_LIFT;
+        if sways && kind > 1.5 {
+            lift += 2.0 * GRASS_SWAY * gust;
+        }
+    } else if sways && kind > 0.5 && kind < 1.5 {
+        lift = 2.0 * LEAF_SWAY * gust;
+        // Грани листвы осевые; нормаль по производным у неплоского квада разная на треугольниках.
+        let a = abs(geometric);
+        if a.x >= a.y && a.x >= a.z {
+            normal = vec3<f32>(sign(geometric.x), 0.0, 0.0);
+        } else if a.y >= a.z {
+            normal = vec3<f32>(0.0, sign(geometric.y), 0.0);
+        } else {
+            normal = vec3<f32>(0.0, 0.0, sign(geometric.z));
+        }
+        facing = dot(normal, shadows.light.xyz);
+    }
+    var visibility = 0.0;
+    var fade = 0.0;
+    if facing > 0.0 {
+        let depth = linear_depth(in.position.z);
+        let count = u32(shadows.params.x);
+        var c = 0u;
+        while c + 1u < count && depth > shadows.splits[c] {
+            c++;
+        }
+        visibility = shadow_cascade(c, in.world_pos, normal, facing, lift);
+        let edge = shadows.splits[c];
+        let blend = smoothstep(edge * SHADOW_BLEND, edge, depth);
+        if blend > 0.0 {
+            if c + 1u < count {
+                visibility = mix(visibility, shadow_cascade(c + 1u, in.world_pos, normal, facing, lift), blend);
+            } else {
+                fade = blend;
+            }
+        }
+    }
+    return 1.0 - strength * (1.0 - mix(visibility, 1.0, fade));
+}
+
+// Тень ограничивает солнечный свет сверху уровнем полного неба: где CPU-свет уже ниже
+// (под кроной, в пещере), min ничего не меняет и не осветляет.
+fn shadowed_sun(sun_light: f32, sun_vis: f32) -> f32 {
+    let full_sky = max(level_brightness(MAX_LIGHT - globals.darkness), sun_light);
+    return min(sun_light, full_sky * mix(SHADOW_FLOOR, 1.0, sun_vis));
+}
+
+fn shaded(in: VertexOut, texel: vec3<f32>, sun_vis: f32) -> vec3<f32> {
+    let sun_light = shadowed_sun(in.sun_light, sun_vis);
+    var color = texel * in.shade * max(sun_light, in.block_light) * light_tint(in);
     color *= weather_exposure();
     if effect(FX_HDR) && is_emissive(animation[in.layer].w) {
         color = max(color, texel * HDR_EMISSIVE_LEVEL);
@@ -293,8 +447,9 @@ fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
 // (TBDR отключает это для любого пайплайна с `discard`).
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    let normal = flat_normal(in.world_pos);
     let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
-    return vec4<f32>(shaded(in, texel.rgb), 1.0);
+    return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, false)), 1.0);
 }
 
 // Листва, кресты, факел: дырки через `discard`. Альфа в текстуре двоичная на каждом
@@ -302,11 +457,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 // не нужно.
 @fragment
 fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
+    let normal = flat_normal(in.world_pos);
     let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
     if texel.a < 0.5 {
         discard;
     }
-    return vec4<f32>(shaded(in, texel.rgb), 1.0);
+    return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, true)), 1.0);
 }
 
 // Одинаково в sky.wgsl и shader.wgsl: туман сцены сходится с горизонтом неба.
@@ -411,12 +567,12 @@ fn scene_depth_at(pixel: vec2<f32>) -> f32 {
 @fragment
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
-    let flat_normal = normalize(cross(dpdx(in.world_pos), dpdy(in.world_pos)));
+    var normal = flat_normal(in.world_pos);
+    let sun_vis = sun_visibility(in, normal, false);
     if globals.eye_fluid > 0.5 || !effect(FX_WATER_REFLECTIONS) {
-        return vec4<f32>(shaded(in, texel.rgb), texel.a);
+        return vec4<f32>(shaded(in, texel.rgb, sun_vis), texel.a);
     }
     let view = normalize(globals.camera_pos - in.world_pos);
-    var normal = select(-flat_normal, flat_normal, dot(flat_normal, view) >= 0.0);
     let ripple_footprint = length(fwidth(in.world_pos.xz));
     if normal.y > 0.95 {
         normal = ripple_normal(in.world_pos.xz, length(globals.camera_pos - in.world_pos), ripple_footprint);
@@ -425,19 +581,19 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - cos_view, 5.0);
     let reflected = reflect(-view, normal);
     let exposure = weather_exposure();
-    let sky = sky_color(vec3<f32>(reflected.x, abs(reflected.y), reflected.z)) * in.sky_exposure * exposure;
+    let sky = sky_color(vec3<f32>(reflected.x, abs(reflected.y), reflected.z)) * min(in.sky_exposure, mix(SHADOW_FLOOR, 1.0, sun_vis)) * exposure;
 
     let sun_up = smoothstep(-0.05, 0.1, globals.sun_dir.y);
     let moon_up = MOON_SPECULAR * smoothstep(-0.05, 0.1, -globals.sun_dir.y);
     let glint = sun_up * pow(max(dot(reflected, globals.sun_dir), 0.0), SPECULAR_POWER)
         + moon_up * pow(max(dot(reflected, -globals.sun_dir), 0.0), SPECULAR_POWER);
-    var specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sky_exposure);
+    var specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sky_exposure) * sun_vis;
     let alpha_glint = clamp(specular, 0.0, 1.0);
     if effect(FX_HDR) {
         specular *= HDR_GLINT_GAIN;
     }
 
-    let lit = in.shade * max(in.sun_light, in.block_light) * light_tint(in) * exposure;
+    let lit = in.shade * max(shadowed_sun(in.sun_light, sun_vis), in.block_light) * light_tint(in) * exposure;
     let body = texel.rgb * lit;
     if effect(FX_WATER_DEPTH) {
         let pixel = in.position.xy;
@@ -469,6 +625,7 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_ice(in: VertexOut) -> @location(0) vec4<f32> {
+    let normal = flat_normal(in.world_pos);
     let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
-    return vec4<f32>(shaded(in, texel.rgb), texel.a);
+    return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, false)), texel.a);
 }

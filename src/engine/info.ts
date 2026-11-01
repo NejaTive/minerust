@@ -48,6 +48,8 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
       bloom: defaults.bloom,
       waterDepth: defaults.waterDepth,
       sunRays: defaults.sunRays,
+      shadows: defaults.shadows,
+      shadowQualityHigh: defaults.shadowQualityHigh,
     },
   }
   list.forEach((block) => block.free())

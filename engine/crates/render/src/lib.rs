@@ -15,8 +15,11 @@ mod quad_indices;
 mod rain;
 pub mod renderer;
 pub mod shaders;
+mod shadow;
+mod shadow_map;
 mod slots;
 mod texture;
 
 pub use effects::Effects;
 pub use renderer::{FrameCounts, FrameParams, PendingFrame, Renderer};
+pub use shadow::ShadowQuality;
