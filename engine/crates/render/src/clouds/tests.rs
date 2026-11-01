@@ -1,7 +1,30 @@
-use glam::{IVec2, Vec2};
-use world::clouds::{CLOUD_CELL, CloudMask};
+use glam::{IVec2, Vec2, Vec3};
+use world::clouds::{CLOUD_CELL, CLOUD_HEIGHT, CLOUD_Y, CloudMask};
 
 use super::*;
+
+const CLOUD_SHADOW_PLANE_Y: f32 = CLOUD_Y as f32 + CLOUD_HEIGHT as f32 * 0.5;
+
+fn cloud_shadow_cell(world_pos: Vec3, light_dir: Vec3, drift: f32) -> Vec2 {
+    let t = (CLOUD_SHADOW_PLANE_Y - world_pos.y) / light_dir.y;
+    let xz = Vec2::new(world_pos.x + light_dir.x * t, world_pos.z + light_dir.z * t);
+    (xz - Vec2::new(drift, 0.0)) / CLOUD_CELL as f32
+}
+
+fn cloud_shadow_cover(mask: &CloudMask, cell: Vec2) -> f32 {
+    let q = cell - Vec2::splat(0.5);
+    let base = q.floor();
+    let f = q - base;
+    let f = f * f * (Vec2::splat(3.0) - 2.0 * f);
+    let origin = base.as_ivec2();
+    let at = |offset: IVec2| {
+        let c = origin + offset;
+        f32::from(u8::from(mask.get(c.x, c.y)))
+    };
+    let top = at(IVec2::ZERO) + (at(IVec2::X) - at(IVec2::ZERO)) * f.x;
+    let bottom = at(IVec2::Y) + (at(IVec2::ONE) - at(IVec2::Y)) * f.x;
+    top + (bottom - top) * f.y
+}
 
 fn instance_cell(index: u32, camera_xz: Vec2, drift: f32) -> IVec2 {
     let base = ((camera_xz - Vec2::new(drift, 0.0)) / CLOUD_CELL as f32)
@@ -103,4 +126,58 @@ fn rain_darkens_clouds_and_flash_lights_them() {
     let rainy = cloud_color(0.0, 0.0, 1.0, 0.0);
     assert!(rainy.max_element() < 0.5);
     assert!(cloud_color(0.0, 0.0, 1.0, 1.0).min_element() > rainy.max_element());
+}
+
+#[test]
+fn shadow_cell_projects_along_light_to_cloud_plane_with_drift() {
+    let light = Vec3::new(0.6, 0.8, 0.0);
+    let point = Vec3::new(100.0, 100.0, 50.0);
+    let rise = (CLOUD_SHADOW_PLANE_Y - point.y) / light.y;
+    let hit_x = point.x + light.x * rise;
+    let cell = cloud_shadow_cell(point, light, 0.0);
+    assert!((cell.x - hit_x / CLOUD_CELL as f32).abs() < 1e-4);
+    assert!((cell.y - point.z / CLOUD_CELL as f32).abs() < 1e-4);
+    let drifted = cloud_shadow_cell(point, light, 24.0);
+    assert!((drifted.x - (cell.x - 2.0)).abs() < 1e-4);
+    assert_eq!(drifted.y, cell.y);
+}
+
+#[test]
+fn shadow_cell_of_point_under_the_plane_with_vertical_light_is_its_own_column() {
+    let cell = cloud_shadow_cell(Vec3::new(30.0, 70.0, -18.0), Vec3::Y, 0.0);
+    assert_eq!(cell, Vec2::new(2.5, -1.5));
+}
+
+#[test]
+fn shadow_cover_is_solid_inside_empty_outside_and_soft_on_the_edge() {
+    let mask = CloudMask::new(9);
+    let mut checked = 0;
+    for x in -30..30 {
+        for z in -30..30 {
+            let near = |dx: i32, dz: i32| mask.get(x + dx, z + dz);
+            let cells = [(0, 0), (1, 0), (0, 1), (1, 1)];
+            let all = cells.iter().all(|&(dx, dz)| near(dx, dz));
+            let none = cells.iter().all(|&(dx, dz)| !near(dx, dz));
+            let mixed = !all && !none;
+            let center = Vec2::new(x as f32 + 1.0, z as f32 + 1.0);
+            let cover = cloud_shadow_cover(&mask, center);
+            if all {
+                assert_eq!(cover, 1.0);
+            } else if none {
+                assert_eq!(cover, 0.0);
+            } else if mixed {
+                assert!(cover > 0.0 && cover < 1.0, "{cover}");
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0);
+}
+
+#[test]
+fn cloud_shadow_strength_fades_with_rain_and_light() {
+    assert!(cloud_shadow_strength(1.0, 0.0) > 0.3);
+    assert!(cloud_shadow_strength(1.0, 0.0) < 0.5);
+    assert_eq!(cloud_shadow_strength(1.0, 0.5), 0.0);
+    assert!(cloud_shadow_strength(0.13, 0.0) < 0.07);
 }

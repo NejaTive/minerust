@@ -10,7 +10,8 @@ use world::section::SECTION_SIZE;
 
 use crate::bloom::BloomPipelines;
 use crate::clouds::{
-    CLOUD_INSTANCES, CLOUD_VERTICES, cloud_color, create_cloud_texture, upload_cloud_mask,
+    CLOUD_INSTANCES, CLOUD_VERTICES, cloud_color, cloud_shadow_strength, create_cloud_texture,
+    upload_cloud_mask,
 };
 use crate::effects::Effects;
 use crate::frustum::Frustum;
@@ -32,7 +33,7 @@ use crate::rain::{
 use crate::shaders;
 use crate::shadow::MAX_CASCADES;
 use crate::shadow::{
-    ShadowData, ShadowQuality, compute_cascades, quantize_light_dir, shadow_light,
+    ShadowData, ShadowLight, ShadowQuality, compute_cascades, quantize_light_dir, shadow_light,
 };
 use crate::shadow_map::{ShadowMap, comparison_sampler};
 use crate::texture::{create_animation_table, create_block_textures};
@@ -342,7 +343,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -770,11 +771,9 @@ impl Renderer {
         } else {
             (Vec2::ZERO, 0.0)
         };
-        let light = params
-            .effects
-            .shadows
-            .then(|| shadow_light(params.sun_dir, params.warm, params.rain))
-            .flatten()
+        let sky_light = shadow_light(params.sun_dir, params.warm, params.rain);
+        let light = sky_light
+            .filter(|_| params.effects.shadows)
             .map(|mut light| {
                 light.dir = quantize_light_dir(self.shadow_dir, light.dir);
                 light
@@ -782,6 +781,13 @@ impl Renderer {
         self.shadow_dir = light.map(|light| light.dir);
         let quality = params.effects.shadow_quality;
         self.sync_shadow_map(light.map(|_| quality));
+        let cloud_strength = sky_light
+            .filter(|_| params.effects.cloud_shadows)
+            .map_or(0.0, |sky| cloud_shadow_strength(sky.strength, params.rain));
+        let cloud_light = sky_light.map(|sky| ShadowLight {
+            dir: light.map_or(sky.dir, |block| block.dir),
+            strength: sky.strength,
+        });
         let shadow = light.map(|light| ShadowData {
             cascades: compute_cascades(
                 params.view_proj,
@@ -793,9 +799,11 @@ impl Renderer {
             ),
             light,
             quality,
+            cloud_strength,
         });
         let effects = Effects {
             shadows: shadow.is_some(),
+            cloud_shadows: cloud_strength > 0.0,
             ..params.effects
         };
         let [r, g, b] = params.background.to_array().map(f64::from);
@@ -851,6 +859,10 @@ impl Renderer {
                     .collect();
                 self.queue.write_buffer(buffer, 0, &bytes);
             }
+        } else if let (Some(light), true) = (cloud_light, cloud_strength > 0.0) {
+            let data = ShadowData::cloud_only(light, cloud_strength);
+            self.queue
+                .write_buffer(&self.global_sources.shadow_buffer, 0, &data.to_bytes());
         }
         let frustum = Frustum::from_view_proj(params.view_proj);
 

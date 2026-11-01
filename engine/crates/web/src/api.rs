@@ -114,6 +114,8 @@ pub struct EngineSettings {
     pub shadows: bool,
     #[wasm_bindgen(js_name = shadowQualityHigh)]
     pub shadow_quality_high: bool,
+    #[wasm_bindgen(js_name = cloudShadows)]
+    pub cloud_shadows: bool,
 }
 
 #[wasm_bindgen]
@@ -138,6 +140,7 @@ impl EngineSettings {
         sun_rays: bool,
         shadows: bool,
         shadow_quality_high: bool,
+        cloud_shadows: bool,
     ) -> EngineSettings {
         EngineSettings {
             render_distance,
@@ -157,6 +160,7 @@ impl EngineSettings {
             sun_rays,
             shadows,
             shadow_quality_high,
+            cloud_shadows,
         }
     }
 }
@@ -181,6 +185,7 @@ pub fn default_settings() -> EngineSettings {
         sun_rays: true,
         shadows: true,
         shadow_quality_high: true,
+        cloud_shadows: true,
     }
 }
 

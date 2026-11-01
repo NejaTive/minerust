@@ -41,6 +41,14 @@ fn cloud_shader_constants_match_cpu() {
 }
 
 #[test]
+fn block_shader_cloud_shadow_constants_match_cpu() {
+    assert!(BLOCK_SHADER.contains(&format!("const CLOUD_MAP: i32 = {CLOUD_MAP};")));
+    assert!(BLOCK_SHADER.contains(&format!("const CLOUD_CELL: f32 = {CLOUD_CELL}.0;")));
+    let plane = CLOUD_Y as f32 + CLOUD_HEIGHT as f32 * 0.5;
+    assert!(BLOCK_SHADER.contains(&format!("const CLOUD_SHADOW_PLANE_Y: f32 = {plane:?};")));
+}
+
+#[test]
 fn rain_shader_grid_matches_cover_window() {
     assert!(RAIN_SHADER.contains(&format!("const GRID_SIZE: u32 = {COVER_SIZE}u;")));
     assert!(RAIN_SHADER.contains(&format!("const GRID_RADIUS: i32 = {};", COVER_SIZE / 2)));

@@ -138,6 +138,7 @@ impl Engine {
             water_depth: settings.water_depth,
             sun_rays: settings.sun_rays,
             shadows: settings.shadows,
+            cloud_shadows: settings.cloud_shadows,
             shadow_quality: if settings.shadow_quality_high {
                 ShadowQuality::High
             } else {

@@ -45,6 +45,10 @@ const FX_PLANT_SWAY: u32 = 8u;
 const FX_HDR: u32 = 16u;
 const FX_WATER_DEPTH: u32 = 64u;
 const FX_SHADOWS: u32 = 256u;
+const FX_CLOUD_SHADOWS: u32 = 512u;
+const CLOUD_MAP: i32 = 256;
+const CLOUD_CELL: f32 = 12.0;
+const CLOUD_SHADOW_PLANE_Y: f32 = 162.0;
 
 fn effect(bit: u32) -> bool {
     return (globals.effects & bit) != 0u;
@@ -109,10 +113,8 @@ var block_sampler: sampler;
 @group(0) @binding(3)
 var<uniform> animation: array<vec4<f32>, 58>;
 
-// Каскадные тени от солнца (или луны). Раскладка байтов — `ShadowData` в shadow.rs.
-// matrices — мировая позиция в клип каскада; splits — дальняя граница каскада в линейной
-// глубине камеры; light — (направление на источник, сила тени); texel_world — размер
-// текселя карты в блоках; params — (каскадов, отсчётов PCF на сторону, 1 / разрешение).
+// Раскладка — `ShadowData` в shadow.rs; light = (на источник, сила), params.w — сила теней облаков.
+// Без теней блоков пишутся только light.xyz и params.w.
 struct ShadowData {
     matrices: array<mat4x4<f32>, 3>,
     splits: vec4<f32>,
@@ -120,6 +122,8 @@ struct ShadowData {
     texel_world: vec4<f32>,
     params: vec4<f32>,
 };
+@group(0) @binding(4)
+var cloud_mask: texture_2d<u32>;
 @group(0) @binding(7)
 var<uniform> shadows: ShadowData;
 @group(0) @binding(8)
@@ -365,9 +369,40 @@ fn shadow_cascade(c: u32, world_pos: vec3<f32>, normal: vec3<f32>, facing: f32, 
     return lit / f32(taps * taps);
 }
 
+fn cloud_at(cell: vec2<i32>) -> f32 {
+    return select(0.0, 1.0, f32(textureLoad(cloud_mask, cell & vec2<i32>(CLOUD_MAP - 1), 0).x) >= globals.cloud_threshold);
+}
+
+// Зеркало `cloud_shadow_cover` в clouds/tests.rs.
+fn cloud_shadow_cover(world_pos: vec3<f32>) -> f32 {
+    let light = shadows.light.xyz;
+    let t = (CLOUD_SHADOW_PLANE_Y - world_pos.y) / light.y;
+    let xz = world_pos.xz + light.xz * t - vec2<f32>(globals.cloud_drift, 0.0);
+    let q = xz / CLOUD_CELL - vec2<f32>(0.5);
+    let base = floor(q);
+    let f = fract(q);
+    let s = f * f * (vec2<f32>(3.0) - 2.0 * f);
+    let origin = vec2<i32>(base);
+    let top = mix(cloud_at(origin), cloud_at(origin + vec2<i32>(1, 0)), s.x);
+    let bottom = mix(cloud_at(origin + vec2<i32>(0, 1)), cloud_at(origin + vec2<i32>(1, 1)), s.x);
+    return mix(top, bottom, s.y);
+}
+
+fn cloud_visibility(world_pos: vec3<f32>) -> f32 {
+    let strength = shadows.params.w;
+    if !effect(FX_CLOUD_SHADOWS) || strength <= 0.0 {
+        return 1.0;
+    }
+    return 1.0 - strength * cloud_shadow_cover(world_pos);
+}
+
 // 1 — солнце видно, меньше — тень (с учётом силы тени).
 // Не использует производные: нормаль считается снаружи.
 fn sun_visibility(in: VertexOut, geometric: vec3<f32>, cutout: bool) -> f32 {
+    return min(block_visibility(in, geometric, cutout), cloud_visibility(in.world_pos));
+}
+
+fn block_visibility(in: VertexOut, geometric: vec3<f32>, cutout: bool) -> f32 {
     if !effect(FX_SHADOWS) {
         return 1.0;
     }
