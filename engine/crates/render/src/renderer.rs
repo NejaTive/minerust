@@ -14,6 +14,7 @@ use crate::clouds::{
     upload_cloud_mask,
 };
 use crate::effects::Effects;
+use crate::exposure_pass::ExposureState;
 use crate::frustum::Frustum;
 use crate::globals::{Globals, view_dir_matrix};
 use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_section};
@@ -62,6 +63,7 @@ pub struct FrameParams {
     pub flash: f32,
     pub near: f32,
     pub far: f32,
+    pub dt: f32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -175,6 +177,9 @@ pub struct Renderer {
     rays_pipeline: Option<wgpu::RenderPipeline>,
     bloom_pipelines: Option<BloomPipelines>,
     hdr_targets: Option<HdrTargets>,
+    exposure: ExposureState,
+    exposure_adapting: bool,
+    exposure_reset: bool,
     cloud_texture: wgpu::Texture,
     rain_cover_texture: wgpu::Texture,
     outline_buffer: wgpu::Buffer,
@@ -433,6 +438,7 @@ impl Renderer {
         });
         let post_layouts = PostLayouts::new(&device);
         let scene_copy_stub = create_scene_copy_stub(&device, &post_layouts);
+        let exposure = ExposureState::new(&device, &queue, &post_layouts.sampler);
         let water_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("water"),
             bind_group_layouts: &[
@@ -549,6 +555,9 @@ impl Renderer {
             rays_pipeline: None,
             bloom_pipelines: None,
             hdr_targets: None,
+            exposure,
+            exposure_adapting: false,
+            exposure_reset: true,
             cloud_texture,
             rain_cover_texture,
             outline_buffer,
@@ -586,6 +595,7 @@ impl Renderer {
             self.hdr_targets = Some(HdrTargets::new(
                 &self.device,
                 &self.post_layouts,
+                &self.exposure,
                 width,
                 height,
             ));
@@ -601,6 +611,7 @@ impl Renderer {
             self.hdr_targets = Some(HdrTargets::new(
                 &self.device,
                 &self.post_layouts,
+                &self.exposure,
                 self.config.width,
                 self.config.height,
             ));
@@ -647,6 +658,10 @@ impl Renderer {
 
     pub fn set_rain_cover(&self, heights: &[u8]) {
         upload_rain_cover(&self.queue, &self.rain_cover_texture, heights);
+    }
+
+    pub fn reset_exposure(&mut self) {
+        self.exposure_reset = true;
     }
 
     pub fn aspect(&self) -> f32 {
@@ -899,6 +914,15 @@ impl Renderer {
         if let Some(shadow) = &shadow {
             self.encode_shadows(&mut encoder, shadow);
         }
+        let adapting = params.effects.hdr && params.effects.auto_exposure;
+        if adapting != self.exposure_adapting {
+            self.exposure_adapting = adapting;
+            if adapting {
+                self.exposure_reset = true;
+            } else {
+                self.exposure.set_fixed(&self.queue);
+            }
+        }
         let hdr = self.hdr_targets.as_ref();
         let split;
         let pipes = match (&self.hdr_pipelines, hdr) {
@@ -1087,6 +1111,18 @@ impl Renderer {
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
             pass.set_bind_group(1, &targets.scene_copy_group, &[]);
             pass.draw(0..3, 0..1);
+        }
+        if let Some(targets) = hdr
+            && adapting
+        {
+            self.exposure.encode(
+                &mut encoder,
+                &self.queue,
+                &targets.exposure_source,
+                params.dt,
+                self.exposure_reset,
+            );
+            self.exposure_reset = false;
         }
         if let (Some(targets), Some(bloom)) = (hdr, &self.bloom_pipelines)
             && params.effects.bloom

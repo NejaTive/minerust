@@ -1,3 +1,4 @@
+use crate::exposure_pass::float_texture;
 use crate::pipelines::HDR_FORMAT;
 use crate::shaders;
 
@@ -33,6 +34,12 @@ pub(crate) fn create_bloom_layout(device: &wgpu::Device) -> wgpu::BindGroupLayou
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: float_texture(false),
                 count: None,
             },
         ],
@@ -110,6 +117,7 @@ impl BloomTargets {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         scene: &wgpu::TextureView,
+        exposure: &wgpu::TextureView,
         width: u32,
         height: u32,
     ) -> (Self, wgpu::TextureView) {
@@ -150,6 +158,10 @@ impl BloomTargets {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(exposure),
                     },
                 ],
             })

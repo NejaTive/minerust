@@ -117,6 +117,8 @@ pub struct EngineSettings {
     #[wasm_bindgen(js_name = cloudShadows)]
     pub cloud_shadows: bool,
     pub ssr: bool,
+    #[wasm_bindgen(js_name = autoExposure)]
+    pub auto_exposure: bool,
 }
 
 #[wasm_bindgen]
@@ -143,6 +145,7 @@ impl EngineSettings {
         shadow_quality_high: bool,
         cloud_shadows: bool,
         ssr: bool,
+        auto_exposure: bool,
     ) -> EngineSettings {
         EngineSettings {
             render_distance,
@@ -164,6 +167,7 @@ impl EngineSettings {
             shadow_quality_high,
             cloud_shadows,
             ssr,
+            auto_exposure,
         }
     }
 }
@@ -190,6 +194,7 @@ pub fn default_settings() -> EngineSettings {
         shadow_quality_high: true,
         cloud_shadows: true,
         ssr: true,
+        auto_exposure: true,
     }
 }
 

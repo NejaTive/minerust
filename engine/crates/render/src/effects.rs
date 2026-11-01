@@ -13,6 +13,7 @@ pub struct Effects {
     pub shadows: bool,
     pub cloud_shadows: bool,
     pub ssr: bool,
+    pub auto_exposure: bool,
     pub shadow_quality: ShadowQuality,
 }
 
@@ -30,6 +31,7 @@ impl Default for Effects {
             shadows: true,
             cloud_shadows: true,
             ssr: true,
+            auto_exposure: true,
             shadow_quality: ShadowQuality::default(),
         }
     }

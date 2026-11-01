@@ -140,6 +140,7 @@ impl Engine {
             shadows: settings.shadows,
             cloud_shadows: settings.cloud_shadows,
             ssr: settings.ssr,
+            auto_exposure: settings.auto_exposure,
             shadow_quality: if settings.shadow_quality_high {
                 ShadowQuality::High
             } else {
@@ -201,6 +202,7 @@ impl Engine {
             .set_camera_state(&state)
             .map_err(|_| JsError::new(BAD_CAMERA_STATE))?;
         self.profiler.restart_load();
+        self.renderer.reset_exposure();
         Ok(())
     }
 
@@ -287,7 +289,7 @@ impl Engine {
 
     pub fn render(&mut self, time: f32) -> Result<(), JsError> {
         let t_start = self.profiler.tick();
-        self.game.update(time);
+        let dt = self.game.update(time);
         let t_stream = self.profiler.tick();
         self.streamer
             .update(&mut self.game, &mut self.renderer, &mut self.profiler);
@@ -312,6 +314,7 @@ impl Engine {
             self.renderer.aspect(),
             self.clouds,
             self.effects,
+            dt,
         );
         let Some(pending) = self.renderer.begin(&params).map_err(|e| JsError::new(&e))? else {
             return Ok(());

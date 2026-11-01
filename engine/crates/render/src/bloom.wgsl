@@ -3,9 +3,12 @@
 var src: texture_2d<f32>;
 @group(0) @binding(1)
 var src_sampler: sampler;
+@group(0) @binding(2)
+var exposure_tex: texture_2d<f32>;
 
-const THRESHOLD: f32 = 1.05;
-const KNEE: f32 = 0.3;
+const DISPLAY_THRESHOLD: f32 = 1.26;
+const MIN_THRESHOLD: f32 = 0.9;
+const KNEE_RATIO: f32 = 0.2857143;
 
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -29,11 +32,12 @@ fn luma(color: vec3<f32>) -> f32 {
     return dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 
-fn prefilter(color: vec3<f32>) -> vec3<f32> {
+fn prefilter(color: vec3<f32>, threshold: f32) -> vec3<f32> {
+    let knee_width = threshold * KNEE_RATIO;
     let brightness = max(color.r, max(color.g, color.b));
-    let soft = clamp(brightness - THRESHOLD + KNEE, 0.0, 2.0 * KNEE);
-    let knee = soft * soft / (4.0 * KNEE + 1e-4);
-    return color * (max(knee, brightness - THRESHOLD) / max(brightness, 1e-4));
+    let soft = clamp(brightness - threshold + knee_width, 0.0, 2.0 * knee_width);
+    let knee = soft * soft / (4.0 * knee_width + 1e-4);
+    return color * (max(knee, brightness - threshold) / max(brightness, 1e-4));
 }
 
 fn karis(color: vec3<f32>) -> f32 {
@@ -43,19 +47,21 @@ fn karis(color: vec3<f32>) -> f32 {
 @fragment
 fn fs_down_first(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = 1.0 / vec2<f32>(textureDimensions(src));
-    let a = prefilter(tap(in.uv, vec2<f32>(-2.0, 2.0), texel));
-    let b = prefilter(tap(in.uv, vec2<f32>(0.0, 2.0), texel));
-    let c = prefilter(tap(in.uv, vec2<f32>(2.0, 2.0), texel));
-    let d = prefilter(tap(in.uv, vec2<f32>(-2.0, 0.0), texel));
-    let e = prefilter(tap(in.uv, vec2<f32>(0.0, 0.0), texel));
-    let f = prefilter(tap(in.uv, vec2<f32>(2.0, 0.0), texel));
-    let g = prefilter(tap(in.uv, vec2<f32>(-2.0, -2.0), texel));
-    let h = prefilter(tap(in.uv, vec2<f32>(0.0, -2.0), texel));
-    let i = prefilter(tap(in.uv, vec2<f32>(2.0, -2.0), texel));
-    let j = prefilter(tap(in.uv, vec2<f32>(-1.0, 1.0), texel));
-    let k = prefilter(tap(in.uv, vec2<f32>(1.0, 1.0), texel));
-    let l = prefilter(tap(in.uv, vec2<f32>(-1.0, -1.0), texel));
-    let m = prefilter(tap(in.uv, vec2<f32>(1.0, -1.0), texel));
+    let exposure = textureLoad(exposure_tex, vec2<i32>(0), 0).r;
+    let threshold = max(DISPLAY_THRESHOLD / exposure, MIN_THRESHOLD);
+    let a = prefilter(tap(in.uv, vec2<f32>(-2.0, 2.0), texel), threshold);
+    let b = prefilter(tap(in.uv, vec2<f32>(0.0, 2.0), texel), threshold);
+    let c = prefilter(tap(in.uv, vec2<f32>(2.0, 2.0), texel), threshold);
+    let d = prefilter(tap(in.uv, vec2<f32>(-2.0, 0.0), texel), threshold);
+    let e = prefilter(tap(in.uv, vec2<f32>(0.0, 0.0), texel), threshold);
+    let f = prefilter(tap(in.uv, vec2<f32>(2.0, 0.0), texel), threshold);
+    let g = prefilter(tap(in.uv, vec2<f32>(-2.0, -2.0), texel), threshold);
+    let h = prefilter(tap(in.uv, vec2<f32>(0.0, -2.0), texel), threshold);
+    let i = prefilter(tap(in.uv, vec2<f32>(2.0, -2.0), texel), threshold);
+    let j = prefilter(tap(in.uv, vec2<f32>(-1.0, 1.0), texel), threshold);
+    let k = prefilter(tap(in.uv, vec2<f32>(1.0, 1.0), texel), threshold);
+    let l = prefilter(tap(in.uv, vec2<f32>(-1.0, -1.0), texel), threshold);
+    let m = prefilter(tap(in.uv, vec2<f32>(1.0, -1.0), texel), threshold);
     let center = (j + k + l + m) * 0.25;
     let g0 = (a + b + d + e) * 0.25;
     let g1 = (b + c + e + f) * 0.25;
