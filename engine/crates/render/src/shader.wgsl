@@ -314,8 +314,8 @@ fn ripple_octave(q: vec2<f32>, scale: f32, angle: f32, drift: vec2<f32>, weight:
     let r = vec2<f32>(q.x * rot.x - q.y * rot.y, q.x * rot.y + q.y * rot.x);
     let n = value_noise(r * scale + drift * globals.anim_time);
     let slope = vec2<f32>(n.y * rot.x + n.z * rot.y, n.z * rot.x - n.y * rot.y) * scale;
-    let alias = 1.0 - smoothstep(0.25, 0.6, footprint * scale);
-    return slope * (weight * alias / scale);
+    let resolved = 1.0 - smoothstep(0.25, 0.6, footprint * scale);
+    return slope * (weight * resolved / scale);
 }
 
 // footprint = length(fwidth(p)) считается снаружи: производные нельзя брать в неоднородном ветвлении.
