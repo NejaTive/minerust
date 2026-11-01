@@ -8,6 +8,7 @@ pub(crate) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Fl
 pub(crate) struct SceneLayouts {
     pub plain: wgpu::PipelineLayout,
     pub blocks: wgpu::PipelineLayout,
+    pub water: wgpu::PipelineLayout,
 }
 
 pub(crate) struct ScenePipelines {
@@ -29,7 +30,14 @@ impl ScenePipelines {
         shader: &wgpu::ShaderModule,
         format: wgpu::TextureFormat,
     ) -> Self {
-        let block = |pass| create_block_pipeline(device, &layouts.blocks, shader, format, pass);
+        let block = |pass| {
+            let layout = if pass == BlockPass::Water {
+                &layouts.water
+            } else {
+                &layouts.blocks
+            };
+            create_block_pipeline(device, layout, shader, format, pass)
+        };
         Self {
             solid: block(BlockPass::Solid),
             cutout: block(BlockPass::Cutout),
@@ -285,11 +293,11 @@ pub(crate) fn create_rain_pipeline(
     })
 }
 
-pub(crate) fn create_depth_view(
+pub(crate) fn create_depth_target(
     device: &wgpu::Device,
     width: u32,
     height: u32,
-) -> wgpu::TextureView {
+) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("depth"),
         size: wgpu::Extent3d {
@@ -304,5 +312,6 @@ pub(crate) fn create_depth_view(
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
 }

@@ -107,6 +107,8 @@ pub struct EngineSettings {
     pub plant_sway: bool,
     pub hdr: bool,
     pub bloom: bool,
+    #[wasm_bindgen(js_name = waterDepth)]
+    pub water_depth: bool,
 }
 
 #[wasm_bindgen]
@@ -127,6 +129,7 @@ impl EngineSettings {
         plant_sway: bool,
         hdr: bool,
         bloom: bool,
+        water_depth: bool,
     ) -> EngineSettings {
         EngineSettings {
             render_distance,
@@ -142,6 +145,7 @@ impl EngineSettings {
             plant_sway,
             hdr,
             bloom,
+            water_depth,
         }
     }
 }
@@ -162,6 +166,7 @@ pub fn default_settings() -> EngineSettings {
         plant_sway: true,
         hdr: true,
         bloom: true,
+        water_depth: true,
     }
 }
 

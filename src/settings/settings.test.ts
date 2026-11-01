@@ -31,6 +31,7 @@ const defaults = defaultSettings({
   plantSway: true,
   hdr: true,
   bloom: true,
+  waterDepth: true,
 })
 
 const load = (data: Record<string, string> = {}) =>
@@ -51,7 +52,8 @@ describe('loadSettings', () => {
       s.plantSway,
       s.hdr,
       s.bloom,
-    ]).toEqual([true, true, true, true, true, true, true])
+      s.waterDepth,
+    ]).toEqual([true, true, true, true, true, true, true, true])
   })
 
   it('читает сохранённые значения', () => {
@@ -69,6 +71,7 @@ describe('loadSettings', () => {
       [KEYS.plantSway]: 'false',
       [KEYS.hdr]: 'false',
       [KEYS.bloom]: 'false',
+      [KEYS.waterDepth]: 'false',
       [KEYS.showDebug]: 'true',
     }
     expect(load(data)).toEqual({
@@ -85,6 +88,7 @@ describe('loadSettings', () => {
       plantSway: false,
       hdr: false,
       bloom: false,
+      waterDepth: false,
       showDebug: true,
     })
   })

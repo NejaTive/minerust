@@ -16,6 +16,7 @@ export function applySettings(engine: Engine, s: Settings) {
     s.plantSway,
     s.hdr,
     s.bloom,
+    s.waterDepth,
   )
   try {
     engine.apply_settings(payload)

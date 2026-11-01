@@ -114,6 +114,17 @@ function checkedOf(e: Event): boolean {
         @change="patch({ bloom: checkedOf($event) })"
       />
     </label>
+
+    <label class="row toggle" :class="{ disabled: !settings.hdr }">
+      <span class="name">Глубина воды</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.hdr && settings.waterDepth"
+        :disabled="!settings.hdr"
+        @change="patch({ waterDepth: checkedOf($event) })"
+      />
+    </label>
   </div>
   <button @click="emit('back')">Назад</button>
 </template>

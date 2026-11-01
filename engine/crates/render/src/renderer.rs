@@ -17,8 +17,8 @@ use crate::globals::{Globals, view_dir_matrix};
 use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_section};
 use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
-use crate::pipelines::{HDR_FORMAT, SceneLayouts, ScenePipelines, create_depth_view};
-use crate::post::{HdrTargets, PostLayouts, create_post_pipeline};
+use crate::pipelines::{HDR_FORMAT, SceneLayouts, ScenePipelines, create_depth_target};
+use crate::post::{HdrTargets, PostLayouts, create_post_pipeline, create_scene_copy_stub};
 use crate::rain::{
     RAIN_INSTANCES, RAIN_VERTICES, create_rain_cover_texture, create_rain_tile_texture,
     upload_rain_cover,
@@ -92,9 +92,52 @@ pub struct Renderer {
     failed_uploads: u32,
     gpu_timer: Option<GpuTimer>,
     gpu_timing: bool,
+    depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
+    scene_copy_stub: wgpu::BindGroup,
     drawn_sections: u32,
     frame_counts: FrameCounts,
+}
+
+fn copy_info(texture: &wgpu::Texture) -> wgpu::TexelCopyTextureInfo<'_> {
+    wgpu::TexelCopyTextureInfo {
+        texture,
+        mip_level: 0,
+        origin: wgpu::Origin3d::ZERO,
+        aspect: wgpu::TextureAspect::All,
+    }
+}
+
+fn scene_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    label: &str,
+    color: &wgpu::TextureView,
+    depth: &wgpu::TextureView,
+    clear: Option<wgpu::Color>,
+    timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
+) -> wgpu::RenderPass<'a> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some(label),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: color,
+            resolve_target: None,
+            depth_slice: None,
+            ops: wgpu::Operations {
+                load: clear.map_or(wgpu::LoadOp::Load, wgpu::LoadOp::Clear),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: depth,
+            depth_ops: Some(wgpu::Operations {
+                load: clear.map_or(wgpu::LoadOp::Load, |_| wgpu::LoadOp::Clear(1.0)),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes,
+        ..Default::default()
+    })
 }
 
 impl Renderer {
@@ -139,7 +182,7 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        let depth_view = create_depth_view(&device, width, height);
+        let (depth_texture, depth_view) = create_depth_target(&device, width, height);
 
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
@@ -286,9 +329,21 @@ impl Renderer {
             ],
             ..Default::default()
         });
+        let post_layouts = PostLayouts::new(&device);
+        let scene_copy_stub = create_scene_copy_stub(&device, &post_layouts);
+        let water_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("water"),
+            bind_group_layouts: &[
+                Some(&globals_layout),
+                Some(buffers.arena.bind_group_layout()),
+                Some(&post_layouts.scene_copy),
+            ],
+            ..Default::default()
+        });
         let scene_layouts = SceneLayouts {
             plain: pipeline_layout,
             blocks: block_layout,
+            water: water_layout,
         };
         let outline_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outline"),
@@ -297,7 +352,6 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let sdr_pipelines = ScenePipelines::new(&device, &scene_layouts, &shader, render_format);
-        let post_layouts = PostLayouts::new(&device);
 
         let gpu_timer = device
             .features()
@@ -330,7 +384,9 @@ impl Renderer {
             failed_uploads: 0,
             gpu_timer,
             gpu_timing: false,
+            depth_texture,
             depth_view,
+            scene_copy_stub,
             drawn_sections: 0,
             frame_counts: FrameCounts::default(),
         })
@@ -343,7 +399,7 @@ impl Renderer {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
-        self.depth_view = create_depth_view(&self.device, width, height);
+        (self.depth_texture, self.depth_view) = create_depth_target(&self.device, width, height);
         if self.hdr_targets.is_some() {
             self.hdr_targets = Some(HdrTargets::new(
                 &self.device,
@@ -580,42 +636,6 @@ impl Renderer {
         };
         {
             let timer = self.gpu_timer.as_ref().filter(|_| timer_slot.is_some());
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: hdr.map_or(&view, |targets| &targets.color),
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: timer.map(|timer| {
-                    if hdr.is_some() {
-                        timer.begin_writes()
-                    } else {
-                        timer.pass_writes()
-                    }
-                }),
-                ..Default::default()
-            });
-            pass.set_pipeline(&pipes.solid);
-            pass.set_bind_group(0, &self.globals_bind_group, &[]);
-            pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
-            pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
-            pass.set_index_buffer(
-                self.buffers.indices.buffer().slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
             let eye = params.camera_pos;
             let mut visible: Vec<(f32, &SectionMesh)> = self
                 .column_meshes
@@ -626,6 +646,40 @@ impl Renderer {
                 .map(|mesh| (((mesh.min + mesh.max) / 2.0).distance_squared(eye), mesh))
                 .collect();
             visible.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+            let ice: Vec<&GpuMesh> = visible
+                .iter()
+                .rev()
+                .filter_map(|(_, mesh)| mesh.ice.as_ref())
+                .collect();
+            let water: Vec<&GpuMesh> = visible
+                .iter()
+                .rev()
+                .filter_map(|(_, mesh)| mesh.water.as_ref())
+                .collect();
+            let split = params.effects.water_depth && !water.is_empty();
+            let scene_color = hdr.map_or(&view, |targets| &targets.color);
+            let mut pass = scene_pass(
+                &mut encoder,
+                "main",
+                scene_color,
+                &self.depth_view,
+                Some(clear),
+                timer.map(|timer| {
+                    if hdr.is_some() {
+                        timer.begin_writes()
+                    } else {
+                        timer.pass_writes()
+                    }
+                }),
+            );
+            pass.set_pipeline(&pipes.solid);
+            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+            pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
+            pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
+            pass.set_index_buffer(
+                self.buffers.indices.buffer().slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
             let mut counts = FrameCounts::default();
             for (_, section) in &visible {
                 if let Some(mesh) = &section.solid {
@@ -669,11 +723,38 @@ impl Renderer {
                 counts.draw_calls += 1;
             }
 
-            let ice: Vec<&GpuMesh> = visible
-                .iter()
-                .rev()
-                .filter_map(|(_, mesh)| mesh.ice.as_ref())
-                .collect();
+            if split && let Some(targets) = hdr {
+                drop(pass);
+                let size = wgpu::Extent3d {
+                    width: self.config.width,
+                    height: self.config.height,
+                    depth_or_array_layers: 1,
+                };
+                encoder.copy_texture_to_texture(
+                    copy_info(&targets.color_texture),
+                    copy_info(&targets.color_copy),
+                    size,
+                );
+                encoder.copy_texture_to_texture(
+                    copy_info(&self.depth_texture),
+                    copy_info(&targets.depth_copy),
+                    size,
+                );
+                pass = scene_pass(
+                    &mut encoder,
+                    "water",
+                    scene_color,
+                    &self.depth_view,
+                    None,
+                    None,
+                );
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_index_buffer(
+                    self.buffers.indices.buffer().slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.set_bind_group(2, &targets.scene_copy_group, &[]);
+            }
             if !ice.is_empty() {
                 pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
                 pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
@@ -687,13 +768,11 @@ impl Renderer {
                 counts.water_quads += ice.iter().map(|mesh| mesh.quad_count).sum::<u32>();
             }
 
-            let water: Vec<&GpuMesh> = visible
-                .iter()
-                .rev()
-                .filter_map(|(_, mesh)| mesh.water.as_ref())
-                .collect();
             if !water.is_empty() {
                 pass.set_pipeline(&pipes.water);
+                if !split {
+                    pass.set_bind_group(2, &self.scene_copy_stub, &[]);
+                }
                 pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
                 pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
                 for mesh in water {

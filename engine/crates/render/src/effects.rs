@@ -6,6 +6,7 @@ pub struct Effects {
     pub plant_sway: bool,
     pub hdr: bool,
     pub bloom: bool,
+    pub water_depth: bool,
 }
 
 impl Default for Effects {
@@ -17,6 +18,7 @@ impl Default for Effects {
             plant_sway: true,
             hdr: true,
             bloom: true,
+            water_depth: true,
         }
     }
 }
@@ -29,6 +31,7 @@ impl Effects {
             | u32::from(self.ground_fog) << 2
             | u32::from(self.plant_sway) << 3
             | u32::from(self.hdr) << 4
-            | u32::from(self.bloom) << 5
+            | u32::from(self.bloom && self.hdr) << 5
+            | u32::from(self.water_depth && self.hdr) << 6
     }
 }
