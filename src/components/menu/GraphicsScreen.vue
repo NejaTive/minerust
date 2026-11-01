@@ -103,6 +103,17 @@ function checkedOf(e: Event): boolean {
         @change="patch({ hdr: checkedOf($event) })"
       />
     </label>
+
+    <label class="row toggle" :class="{ disabled: !settings.hdr }">
+      <span class="name">Свечение</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.hdr && settings.bloom"
+        :disabled="!settings.hdr"
+        @change="patch({ bloom: checkedOf($event) })"
+      />
+    </label>
   </div>
   <button @click="emit('back')">Назад</button>
 </template>
@@ -126,6 +137,9 @@ function checkedOf(e: Event): boolean {
 }
 .toggle input {
   margin: 0;
+}
+.disabled {
+  opacity: 0.5;
 }
 .value {
   font-variant-numeric: tabular-nums;

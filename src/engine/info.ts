@@ -45,6 +45,7 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
       groundFog: defaults.groundFog,
       plantSway: defaults.plantSway,
       hdr: defaults.hdr,
+      bloom: defaults.bloom,
     },
   }
   list.forEach((block) => block.free())

@@ -35,6 +35,13 @@ struct Globals {
 var<uniform> globals: Globals;
 @group(1) @binding(0)
 var scene: texture_2d<f32>;
+@group(1) @binding(1)
+var bloom: texture_2d<f32>;
+@group(1) @binding(2)
+var post_sampler: sampler;
+
+const FX_BLOOM: u32 = 32u;
+const BLOOM_STRENGTH: f32 = 0.12;
 
 const EXPOSURE: f32 = 1.2;
 const NIGHT_GRADE: vec3<f32> = vec3<f32>(0.85, 0.95, 1.2);
@@ -88,7 +95,10 @@ fn vignette(uv: vec2<f32>) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let hdr = textureLoad(scene, vec2<i32>(in.position.xy), 0).rgb;
+    var hdr = textureLoad(scene, vec2<i32>(in.position.xy), 0).rgb;
+    if (globals.effects & FX_BLOOM) != 0u {
+        hdr += textureSampleLevel(bloom, post_sampler, in.uv, 0.0).rgb * BLOOM_STRENGTH;
+    }
     var color = aces_fitted(hdr * EXPOSURE);
     color = grade(color) * vignette(in.uv);
     let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));

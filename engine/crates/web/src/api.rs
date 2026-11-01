@@ -106,6 +106,7 @@ pub struct EngineSettings {
     #[wasm_bindgen(js_name = plantSway)]
     pub plant_sway: bool,
     pub hdr: bool,
+    pub bloom: bool,
 }
 
 #[wasm_bindgen]
@@ -125,6 +126,7 @@ impl EngineSettings {
         ground_fog: bool,
         plant_sway: bool,
         hdr: bool,
+        bloom: bool,
     ) -> EngineSettings {
         EngineSettings {
             render_distance,
@@ -139,6 +141,7 @@ impl EngineSettings {
             ground_fog,
             plant_sway,
             hdr,
+            bloom,
         }
     }
 }
@@ -158,6 +161,7 @@ pub fn default_settings() -> EngineSettings {
         ground_fog: true,
         plant_sway: true,
         hdr: true,
+        bloom: true,
     }
 }
 

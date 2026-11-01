@@ -1,15 +1,33 @@
+use crate::bloom::{BloomTargets, create_bloom_layout, create_linear_sampler};
 use crate::pipelines::HDR_FORMAT;
 use crate::shaders;
+
+pub(crate) struct PostLayouts {
+    pub post: wgpu::BindGroupLayout,
+    pub bloom: wgpu::BindGroupLayout,
+    pub sampler: wgpu::Sampler,
+}
+
+impl PostLayouts {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
+        Self {
+            post: create_post_layout(device),
+            bloom: create_bloom_layout(device),
+            sampler: create_linear_sampler(device),
+        }
+    }
+}
 
 pub(crate) struct HdrTargets {
     pub color: wgpu::TextureView,
     pub post_group: wgpu::BindGroup,
+    pub bloom: BloomTargets,
 }
 
 impl HdrTargets {
     pub(crate) fn new(
         device: &wgpu::Device,
-        post_layout: &wgpu::BindGroupLayout,
+        layouts: &PostLayouts,
         width: u32,
         height: u32,
     ) -> Self {
@@ -30,31 +48,71 @@ impl HdrTargets {
             view_formats: &[],
         });
         let color = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let (bloom, bloom_result) = BloomTargets::new(
+            device,
+            &layouts.bloom,
+            &layouts.sampler,
+            &color,
+            width,
+            height,
+        );
         let post_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("post"),
-            layout: post_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&color),
-            }],
+            layout: &layouts.post,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&color),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&bloom_result),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&layouts.sampler),
+                },
+            ],
         });
-        Self { color, post_group }
+        Self {
+            color,
+            post_group,
+            bloom,
+        }
     }
 }
 
 pub(crate) fn create_post_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("post"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
             },
-            count: None,
-        }],
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
     })
 }
 

@@ -5,6 +5,7 @@ pub struct Effects {
     pub ground_fog: bool,
     pub plant_sway: bool,
     pub hdr: bool,
+    pub bloom: bool,
 }
 
 impl Default for Effects {
@@ -15,6 +16,7 @@ impl Default for Effects {
             ground_fog: true,
             plant_sway: true,
             hdr: true,
+            bloom: true,
         }
     }
 }
@@ -27,5 +29,6 @@ impl Effects {
             | u32::from(self.ground_fog) << 2
             | u32::from(self.plant_sway) << 3
             | u32::from(self.hdr) << 4
+            | u32::from(self.bloom) << 5
     }
 }

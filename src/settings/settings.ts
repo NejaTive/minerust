@@ -13,6 +13,7 @@ export const KEYS = {
   groundFog: 'minerust.groundFog',
   plantSway: 'minerust.plantSway',
   hdr: 'minerust.hdr',
+  bloom: 'minerust.bloom',
   showDebug: 'minerust.showDebug',
 } as const
 // Ключи убранных настроек (панель управления, выбор графического API): чистим, чтобы не копился мусор.
@@ -31,6 +32,7 @@ export interface EngineSettings {
   groundFog: boolean
   plantSway: boolean
   hdr: boolean
+  bloom: boolean
 }
 
 export interface Settings extends EngineSettings {
@@ -105,6 +107,7 @@ export function loadSettings(
     groundFog: readBool(store, KEYS.groundFog, defaults.groundFog),
     plantSway: readBool(store, KEYS.plantSway, defaults.plantSway),
     hdr: readBool(store, KEYS.hdr, defaults.hdr),
+    bloom: readBool(store, KEYS.bloom, defaults.bloom),
     showDebug: readBool(store, KEYS.showDebug, defaults.showDebug),
   }
 }
@@ -122,6 +125,7 @@ export function saveSettings(store: KeyValueStore, s: Settings) {
   store.set(KEYS.groundFog, String(s.groundFog))
   store.set(KEYS.plantSway, String(s.plantSway))
   store.set(KEYS.hdr, String(s.hdr))
+  store.set(KEYS.bloom, String(s.bloom))
   store.set(KEYS.showDebug, String(s.showDebug))
 }
 

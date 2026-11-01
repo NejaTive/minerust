@@ -1,4 +1,5 @@
 mod arena;
+mod bloom;
 mod clouds;
 mod effects;
 pub mod fog;

@@ -30,6 +30,7 @@ const defaults = defaultSettings({
   groundFog: true,
   plantSway: true,
   hdr: true,
+  bloom: true,
 })
 
 const load = (data: Record<string, string> = {}) =>
@@ -49,7 +50,8 @@ describe('loadSettings', () => {
       s.groundFog,
       s.plantSway,
       s.hdr,
-    ]).toEqual([true, true, true, true, true, true])
+      s.bloom,
+    ]).toEqual([true, true, true, true, true, true, true])
   })
 
   it('читает сохранённые значения', () => {
@@ -66,6 +68,7 @@ describe('loadSettings', () => {
       [KEYS.groundFog]: 'false',
       [KEYS.plantSway]: 'false',
       [KEYS.hdr]: 'false',
+      [KEYS.bloom]: 'false',
       [KEYS.showDebug]: 'true',
     }
     expect(load(data)).toEqual({
@@ -81,6 +84,7 @@ describe('loadSettings', () => {
       groundFog: false,
       plantSway: false,
       hdr: false,
+      bloom: false,
       showDebug: true,
     })
   })

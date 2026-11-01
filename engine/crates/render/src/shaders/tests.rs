@@ -61,6 +61,17 @@ fn clouds_shader_validates() {
 }
 
 #[test]
+fn bloom_shader_validates() {
+    let module = naga::front::wgsl::parse_str(BLOOM_SHADER).expect("wgsl parses");
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::empty(),
+    )
+    .validate(&module)
+    .expect("wgsl validates");
+}
+
+#[test]
 fn every_shader_validates_with_the_full_globals_layout() {
     for (name, source) in [
         ("block", BLOCK_SHADER),

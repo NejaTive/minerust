@@ -134,6 +134,7 @@ impl Engine {
             ground_fog: settings.ground_fog,
             plant_sway: settings.plant_sway,
             hdr: settings.hdr,
+            bloom: settings.bloom,
         };
         self.game.set_weather_enabled(settings.weather);
         self.game.set_auto_step(settings.auto_step);

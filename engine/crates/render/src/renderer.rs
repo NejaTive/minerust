@@ -7,6 +7,7 @@ use world::clouds::{CloudMask, cloud_threshold, coverage_for_rain};
 use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 
+use crate::bloom::BloomPipelines;
 use crate::clouds::{
     CLOUD_INSTANCES, CLOUD_VERTICES, cloud_color, create_cloud_texture, upload_cloud_mask,
 };
@@ -17,7 +18,7 @@ use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_s
 use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::pipelines::{HDR_FORMAT, SceneLayouts, ScenePipelines, create_depth_view};
-use crate::post::{HdrTargets, create_post_layout, create_post_pipeline};
+use crate::post::{HdrTargets, PostLayouts, create_post_pipeline};
 use crate::rain::{
     RAIN_INSTANCES, RAIN_VERTICES, create_rain_cover_texture, create_rain_tile_texture,
     upload_rain_cover,
@@ -76,8 +77,9 @@ pub struct Renderer {
     shader: wgpu::ShaderModule,
     sdr_pipelines: ScenePipelines,
     hdr_pipelines: Option<ScenePipelines>,
-    post_layout: wgpu::BindGroupLayout,
+    post_layouts: PostLayouts,
     post_pipeline: Option<wgpu::RenderPipeline>,
+    bloom_pipelines: Option<BloomPipelines>,
     hdr_targets: Option<HdrTargets>,
     cloud_texture: wgpu::Texture,
     rain_cover_texture: wgpu::Texture,
@@ -295,7 +297,7 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let sdr_pipelines = ScenePipelines::new(&device, &scene_layouts, &shader, render_format);
-        let post_layout = create_post_layout(&device);
+        let post_layouts = PostLayouts::new(&device);
 
         let gpu_timer = device
             .features()
@@ -313,8 +315,9 @@ impl Renderer {
             shader,
             sdr_pipelines,
             hdr_pipelines: None,
-            post_layout,
+            post_layouts,
             post_pipeline: None,
+            bloom_pipelines: None,
             hdr_targets: None,
             cloud_texture,
             rain_cover_texture,
@@ -344,7 +347,7 @@ impl Renderer {
         if self.hdr_targets.is_some() {
             self.hdr_targets = Some(HdrTargets::new(
                 &self.device,
-                &self.post_layout,
+                &self.post_layouts,
                 width,
                 height,
             ));
@@ -359,7 +362,7 @@ impl Renderer {
         if self.hdr_targets.is_none() {
             self.hdr_targets = Some(HdrTargets::new(
                 &self.device,
-                &self.post_layout,
+                &self.post_layouts,
                 self.config.width,
                 self.config.height,
             ));
@@ -374,9 +377,11 @@ impl Renderer {
             self.post_pipeline = Some(create_post_pipeline(
                 &self.device,
                 &self.globals_layout,
-                &self.post_layout,
+                &self.post_layouts.post,
                 self.render_format,
             ));
+            self.bloom_pipelines =
+                Some(BloomPipelines::new(&self.device, &self.post_layouts.bloom));
         }
     }
 
@@ -698,6 +703,11 @@ impl Renderer {
                 }
             }
             self.frame_counts = counts;
+        }
+        if let (Some(targets), Some(bloom)) = (hdr, &self.bloom_pipelines)
+            && params.effects.bloom
+        {
+            targets.bloom.encode(&mut encoder, bloom);
         }
         if let Some(targets) = hdr {
             let timer = self.gpu_timer.as_ref().filter(|_| timer_slot.is_some());
