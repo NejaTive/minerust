@@ -11,6 +11,10 @@ describe('backTarget', () => {
     expect(backTarget('settings', false)).toBe('main')
     expect(backTarget('settings', true)).toBe('main')
   })
+  it('из графики — в настройки, в мире и на титуле', () => {
+    expect(backTarget('graphics', false)).toBe('settings')
+    expect(backTarget('graphics', true)).toBe('settings')
+  })
   it('из управления: без мира — в настройки, в паузе — в паузу', () => {
     expect(backTarget('controls', false)).toBe('settings')
     expect(backTarget('controls', true)).toBe('main')

@@ -23,6 +23,7 @@ fn layout_matches_shader() {
         warm: 307.0,
         horizon_tilt: 308.0,
         star_rotation: Vec2::new(309.0, 310.0),
+        effects: 0b1010,
         cloud_color: Vec3::new(311.0, 312.0, 313.0),
         rain: 314.0,
         rain_drops: 315.0,
@@ -55,7 +56,7 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 208), 308.0);
     assert_eq!(f32_at(&bytes, 212), 309.0);
     assert_eq!(f32_at(&bytes, 216), 310.0);
-    assert_eq!(f32_at(&bytes, 220), 0.0);
+    assert_eq!(bytes[220..224], 0b1010u32.to_le_bytes());
     assert_eq!(f32_at(&bytes, 224), 311.0);
     assert_eq!(f32_at(&bytes, 228), 312.0);
     assert_eq!(f32_at(&bytes, 232), 313.0);

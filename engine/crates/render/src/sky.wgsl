@@ -17,6 +17,7 @@ struct Globals {
     horizon_tilt: f32,
     star_cos: f32,
     star_sin: f32,
+    effects: u32,
     cloud_color: vec3<f32>,
     rain: f32,
     rain_drops: f32,
@@ -100,6 +101,14 @@ fn square_body(dir: vec3<f32>, light: vec3<f32>, half_size: f32) -> vec4<f32> {
     return vec4<f32>(disc * front, halo * front, u, v);
 }
 
+// Одинаково в sky.wgsl и shader.wgsl: туман сцены сходится с горизонтом неба.
+fn dusk_glow(dir: vec3<f32>, height: f32) -> f32 {
+    let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
+    let side = max(dot(normalize(dir.xz + vec2<f32>(1e-5)), sun_flat), 0.0);
+    let glow = globals.warm * pow(side, 3.0) * exp(-6.0 * height) * smoothstep(0.0, 0.07, height);
+    return clamp(glow, 0.0, 1.0);
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let dir = normalize((globals.view_dir * vec4<f32>(in.ndc, 1.0, 0.0)).xyz);
@@ -108,10 +117,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let height = clamp((dir.y - edge) / (1.0 - edge), 0.0, 1.0);
     var color = mix(globals.fog_color, globals.zenith, pow(smoothstep(0.0, 1.0, height), 0.6));
 
-    let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
-    let side = max(dot(normalize(dir.xz + vec2<f32>(1e-5)), sun_flat), 0.0);
-    let glow = globals.warm * pow(side, 3.0) * exp(-6.0 * height) * smoothstep(0.0, 0.07, height);
-    color = mix(color, DUSK_COLOR * 1.3, clamp(glow, 0.0, 1.0));
+    color = mix(color, DUSK_COLOR * 1.3, dusk_glow(dir, height));
 
     let above = smoothstep(edge - 0.06, edge - 0.03, dir.y);
     let clear = 1.0 - globals.rain;

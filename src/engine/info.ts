@@ -40,6 +40,10 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
       autoStep: defaults.autoStep,
       mouseSensitivity: defaults.mouseSensitivity,
       fov: defaults.fov,
+      coloredLight: defaults.coloredLight,
+      waterReflections: defaults.waterReflections,
+      groundFog: defaults.groundFog,
+      plantSway: defaults.plantSway,
     },
   }
   list.forEach((block) => block.free())

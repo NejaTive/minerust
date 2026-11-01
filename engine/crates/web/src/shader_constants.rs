@@ -10,9 +10,9 @@ fn sky_shader_constants_match_cpu() {
     // Закатный цвет в шейдере неба дублирует `DUSK_SKY`: тёплое пятно должно быть
     // того же оттенка, что и тонировка неба.
     let [r, g, b] = DUSK_SKY;
-    assert!(SKY_SHADER.contains(&format!(
-        "const DUSK_COLOR: vec3<f32> = vec3<f32>({r}, {g}, {b});"
-    )));
+    let dusk = format!("const DUSK_COLOR: vec3<f32> = vec3<f32>({r}, {g}, {b});");
+    assert!(SKY_SHADER.contains(&dusk));
+    assert!(BLOCK_SHADER.contains(&dusk));
 }
 
 #[test]

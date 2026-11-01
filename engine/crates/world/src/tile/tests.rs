@@ -31,13 +31,19 @@ fn animation_table_has_one_entry_per_layer() {
             let entry = table[(tile.layer() + frame) as usize];
             assert_eq!(
                 entry,
-                [tile.frames() as f32, tile.fps(), tile.scroll(), 0.0]
+                [tile.frames() as f32, tile.fps(), tile.scroll(), tile.sway()]
             );
         }
     }
     assert_eq!(table[Tile::Water.layer() as usize], [16.0, 10.0, 1.0, 0.0]);
     assert_eq!(table[Tile::Lava.layer() as usize], [16.0, 5.0, 0.3, 0.0]);
     assert_eq!(table[Tile::Stone.layer() as usize], [1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(table[Tile::Leaves.layer() as usize], [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(
+        table[Tile::TallGrass.layer() as usize],
+        [1.0, 0.0, 0.0, 2.0]
+    );
+    assert_eq!(table[Tile::Torch.layer() as usize], [1.0, 0.0, 0.0, 0.0]);
 }
 
 #[test]

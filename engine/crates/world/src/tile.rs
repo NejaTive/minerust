@@ -88,6 +88,14 @@ impl Tile {
         }
     }
 
+    pub fn sway(self) -> f32 {
+        match self {
+            Tile::Leaves | Tile::BirchLeaves | Tile::SpruceLeaves => 1.0,
+            Tile::TallGrass | Tile::Poppy | Tile::Dandelion => 2.0,
+            _ => 0.0,
+        }
+    }
+
     pub fn layer(self) -> u32 {
         Tile::ALL
             .iter()
@@ -124,7 +132,7 @@ pub fn animation_table() -> Vec<[f32; 4]> {
     Tile::ALL
         .iter()
         .flat_map(|&t| {
-            let entry = [t.frames() as f32, t.fps(), t.scroll(), 0.0];
+            let entry = [t.frames() as f32, t.fps(), t.scroll(), t.sway()];
             (0..t.frames()).map(move |_| entry)
         })
         .collect()

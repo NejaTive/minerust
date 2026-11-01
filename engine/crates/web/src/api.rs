@@ -97,11 +97,20 @@ pub struct EngineSettings {
     #[wasm_bindgen(js_name = mouseSensitivity)]
     pub mouse_sensitivity: f32,
     pub fov: f32,
+    #[wasm_bindgen(js_name = coloredLight)]
+    pub colored_light: bool,
+    #[wasm_bindgen(js_name = waterReflections)]
+    pub water_reflections: bool,
+    #[wasm_bindgen(js_name = groundFog)]
+    pub ground_fog: bool,
+    #[wasm_bindgen(js_name = plantSway)]
+    pub plant_sway: bool,
 }
 
 #[wasm_bindgen]
 impl EngineSettings {
     #[wasm_bindgen(constructor)]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         render_distance: i32,
         ambient_occlusion: bool,
@@ -110,6 +119,10 @@ impl EngineSettings {
         auto_step: bool,
         mouse_sensitivity: f32,
         fov: f32,
+        colored_light: bool,
+        water_reflections: bool,
+        ground_fog: bool,
+        plant_sway: bool,
     ) -> EngineSettings {
         EngineSettings {
             render_distance,
@@ -119,6 +132,10 @@ impl EngineSettings {
             auto_step,
             mouse_sensitivity,
             fov,
+            colored_light,
+            water_reflections,
+            ground_fog,
+            plant_sway,
         }
     }
 }
@@ -133,6 +150,10 @@ pub fn default_settings() -> EngineSettings {
         auto_step: true,
         mouse_sensitivity: DEFAULT_SENSITIVITY,
         fov: DEFAULT_FOV,
+        colored_light: true,
+        water_reflections: true,
+        ground_fog: true,
+        plant_sway: true,
     }
 }
 
