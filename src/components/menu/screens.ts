@@ -1,4 +1,5 @@
-export type MenuScreen = 'main' | 'worlds' | 'create' | 'delete' | 'settings' | 'controls'
+export type MenuScreen =
+  'main' | 'worlds' | 'create' | 'delete' | 'settings' | 'graphics' | 'controls'
 
 export const TITLES: Record<MenuScreen, string> = {
   main: 'MineRust',
@@ -6,6 +7,7 @@ export const TITLES: Record<MenuScreen, string> = {
   create: 'Создание мира',
   delete: 'Удаление мира',
   settings: 'Настройки',
+  graphics: 'Графика',
   controls: 'Управление',
 }
 
@@ -14,6 +16,8 @@ export function backTarget(screen: MenuScreen, inWorld: boolean): MenuScreen {
     case 'create':
     case 'delete':
       return 'worlds'
+    case 'graphics':
+      return 'settings'
     case 'controls':
       return inWorld ? 'main' : 'settings'
     default:

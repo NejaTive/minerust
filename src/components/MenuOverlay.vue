@@ -5,6 +5,7 @@ import { pauseMenuEscAction } from '../input/lock-policy'
 import type { Settings, SettingsLimits } from '../settings/settings'
 import { useWorlds, type CreateWorldForm } from '../world/useWorlds'
 import ControlsScreen from './menu/ControlsScreen.vue'
+import GraphicsScreen from './menu/GraphicsScreen.vue'
 import CreateWorldScreen from './menu/CreateWorldScreen.vue'
 import DeleteWorldScreen from './menu/DeleteWorldScreen.vue'
 import PauseScreen from './menu/PauseScreen.vue'
@@ -127,6 +128,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
         :show-controls="!inWorld"
         @update:settings="emit('update:settings', $event)"
         @controls="go('controls')"
+        @graphics="go('graphics')"
+        @back="back"
+      />
+      <GraphicsScreen
+        v-else-if="screen === 'graphics'"
+        :settings="settings"
+        :limits="limits"
+        @update:settings="emit('update:settings', $event)"
         @back="back"
       />
       <ControlsScreen v-else @back="back" />

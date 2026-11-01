@@ -8,6 +8,10 @@ export const KEYS = {
   autoStep: 'minerust.autoStep',
   mouseSensitivity: 'minerust.mouseSensitivity',
   fov: 'minerust.fov',
+  coloredLight: 'minerust.coloredLight',
+  waterReflections: 'minerust.waterReflections',
+  groundFog: 'minerust.groundFog',
+  plantSway: 'minerust.plantSway',
   showDebug: 'minerust.showDebug',
 } as const
 // Ключи убранных настроек (панель управления, выбор графического API): чистим, чтобы не копился мусор.
@@ -21,6 +25,10 @@ export interface EngineSettings {
   autoStep: boolean
   mouseSensitivity: number
   fov: number
+  coloredLight: boolean
+  waterReflections: boolean
+  groundFog: boolean
+  plantSway: boolean
 }
 
 export interface Settings extends EngineSettings {
@@ -90,6 +98,10 @@ export function loadSettings(
       defaults.mouseSensitivity,
     ),
     fov: readNumber(store, KEYS.fov, limits.fovMin, limits.fovMax, defaults.fov),
+    coloredLight: readBool(store, KEYS.coloredLight, defaults.coloredLight),
+    waterReflections: readBool(store, KEYS.waterReflections, defaults.waterReflections),
+    groundFog: readBool(store, KEYS.groundFog, defaults.groundFog),
+    plantSway: readBool(store, KEYS.plantSway, defaults.plantSway),
     showDebug: readBool(store, KEYS.showDebug, defaults.showDebug),
   }
 }
@@ -102,6 +114,10 @@ export function saveSettings(store: KeyValueStore, s: Settings) {
   store.set(KEYS.autoStep, String(s.autoStep))
   store.set(KEYS.mouseSensitivity, String(s.mouseSensitivity))
   store.set(KEYS.fov, String(s.fov))
+  store.set(KEYS.coloredLight, String(s.coloredLight))
+  store.set(KEYS.waterReflections, String(s.waterReflections))
+  store.set(KEYS.groundFog, String(s.groundFog))
+  store.set(KEYS.plantSway, String(s.plantSway))
   store.set(KEYS.showDebug, String(s.showDebug))
 }
 

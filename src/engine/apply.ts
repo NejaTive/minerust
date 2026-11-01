@@ -10,6 +10,10 @@ export function applySettings(engine: Engine, s: Settings) {
     s.autoStep,
     s.mouseSensitivity,
     s.fov,
+    s.coloredLight,
+    s.waterReflections,
+    s.groundFog,
+    s.plantSway,
   )
   try {
     engine.apply_settings(payload)

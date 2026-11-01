@@ -6,6 +6,7 @@ defineProps<{ settings: Settings; limits: SettingsLimits; showControls: boolean 
 const emit = defineEmits<{
   'update:settings': [patch: Partial<Settings>]
   controls: []
+  graphics: []
   back: []
 }>()
 
@@ -22,39 +23,6 @@ function checkedOf(e: Event): boolean {
 
 <template>
   <div class="rows">
-    <label class="row">
-      <span class="name">Дальность прорисовки <kbd>[</kbd><kbd>]</kbd></span>
-      <span class="value">{{ settings.renderDistance }}</span>
-      <input
-        type="range"
-        :min="limits.renderDistanceMin"
-        :max="limits.renderDistanceMax"
-        step="1"
-        :value="settings.renderDistance"
-        @input="patch({ renderDistance: numberOf($event) })"
-      />
-    </label>
-
-    <label class="row toggle">
-      <span class="name">Затенение углов</span>
-      <input
-        type="checkbox"
-        role="switch"
-        :checked="settings.ambientOcclusion"
-        @change="patch({ ambientOcclusion: checkedOf($event) })"
-      />
-    </label>
-
-    <label class="row toggle">
-      <span class="name">Облака</span>
-      <input
-        type="checkbox"
-        role="switch"
-        :checked="settings.clouds"
-        @change="patch({ clouds: checkedOf($event) })"
-      />
-    </label>
-
     <label class="row toggle">
       <span class="name">Погода</span>
       <input
@@ -111,6 +79,7 @@ function checkedOf(e: Event): boolean {
       />
     </label>
   </div>
+  <button @click="emit('graphics')">Графика</button>
   <button v-if="showControls" @click="emit('controls')">Управление</button>
   <button @click="emit('back')">Назад</button>
 </template>
