@@ -130,6 +130,17 @@ function checkedOf(e: Event): boolean {
       />
     </label>
 
+    <label class="row toggle" :class="{ disabled: !settings.hdr || !settings.waterReflections }">
+      <span class="name">Экранные отражения</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.hdr && settings.waterReflections && settings.ssr"
+        :disabled="!settings.hdr || !settings.waterReflections"
+        @change="patch({ ssr: checkedOf($event) })"
+      />
+    </label>
+
     <label class="row toggle" :class="{ disabled: !settings.hdr }">
       <span class="name">Солнечные лучи</span>
       <input
@@ -138,6 +149,17 @@ function checkedOf(e: Event): boolean {
         :checked="settings.hdr && settings.sunRays"
         :disabled="!settings.hdr"
         @change="patch({ sunRays: checkedOf($event) })"
+      />
+    </label>
+
+    <label class="row toggle" :class="{ disabled: !settings.hdr }">
+      <span class="name">Автоэкспозиция</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.hdr && settings.autoExposure"
+        :disabled="!settings.hdr"
+        @change="patch({ autoExposure: checkedOf($event) })"
       />
     </label>
 

@@ -23,6 +23,7 @@ pub(crate) fn frame_params(
     aspect: f32,
     clouds: bool,
     effects: Effects,
+    dt: f32,
 ) -> FrameParams {
     let rain = game.rain();
     let camera = game.camera();
@@ -63,5 +64,6 @@ pub(crate) fn frame_params(
         snow: f32::from(u8::from(game.snowing())),
         near: NEAR,
         far,
+        dt,
     }
 }

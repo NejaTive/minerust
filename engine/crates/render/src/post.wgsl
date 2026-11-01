@@ -1,4 +1,4 @@
-// Постобработка: HDR-сцена → экспозиция → ACES → цветокоррекция → виньетка. Раскладка Globals — в globals.rs.
+// Постобработка: HDR-сцена → экспозиция (текстура 1×1: авто или FIXED_EXPOSURE) → ACES → цветокоррекция → виньетка. Раскладка Globals — в globals.rs.
 struct Globals {
     view_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
@@ -41,6 +41,8 @@ var bloom: texture_2d<f32>;
 var post_sampler: sampler;
 @group(1) @binding(3)
 var rays: texture_2d<f32>;
+@group(1) @binding(4)
+var exposure_tex: texture_2d<f32>;
 
 const FX_BLOOM: u32 = 32u;
 const BLOOM_STRENGTH: f32 = 0.35;
@@ -50,7 +52,6 @@ const RAY_DAY_COLOR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.8);
 const RAY_DUSK_COLOR: vec3<f32> = vec3<f32>(1.0, 0.55, 0.25);
 const RAY_MOON_COLOR: vec3<f32> = vec3<f32>(0.55, 0.7, 1.0);
 
-const EXPOSURE: f32 = 1.2;
 const NIGHT_GRADE: vec3<f32> = vec3<f32>(0.85, 0.95, 1.2);
 const NIGHT_GRADE_MIX: f32 = 0.25;
 const WARM_GRADE: vec3<f32> = vec3<f32>(1.06, 1.0, 0.9);
@@ -110,7 +111,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         let shafts = textureSampleLevel(rays, post_sampler, in.uv, 0.0).r;
         hdr += mix(mix(RAY_DAY_COLOR, RAY_DUSK_COLOR, globals.warm), RAY_MOON_COLOR, globals.night) * (shafts * globals.sun_ray * RAY_STRENGTH);
     }
-    var color = aces_fitted(hdr * EXPOSURE);
+    let exposure = textureLoad(exposure_tex, vec2<i32>(0), 0).r;
+    var color = aces_fitted(hdr * exposure);
     color = grade(color) * vignette(in.uv);
     let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
     let encoded = pow(max(color, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2)) + (noise - 0.5) / 255.0;

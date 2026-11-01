@@ -1,4 +1,5 @@
 use crate::bloom::{BloomTargets, create_bloom_layout, create_linear_sampler};
+use crate::exposure_pass::{ExposureState, float_texture};
 use glam::{Mat4, Vec2, Vec3};
 
 use crate::pipelines::{DEPTH_FORMAT, HDR_FORMAT};
@@ -32,6 +33,7 @@ pub(crate) struct HdrTargets {
     pub scene_copy_group: wgpu::BindGroup,
     pub rays: wgpu::TextureView,
     pub post_group: wgpu::BindGroup,
+    pub exposure_source: wgpu::BindGroup,
     pub bloom: BloomTargets,
 }
 
@@ -135,6 +137,7 @@ impl HdrTargets {
     pub(crate) fn new(
         device: &wgpu::Device,
         layouts: &PostLayouts,
+        exposure: &ExposureState,
         width: u32,
         height: u32,
     ) -> Self {
@@ -180,6 +183,7 @@ impl HdrTargets {
             &layouts.bloom,
             &layouts.sampler,
             &color,
+            &exposure.view,
             width,
             height,
         );
@@ -203,8 +207,13 @@ impl HdrTargets {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(&rays),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&exposure.view),
+                },
             ],
         });
+        let exposure_source = exposure.source_group(device, &color);
         Self {
             color_texture: texture,
             color,
@@ -213,6 +222,7 @@ impl HdrTargets {
             scene_copy_group,
             rays,
             post_group,
+            exposure_source,
             bloom,
         }
     }
@@ -256,6 +266,12 @@ pub(crate) fn create_post_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
                 },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: float_texture(false),
                 count: None,
             },
         ],

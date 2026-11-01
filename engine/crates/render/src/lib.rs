@@ -2,6 +2,8 @@ mod arena;
 mod bloom;
 mod clouds;
 mod effects;
+mod exposure;
+mod exposure_pass;
 pub mod fog;
 mod frustum;
 mod globals;

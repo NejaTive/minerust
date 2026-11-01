@@ -19,6 +19,8 @@ export const KEYS = {
   shadows: 'minerust.shadows',
   shadowQualityHigh: 'minerust.shadowQualityHigh',
   cloudShadows: 'minerust.cloudShadows',
+  ssr: 'minerust.ssr',
+  autoExposure: 'minerust.autoExposure',
   showDebug: 'minerust.showDebug',
 } as const
 // Ключи убранных настроек (панель управления, выбор графического API): чистим, чтобы не копился мусор.
@@ -43,6 +45,8 @@ export interface EngineSettings {
   shadows: boolean
   shadowQualityHigh: boolean
   cloudShadows: boolean
+  ssr: boolean
+  autoExposure: boolean
 }
 
 export interface Settings extends EngineSettings {
@@ -123,6 +127,8 @@ export function loadSettings(
     shadows: readBool(store, KEYS.shadows, defaults.shadows),
     shadowQualityHigh: readBool(store, KEYS.shadowQualityHigh, defaults.shadowQualityHigh),
     cloudShadows: readBool(store, KEYS.cloudShadows, defaults.cloudShadows),
+    ssr: readBool(store, KEYS.ssr, defaults.ssr),
+    autoExposure: readBool(store, KEYS.autoExposure, defaults.autoExposure),
     showDebug: readBool(store, KEYS.showDebug, defaults.showDebug),
   }
 }
@@ -146,6 +152,8 @@ export function saveSettings(store: KeyValueStore, s: Settings) {
   store.set(KEYS.shadows, String(s.shadows))
   store.set(KEYS.shadowQualityHigh, String(s.shadowQualityHigh))
   store.set(KEYS.cloudShadows, String(s.cloudShadows))
+  store.set(KEYS.ssr, String(s.ssr))
+  store.set(KEYS.autoExposure, String(s.autoExposure))
   store.set(KEYS.showDebug, String(s.showDebug))
 }
 

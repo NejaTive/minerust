@@ -6,6 +6,7 @@ pub const CLOUDS_SHADER: &str = include_str!("clouds.wgsl");
 pub const RAIN_SHADER: &str = include_str!("rain.wgsl");
 pub const BLOOM_SHADER: &str = include_str!("bloom.wgsl");
 pub const RAYS_SHADER: &str = include_str!("rays.wgsl");
+pub const EXPOSURE_SHADER: &str = include_str!("exposure.wgsl");
 pub const POST_SHADER: &str = include_str!("post.wgsl");
 pub const OUTLINE_SHADER: &str = include_str!("outline.wgsl");
 

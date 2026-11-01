@@ -36,6 +36,8 @@ const defaults = defaultSettings({
   shadows: true,
   shadowQualityHigh: true,
   cloudShadows: true,
+  ssr: true,
+  autoExposure: true,
 })
 
 const load = (data: Record<string, string> = {}) =>
@@ -61,7 +63,9 @@ describe('loadSettings', () => {
       s.shadows,
       s.shadowQualityHigh,
       s.cloudShadows,
-    ]).toEqual([true, true, true, true, true, true, true, true, true, true, true, true])
+      s.ssr,
+      s.autoExposure,
+    ]).toEqual(Array(14).fill(true))
   })
 
   it('читает сохранённые значения', () => {
@@ -84,6 +88,8 @@ describe('loadSettings', () => {
       [KEYS.shadows]: 'false',
       [KEYS.shadowQualityHigh]: 'false',
       [KEYS.cloudShadows]: 'false',
+      [KEYS.ssr]: 'false',
+      [KEYS.autoExposure]: 'false',
       [KEYS.showDebug]: 'true',
     }
     expect(load(data)).toEqual({
@@ -105,6 +111,8 @@ describe('loadSettings', () => {
       shadows: false,
       shadowQualityHigh: false,
       cloudShadows: false,
+      ssr: false,
+      autoExposure: false,
       showDebug: true,
     })
   })

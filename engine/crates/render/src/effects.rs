@@ -12,6 +12,8 @@ pub struct Effects {
     pub sun_rays: bool,
     pub shadows: bool,
     pub cloud_shadows: bool,
+    pub ssr: bool,
+    pub auto_exposure: bool,
     pub shadow_quality: ShadowQuality,
 }
 
@@ -28,6 +30,8 @@ impl Default for Effects {
             sun_rays: true,
             shadows: true,
             cloud_shadows: true,
+            ssr: true,
+            auto_exposure: true,
             shadow_quality: ShadowQuality::default(),
         }
     }
@@ -46,5 +50,9 @@ impl Effects {
             | u32::from(self.sun_rays && self.hdr) << 7
             | u32::from(self.shadows) << 8
             | u32::from(self.cloud_shadows) << 9
+            | u32::from(self.ssr && self.hdr && self.water_reflections) << 10
     }
 }
+
+#[cfg(test)]
+mod tests;
