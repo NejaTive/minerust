@@ -40,6 +40,12 @@ const DAY_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
 const NIGHT_LIGHT_TINT: vec3<f32> = vec3<f32>(0.7, 0.82, 1.15);
 // Как DUSK_SKY в daytime.rs и DUSK_COLOR в sky.wgsl.
 const DUSK_COLOR: vec3<f32> = vec3<f32>(0.78, 0.32, 0.14);
+// Уровень моря — SEA_LEVEL в terrain.rs.
+const FOG_BASE_Y: f32 = 64.0;
+const FOG_DENSITY: f32 = 0.7;
+const FOG_FALLOFF: f32 = 0.03;
+const FOG_RAIN_DENSITY: f32 = 1.0;
+const FOG_GLOW_HEIGHT: f32 = 0.05;
 const WATER_F0: f32 = 0.02;
 const WATER_TOP_ALPHA: f32 = 0.8;
 const RIPPLE_STRENGTH: f32 = 0.05;
@@ -163,6 +169,19 @@ fn light_tint(in: VertexOut) -> vec3<f32> {
     return luma_normalized(mix(luma_normalized(sun_tint), luma_normalized(BLOCK_LIGHT_TINT), share));
 }
 
+fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
+    let to_pos = world_pos - globals.camera_pos;
+    if globals.eye_fluid > 0.5 {
+        return mix(color, globals.fog_color, smoothstep(globals.fog_start, globals.fog_end, length(to_pos)));
+    }
+    let distance = length(to_pos.xz);
+    let thickness = FOG_DENSITY * (1.0 + FOG_RAIN_DENSITY * globals.rain)
+        * exp(-FOG_FALLOFF * max(world_pos.y - FOG_BASE_Y, 0.0)) / globals.fog_end;
+    let fog = max(1.0 - exp(-thickness * distance), smoothstep(globals.fog_start, globals.fog_end, distance));
+    let tint = mix(globals.fog_color, DUSK_COLOR * 1.3, dusk_glow(to_pos, FOG_GLOW_HEIGHT));
+    return mix(color, tint, fog);
+}
+
 fn weather_exposure() -> f32 {
     return (1.0 - RAIN_DIM * globals.rain * (1.0 - globals.night)) * (1.0 + FLASH_GAIN * globals.flash);
 }
@@ -170,13 +189,10 @@ fn weather_exposure() -> f32 {
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
     var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in);
     color *= weather_exposure();
-    var distance = length(in.world_pos.xz - globals.camera_pos.xz);
     if globals.eye_fluid > 0.5 {
         color *= select(UNDERWATER_TINT, LAVA_TINT, globals.eye_fluid > 1.5);
-        distance = length(in.world_pos - globals.camera_pos);
     }
-    let fog = smoothstep(globals.fog_start, globals.fog_end, distance);
-    return mix(color, globals.fog_color, fog);
+    return apply_fog(color, in.world_pos);
 }
 
 // Непрозрачное: без `discard`, чтобы GPU мог отсекать скрытые пиксели до шейдера
@@ -199,16 +215,21 @@ fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(shaded(in, texel.rgb), 1.0);
 }
 
+// Одинаково в sky.wgsl и shader.wgsl: туман сцены сходится с горизонтом неба.
+fn dusk_glow(dir: vec3<f32>, height: f32) -> f32 {
+    let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
+    let side = max(dot(normalize(dir.xz + vec2<f32>(1e-5)), sun_flat), 0.0);
+    let glow = globals.warm * pow(side, 3.0) * exp(-6.0 * height) * smoothstep(0.0, 0.07, height);
+    return clamp(glow, 0.0, 1.0);
+}
+
 // Небо по лучу — та же формула, что в sky.wgsl (горизонт → зенит и закатное пятно).
 fn sky_color(dir: vec3<f32>) -> vec3<f32> {
     let tilt = globals.horizon_tilt;
     let edge = -tilt / sqrt(1.0 + tilt * tilt);
     let height = clamp((dir.y - edge) / (1.0 - edge), 0.0, 1.0);
     var color = mix(globals.fog_color, globals.zenith, pow(smoothstep(0.0, 1.0, height), 0.6));
-    let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
-    let side = max(dot(normalize(dir.xz + vec2<f32>(1e-5)), sun_flat), 0.0);
-    let glow = globals.warm * pow(side, 3.0) * exp(-6.0 * height) * smoothstep(0.0, 0.07, height);
-    return mix(color, DUSK_COLOR * 1.3, clamp(glow, 0.0, 1.0));
+    return mix(color, DUSK_COLOR * 1.3, dusk_glow(dir, height));
 }
 
 fn ripple_normal(p: vec2<f32>) -> vec3<f32> {
@@ -245,8 +266,7 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
 
     let body = texel.rgb * in.shade * max(in.sun_light, in.block_light) * light_tint(in) * exposure;
     var color = mix(body, sky, fresnel) + vec3<f32>(specular);
-    let distance = length(in.world_pos.xz - globals.camera_pos.xz);
-    color = mix(color, globals.fog_color, smoothstep(globals.fog_start, globals.fog_end, distance));
+    color = apply_fog(color, in.world_pos);
     let alpha = max(mix(texel.a * WATER_TOP_ALPHA, 1.0, smoothstep(0.0, 0.5, fresnel)), clamp(specular, 0.0, 1.0));
     return vec4<f32>(color, alpha);
 }
