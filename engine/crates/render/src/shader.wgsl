@@ -63,6 +63,13 @@ const RAIN_SWAY_GAIN: f32 = 1.5;
 const WATER_F0: f32 = 0.02;
 const WATER_TOP_ALPHA: f32 = 0.8;
 const RIPPLE_STRENGTH: f32 = 0.05;
+const RIPPLE_CALM: f32 = 0.12;
+const RIPPLE_RAIN_GAIN: f32 = 1.2;
+const RIPPLE_FADE_START: f32 = 24.0;
+const RIPPLE_FADE_END: f32 = 90.0;
+const RIPPLE_WARP: f32 = 2.5;
+const RIPPLE_WARP_SCALE: f32 = 0.12;
+const RIPPLE_WIND_SCALE: f32 = 0.025;
 const SPECULAR_POWER: f32 = 220.0;
 const MOON_SPECULAR: f32 = 0.3;
 const WARM_LIGHT_TINT: vec3<f32> = vec3<f32>(1.2, 0.95, 0.7);
@@ -279,12 +286,52 @@ fn sky_color(dir: vec3<f32>) -> vec3<f32> {
     return mix(color, DUSK_COLOR * 1.3, dusk_glow(dir, height));
 }
 
-fn ripple_normal(p: vec2<f32>) -> vec3<f32> {
+fn cell_hash(c: vec2<i32>) -> f32 {
+    var h = u32(c.x) * 0x27d4eb2du ^ u32(c.y) * 0x165667b1u;
+    h = (h ^ (h >> 15u)) * 0x85ebca6bu;
+    h = h ^ (h >> 13u);
+    return f32(h & 0xffffffu) / 16777215.0;
+}
+
+// Value-шум с аналитическими производными: (значение, d/dx, d/dy).
+fn value_noise(p: vec2<f32>) -> vec3<f32> {
+    let i = vec2<i32>(floor(p));
+    let f = fract(p);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let du = 30.0 * f * f * (f - 1.0) * (f - 1.0);
+    let a = cell_hash(i);
+    let b = cell_hash(i + vec2<i32>(1, 0));
+    let c = cell_hash(i + vec2<i32>(0, 1));
+    let d = cell_hash(i + vec2<i32>(1, 1));
+    let k = a - b - c + d;
+    let value = a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y;
+    return vec3<f32>(value, du.x * ((b - a) + k * u.y), du.y * ((c - a) + k * u.x));
+}
+
+// Наклон одной октавы: масштаб, поворот (угол), скорость дрейфа, вес; footprint — размер пикселя в блоках.
+fn ripple_octave(q: vec2<f32>, scale: f32, angle: f32, drift: vec2<f32>, weight: f32, footprint: f32) -> vec2<f32> {
+    let rot = vec2<f32>(cos(angle), sin(angle));
+    let r = vec2<f32>(q.x * rot.x - q.y * rot.y, q.x * rot.y + q.y * rot.x);
+    let n = value_noise(r * scale + drift * globals.anim_time);
+    let slope = vec2<f32>(n.y * rot.x + n.z * rot.y, n.z * rot.x - n.y * rot.y) * scale;
+    let alias = 1.0 - smoothstep(0.25, 0.6, footprint * scale);
+    return slope * (weight * alias / scale);
+}
+
+// footprint = length(fwidth(p)) считается снаружи: производные нельзя брать в неоднородном ветвлении.
+fn ripple_normal(p: vec2<f32>, dist: f32, footprint: f32) -> vec3<f32> {
     let t = globals.anim_time;
-    let a = vec2<f32>(sin(p.x * 2.3 + p.y * 1.7 + t * 1.1), cos(p.x * 1.9 - p.y * 2.9 + t * 0.9));
-    let b = vec2<f32>(sin(p.y * 5.1 - t * 1.7 + p.x * 1.3), cos(p.x * 4.7 + t * 1.4 - p.y * 0.8));
-    let r = (a + 0.5 * b) * RIPPLE_STRENGTH;
-    return normalize(vec3<f32>(r.x, 1.0, r.y));
+    let warp = value_noise(p * RIPPLE_WARP_SCALE + vec2<f32>(t * 0.03, -t * 0.02));
+    let q = p + vec2<f32>(warp.z, -warp.y) * RIPPLE_WARP;
+    let wind = value_noise(p * RIPPLE_WIND_SCALE + vec2<f32>(t * 0.004, t * 0.006)).x;
+    let patch_strength = mix(RIPPLE_CALM, 1.0, smoothstep(0.3, 0.7, wind));
+    let distance_fade = 1.0 - smoothstep(RIPPLE_FADE_START, RIPPLE_FADE_END, dist);
+    let strength = RIPPLE_STRENGTH * patch_strength * distance_fade * (1.0 + RIPPLE_RAIN_GAIN * globals.rain);
+    let slope = ripple_octave(q, 0.9, 0.35, vec2<f32>(0.10, 0.04), 1.0, footprint)
+        + ripple_octave(q, 1.9, 1.9, vec2<f32>(-0.17, 0.09), 0.6, footprint)
+        + ripple_octave(q, 3.7, 4.1, vec2<f32>(0.12, -0.25), 0.35, footprint);
+    let r = slope * strength * 2.0;
+    return normalize(vec3<f32>(-r.x, 1.0, -r.y));
 }
 
 @fragment
@@ -296,8 +343,9 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     }
     let view = normalize(globals.camera_pos - in.world_pos);
     var normal = select(-flat_normal, flat_normal, dot(flat_normal, view) >= 0.0);
+    let ripple_footprint = length(fwidth(in.world_pos.xz));
     if normal.y > 0.95 {
-        normal = ripple_normal(in.world_pos.xz);
+        normal = ripple_normal(in.world_pos.xz, length(globals.camera_pos - in.world_pos), ripple_footprint);
     }
     let cos_view = clamp(dot(normal, view), 0.0, 1.0);
     let fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - cos_view, 5.0);
