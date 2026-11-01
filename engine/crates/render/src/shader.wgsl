@@ -84,7 +84,7 @@ const RIPPLE_WIND_SCALE: f32 = 0.025;
 const SPECULAR_POWER: f32 = 220.0;
 const MOON_SPECULAR: f32 = 0.3;
 // В HDR яркий блочный свет (факелы, лава, светокамень) выходит за 1.0 и даёт свечение.
-const HDR_EMISSIVE_GAIN: f32 = 1.6;
+const HDR_EMISSIVE_GAIN: f32 = 2.0;
 const HDR_GLINT_GAIN: f32 = 4.0;
 const REFRACT_STRENGTH: f32 = 0.06;
 const MAX_WATER_THICKNESS: f32 = 48.0;
@@ -275,7 +275,7 @@ fn emissive_boost(in: VertexOut) -> f32 {
         return 1.0;
     }
     let block_share = smoothstep(0.0, 0.2, in.block_light - in.sun_light);
-    return 1.0 + HDR_EMISSIVE_GAIN * block_share * smoothstep(0.7, 1.0, in.block_light);
+    return 1.0 + HDR_EMISSIVE_GAIN * block_share * smoothstep(0.55, 1.0, in.block_light);
 }
 
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
