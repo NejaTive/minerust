@@ -24,6 +24,7 @@ pub struct Globals {
     pub rain_drops: f32,
     pub flash: f32,
     pub cloud_threshold: f32,
+    pub snow: f32,
 }
 
 pub fn view_dir_matrix(view_proj: Mat4) -> Mat4 {
@@ -64,7 +65,8 @@ impl Globals {
             .chain(self.star_rotation.to_array())
             .chain([0.0])
             .chain(self.cloud_color.to_array())
-            .chain([self.rain, self.rain_drops, self.flash, self.cloud_threshold]);
+            .chain([self.rain, self.rain_drops, self.flash, self.cloud_threshold])
+            .chain([self.snow]);
         let mut bytes = [0; Self::SIZE];
         for (chunk, f) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(floats) {
             *chunk = f.to_le_bytes();

@@ -51,5 +51,6 @@ pub(crate) fn frame_params(game: &Game, radius: i32, aspect: f32, clouds: bool) 
         rain,
         rain_drops: game.rain_drops(),
         flash: game.flash(),
+        snow: f32::from(u8::from(game.snowing())),
     }
 }

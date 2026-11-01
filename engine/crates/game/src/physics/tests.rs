@@ -767,3 +767,139 @@ fn step_offset_decays_to_zero() {
     assert!(peak > 0.5, "peak = {peak}");
     assert_eq!(player.step_offset, 0.0);
 }
+
+const SNOW_HEIGHT: f32 = 2.0 / 16.0;
+
+fn layered(snow: impl Fn(IVec3) -> bool, ice: bool) -> impl Fn(IVec3) -> Collision {
+    move |pos| {
+        if pos.y <= FLOOR {
+            Collision {
+                height: 1.0,
+                slippery: ice,
+            }
+        } else if pos.y == FLOOR + 1 && snow(pos) {
+            Collision {
+                height: SNOW_HEIGHT,
+                slippery: false,
+            }
+        } else {
+            Collision::NONE
+        }
+    }
+}
+
+fn run_with(
+    player: &mut Player,
+    input: Input,
+    ticks: u32,
+    collision: &impl Fn(IVec3) -> Collision,
+) {
+    for _ in 0..ticks {
+        player.step_with(&input, 0.0, collision, dry);
+    }
+}
+
+#[test]
+fn lands_on_the_top_of_a_snow_layer() {
+    let collision = layered(|_| true, false);
+    let mut player = Player::new(Vec3::new(0.5, GROUND + 3.0, 0.5), Mode::Walking);
+    run_with(&mut player, Input::default(), 120, &collision);
+    assert!(player.on_ground);
+    assert_eq!(player.feet.y, GROUND + SNOW_HEIGHT);
+}
+
+#[test]
+fn stays_on_a_snow_layer_when_standing() {
+    let collision = layered(|_| true, false);
+    let mut player = Player::new(Vec3::new(0.5, GROUND + SNOW_HEIGHT, 0.5), Mode::Walking);
+    player.on_ground = true;
+    run_with(&mut player, Input::default(), 120, &collision);
+    assert!(player.on_ground);
+    assert_eq!(player.feet.y, GROUND + SNOW_HEIGHT);
+}
+
+#[test]
+fn auto_step_climbs_onto_a_snow_layer() {
+    let collision = layered(|pos| pos.x >= 2, false);
+    let mut player = standing();
+    run_with(&mut player, FORWARD, 90, &collision);
+    assert!(player.feet.x > 3.0, "{}", player.feet.x);
+    assert!(player.on_ground);
+    assert_eq!(player.feet.y, GROUND + SNOW_HEIGHT);
+}
+
+#[test]
+fn without_auto_step_a_snow_layer_blocks_the_walk() {
+    let collision = layered(|pos| pos.x >= 2, false);
+    let mut player = standing();
+    player.auto_step = false;
+    run_with(&mut player, FORWARD, 90, &collision);
+    assert!(
+        player.feet.x < 2.0 - PLAYER_WIDTH / 2.0 + 0.01,
+        "{}",
+        player.feet.x
+    );
+    assert_eq!(player.feet.y, GROUND);
+}
+
+#[test]
+fn jumping_clears_a_snow_layer() {
+    let collision = layered(|pos| pos.x >= 2, false);
+    let mut player = standing();
+    player.auto_step = false;
+    let jump = Input {
+        jump: true,
+        ..FORWARD
+    };
+    run_with(&mut player, jump, 40, &collision);
+    assert!(player.feet.x > 2.0);
+}
+
+#[test]
+fn snow_layer_does_not_block_the_head() {
+    let collision = layered(|_| true, false);
+    let mut player = standing();
+    let jump = Input {
+        jump: true,
+        ..Input::default()
+    };
+    run_with(&mut player, jump, 1, &collision);
+    assert!(player.feet.y > GROUND);
+}
+
+fn speed_after(ticks: u32, ice: bool) -> f32 {
+    let collision = layered(|_| false, ice);
+    let mut player = standing();
+    run_with(&mut player, FORWARD, ticks, &collision);
+    Vec2::new(player.velocity.x, player.velocity.z).length()
+}
+
+#[test]
+fn ground_speed_is_instant_on_normal_blocks() {
+    assert_eq!(speed_after(2, false), WALK_SPEED);
+}
+
+#[test]
+fn ice_accelerates_slowly() {
+    let early = speed_after(10, true);
+    assert!(early > 0.0 && early < WALK_SPEED * 0.5, "{early}");
+    let late = speed_after(120, true);
+    assert!((late - WALK_SPEED).abs() < 1e-3, "{late}");
+}
+
+#[test]
+fn ice_keeps_sliding_after_the_keys_are_released() {
+    for (ice, slides) in [(false, false), (true, true)] {
+        let collision = layered(|_| false, ice);
+        let mut player = standing();
+        run_with(&mut player, FORWARD, 120, &collision);
+        run_with(&mut player, Input::default(), 15, &collision);
+        let speed = Vec2::new(player.velocity.x, player.velocity.z).length();
+        assert_eq!(speed > 1.0, slides, "ice {ice}: {speed}");
+    }
+}
+
+#[test]
+fn ice_friction_is_a_separate_constant_below_air_control() {
+    const { assert!(ICE_ACCEL > 0.0 && ICE_ACCEL < AIR_ACCEL) };
+}

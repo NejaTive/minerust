@@ -127,6 +127,10 @@ impl Caves {
                             Block::Air
                         };
                         column.set(local, filling);
+                        let above = local + IVec3::Y;
+                        if Column::contains(above) && column.get(above) == Block::Snow {
+                            column.set(above, Block::Air);
+                        }
                     }
                 }
             }
@@ -193,7 +197,7 @@ fn hollow([cheese, a, b]: Sample, density: f32) -> bool {
 fn carvable(block: Block) -> bool {
     matches!(
         block,
-        Block::Stone | Block::Dirt | Block::Sand | Block::Grass
+        Block::Stone | Block::Dirt | Block::Sand | Block::Grass | Block::SnowyGrass
     )
 }
 

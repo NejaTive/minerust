@@ -201,3 +201,67 @@ fn alpha_depends_only_on_horizontal_distance_and_is_symmetric() {
     assert_eq!(plane_alpha((3.5, 3.5), camera), 1.0);
     assert_eq!(plane_alpha((13.5, -2.5), camera), 0.0);
 }
+
+#[test]
+fn snow_tile_has_the_rain_tile_size_and_is_deterministic() {
+    let tile = snow_tile_pixels();
+    assert_eq!(tile.len(), (TILE_WIDTH * TILE_HEIGHT * 4) as usize);
+    assert_eq!(tile, snow_tile_pixels());
+}
+
+#[test]
+fn snowflakes_are_sparse_white_dots_of_one_or_two_texels() {
+    let tile = snow_tile_pixels();
+    let pixels = tile.as_chunks::<4>().0;
+    let filled: Vec<&[u8; 4]> = pixels.iter().filter(|p| p[3] > 0).collect();
+    let share = filled.len() as f32 / (TILE_WIDTH * TILE_HEIGHT) as f32;
+    assert!((0.01..0.10).contains(&share), "{share}");
+    assert!(filled.iter().all(|p| p[..3] == [255, 255, 255]));
+
+    let mut seen = vec![false; pixels.len()];
+    let mut sizes = Vec::new();
+    for start in 0..pixels.len() {
+        if pixels[start][3] == 0 || seen[start] {
+            continue;
+        }
+        let mut stack = vec![start];
+        seen[start] = true;
+        let (mut count, mut min, mut max) = (0, (u32::MAX, u32::MAX), (0, 0));
+        while let Some(at) = stack.pop() {
+            let (x, y) = ((at as u32) % TILE_WIDTH, (at as u32) / TILE_WIDTH);
+            count += 1;
+            min = (min.0.min(x), min.1.min(y));
+            max = (max.0.max(x), max.1.max(y));
+            for (nx, ny) in [
+                (x.wrapping_sub(1), y),
+                (x + 1, y),
+                (x, y.wrapping_sub(1)),
+                (x, y + 1),
+            ] {
+                if nx < TILE_WIDTH && ny < TILE_HEIGHT {
+                    let next = (ny * TILE_WIDTH + nx) as usize;
+                    if pixels[next][3] > 0 && !seen[next] {
+                        seen[next] = true;
+                        stack.push(next);
+                    }
+                }
+            }
+        }
+        assert!(
+            max.0 - min.0 < 2 && max.1 - min.1 < 2,
+            "flake {min:?}-{max:?}"
+        );
+        sizes.push(count);
+    }
+    assert!(sizes.len() >= 10);
+    assert!(sizes.contains(&1) && sizes.contains(&4));
+}
+
+#[test]
+fn snow_shader_falls_slower_with_sway_and_picks_its_half_of_the_texture() {
+    let shader = crate::shaders::RAIN_SHADER;
+    assert!(shader.contains("const SNOW_FALL_SPEED: f32 = 2.5;"));
+    assert!(shader.contains("const FALL_SPEED: f32 = 12.0;"));
+    assert!(shader.contains("snow: f32,"));
+    assert!(shader.contains("select(0.0, 0.5, globals.snow > 0.5)"));
+}

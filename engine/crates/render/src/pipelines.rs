@@ -9,6 +9,8 @@ pub(crate) enum BlockPass {
     Solid,
     Cutout,
     Water,
+    Ice,
+    IceDepth,
 }
 
 pub(crate) fn create_block_pipeline(
@@ -18,12 +20,18 @@ pub(crate) fn create_block_pipeline(
     format: wgpu::TextureFormat,
     pass: BlockPass,
 ) -> wgpu::RenderPipeline {
-    let water = pass == BlockPass::Water;
+    let water = matches!(
+        pass,
+        BlockPass::Water | BlockPass::Ice | BlockPass::IceDepth
+    );
+    let ice = matches!(pass, BlockPass::Ice | BlockPass::IceDepth);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(match pass {
             BlockPass::Solid => "main",
             BlockPass::Cutout => "cutout",
             BlockPass::Water => "water",
+            BlockPass::Ice => "ice",
+            BlockPass::IceDepth => "ice depth",
         }),
         layout: Some(layout),
         vertex: wgpu::VertexState {
@@ -37,25 +45,33 @@ pub(crate) fn create_block_pipeline(
             entry_point: Some(match pass {
                 BlockPass::Solid => "fs_main",
                 BlockPass::Cutout => "fs_cutout",
-                BlockPass::Water => "fs_water",
+                BlockPass::Water | BlockPass::Ice | BlockPass::IceDepth => "fs_water",
             }),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: water.then_some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
+                write_mask: if pass == BlockPass::IceDepth {
+                    wgpu::ColorWrites::empty()
+                } else {
+                    wgpu::ColorWrites::ALL
+                },
             })],
             compilation_options: Default::default(),
         }),
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: (!water).then_some(wgpu::Face::Back),
+            cull_mode: (!water || ice).then_some(wgpu::Face::Back),
             ..Default::default()
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: Some(!water),
-            depth_compare: Some(wgpu::CompareFunction::Less),
+            depth_write_enabled: Some(!water || pass == BlockPass::IceDepth),
+            depth_compare: Some(if pass == BlockPass::Ice {
+                wgpu::CompareFunction::LessEqual
+            } else {
+                wgpu::CompareFunction::Less
+            }),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),

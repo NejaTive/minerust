@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use glam::IVec3;
 
 use crate::mesh::POSITION_UNITS;
-use world::block::{Facing, TORCH_WALL_RISE, TORCH_WALL_SHIFT, WATER_SURFACE};
+use world::block::{Facing, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, WATER_SURFACE};
 use world::tile::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW};
 
 pub(crate) struct Face {
@@ -89,7 +89,9 @@ pub const LOG_BARK_X: u8 = 45;
 pub const LOG_BARK_Z: u8 = 49;
 pub const WATER_TOP_SLOPED: u8 = 53;
 pub const WATER_SIDE_SLOPED: u8 = 54;
-pub const TEMPLATE_COUNT: usize = 58;
+pub const SNOW_TOP: u8 = 58;
+pub const SNOW_SIDE: u8 = 59;
+pub const TEMPLATE_COUNT: usize = 63;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -266,6 +268,8 @@ fn build() -> [Template; TEMPLATE_COUNT] {
     out.extend(FACES[..4].iter().map(|face| bark_face(face, 2)));
     out.push(sloped_water(&FACES[0], TOP_CORNER));
     out.extend(sides.iter().map(|f| sloped_water(f, SIDE_TOP_CORNER)));
+    out.push(cube_face(&FACES[0], i32::from(SNOW_UNITS)));
+    out.extend(sides.iter().map(|f| cube_face(f, i32::from(SNOW_UNITS))));
     out.try_into().expect("template count")
 }
 
@@ -277,7 +281,7 @@ pub fn pack_corner(c: Corner) -> u32 {
 
 fn is_fluid_side(index: usize) -> bool {
     let index = index as u8;
-    (WATER_SIDE..WATER_BOTTOM).contains(&index) || index >= WATER_SIDE_SLOPED
+    (WATER_SIDE..WATER_BOTTOM).contains(&index) || (WATER_SIDE_SLOPED..SNOW_TOP).contains(&index)
 }
 
 pub const TABLE_BYTES: usize = TEMPLATE_COUNT * 32 + 16;

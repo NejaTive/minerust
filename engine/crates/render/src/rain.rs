@@ -12,6 +12,10 @@ const HEAD_ALPHA: f32 = 170.0;
 const TAIL_ALPHA: f32 = 80.0;
 pub(crate) const RAIN_VERTICES: u32 = 6;
 
+const SNOW_SEED: u32 = 0x736e_6f77;
+const SNOWFLAKES: usize = 28;
+const SNOW_ALPHA: u8 = 210;
+
 pub(crate) fn create_rain_cover_texture(device: &wgpu::Device) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("rain cover"),
@@ -63,6 +67,35 @@ pub(crate) fn rain_tile_pixels() -> Vec<u8> {
     pixels
 }
 
+pub(crate) fn snow_tile_pixels() -> Vec<u8> {
+    let mut pixels = vec![0; (TILE_WIDTH * TILE_HEIGHT * 4) as usize];
+    let mut state = SNOW_SEED;
+    let mut placed = 0;
+    while placed < SNOWFLAKES {
+        let x = next(&mut state) % (TILE_WIDTH - 1);
+        let y = next(&mut state) % (TILE_HEIGHT - 1);
+        let size = 1 + next(&mut state) % 2;
+        let free = (y.saturating_sub(1)..=y + size).all(|row| {
+            (x.saturating_sub(1)..=x + size).all(|column| {
+                row >= TILE_HEIGHT
+                    || column >= TILE_WIDTH
+                    || pixels[((row * TILE_WIDTH + column) * 4 + 3) as usize] == 0
+            })
+        });
+        if !free {
+            continue;
+        }
+        for row in y..y + size {
+            for column in x..x + size {
+                let at = ((row * TILE_WIDTH + column) * 4) as usize;
+                pixels[at..at + 4].copy_from_slice(&[255, 255, 255, SNOW_ALPHA]);
+            }
+        }
+        placed += 1;
+    }
+    pixels
+}
+
 pub(crate) fn create_rain_tile_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -75,7 +108,7 @@ pub(crate) fn create_rain_tile_texture(
                 label: Some("rain tile"),
                 size: wgpu::Extent3d {
                     width: TILE_WIDTH,
-                    height: TILE_HEIGHT,
+                    height: TILE_HEIGHT * 2,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
@@ -86,7 +119,7 @@ pub(crate) fn create_rain_tile_texture(
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &rain_tile_pixels(),
+            &[rain_tile_pixels(), snow_tile_pixels()].concat(),
         )
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
