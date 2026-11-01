@@ -43,7 +43,7 @@ var post_sampler: sampler;
 var rays: texture_2d<f32>;
 
 const FX_BLOOM: u32 = 32u;
-const BLOOM_STRENGTH: f32 = 0.12;
+const BLOOM_STRENGTH: f32 = 0.45;
 const FX_SUN_RAYS: u32 = 128u;
 const RAY_STRENGTH: f32 = 0.35;
 const RAY_DAY_COLOR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.8);
