@@ -101,6 +101,7 @@ struct VertexOut {
     @location(1) shade: f32,
     @location(4) sun_light: f32,
     @location(5) block_light: f32,
+    @location(6) sky_exposure: f32,
     // Целые varying нельзя интерполировать.
     @location(2) @interpolate(flat) layer: u32,
     @location(3) world_pos: vec3<f32>,
@@ -169,6 +170,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.uv.y -= table.shapes[shape].shade.y * fract(globals.anim_time * animation[layer].z);
     out.shade = table.shapes[shape].shade.x * table.ao[ao];
     out.sun_light = level_brightness(f32(sun) * 0.5 - globals.darkness);
+    out.sky_exposure = level_brightness(f32(sun) * 0.5);
     out.block_light = level_brightness(f32(block) * 0.5);
     out.layer = layer;
     out.world_pos = world_pos;
@@ -280,13 +282,13 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - cos_view, 5.0);
     let reflected = reflect(-view, normal);
     let exposure = weather_exposure();
-    let sky = sky_color(vec3<f32>(reflected.x, abs(reflected.y), reflected.z)) * in.sun_light * exposure;
+    let sky = sky_color(vec3<f32>(reflected.x, abs(reflected.y), reflected.z)) * in.sky_exposure * exposure;
 
     let sun_up = smoothstep(-0.05, 0.1, globals.sun_dir.y);
     let moon_up = MOON_SPECULAR * smoothstep(-0.05, 0.1, -globals.sun_dir.y);
     let glint = sun_up * pow(max(dot(reflected, globals.sun_dir), 0.0), SPECULAR_POWER)
         + moon_up * pow(max(dot(reflected, -globals.sun_dir), 0.0), SPECULAR_POWER);
-    let specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sun_light);
+    let specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sky_exposure);
 
     let body = texel.rgb * in.shade * max(in.sun_light, in.block_light) * light_tint(in) * exposure;
     var color = mix(body, sky, fresnel) + vec3<f32>(specular);
