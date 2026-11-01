@@ -46,6 +46,7 @@ const FX_HDR: u32 = 16u;
 const FX_WATER_DEPTH: u32 = 64u;
 const FX_SHADOWS: u32 = 256u;
 const FX_CLOUD_SHADOWS: u32 = 512u;
+const FX_SSR: u32 = 1024u;
 const CLOUD_MAP: i32 = 256;
 const CLOUD_CELL: f32 = 12.0;
 const CLOUD_SHADOW_PLANE_Y: f32 = 162.0;
@@ -98,6 +99,14 @@ const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.5, 0.14, 0.07);
 const WATER_SHALLOW_TINT: vec3<f32> = vec3<f32>(0.55, 1.0, 0.9);
 const WATER_DEEP_DARKEN: f32 = 0.3;
 const SHORE_FADE: f32 = 0.35;
+const SSR_MAX_DISTANCE: f32 = 64.0;
+const SSR_STEPS: i32 = 20;
+const SSR_REFINE_STEPS: i32 = 5;
+const SSR_THICKNESS: f32 = 0.4;
+const SSR_THICKNESS_PER_DEPTH: f32 = 0.03;
+const SSR_RIPPLE_KEEP: f32 = 0.55;
+const SSR_EDGE_FADE: f32 = 0.08;
+const SSR_MIN_UP: f32 = 0.02;
 const WARM_LIGHT_TINT: vec3<f32> = vec3<f32>(1.2, 0.95, 0.7);
 
 @group(0) @binding(0)
@@ -625,6 +634,85 @@ fn scene_depth_at(pixel: vec2<f32>) -> f32 {
     return linear_depth(textureLoad(scene_depth, clamp(vec2<i32>(pixel), vec2<i32>(0), size), 0));
 }
 
+fn ssr_depth_error(pixel: vec2<f32>, ray_depth: f32) -> f32 {
+    return ray_depth - scene_depth_at(pixel);
+}
+
+// Луч в экранном пространстве по копии глубины: (цвет попадания, вес). Вес 0 — промах, берётся небо.
+fn ssr_trace(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
+    let clip0 = globals.view_proj * vec4<f32>(origin, 1.0);
+    if clip0.w <= globals.near {
+        return vec4<f32>(0.0);
+    }
+    var length_world = SSR_MAX_DISTANCE;
+    var clip1 = globals.view_proj * vec4<f32>(origin + dir * length_world, 1.0);
+    let depth_rate = (clip1.w - clip0.w) / length_world;
+    if clip1.w < globals.near {
+        length_world *= (clip0.w - globals.near) / (clip0.w - clip1.w);
+        clip1 = globals.view_proj * vec4<f32>(origin + dir * length_world, 1.0);
+    }
+    let toward_camera = smoothstep(0.0, 0.2, depth_rate);
+    if toward_camera <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    let px0 = (clip0.xy / clip0.w * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5)) * globals.resolution;
+    let px1 = (clip1.xy / clip1.w * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5)) * globals.resolution;
+    let delta = px1 - px0;
+    let safe_delta = select(delta, vec2<f32>(1e-4), abs(delta) < vec2<f32>(1e-4));
+    let screen_exit = max((globals.resolution - px0) / safe_delta, (-px0) / safe_delta);
+    let u_max = min(1.0, min(screen_exit.x, screen_exit.y));
+    if u_max <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    let k0 = 1.0 / clip0.w;
+    let k1 = 1.0 / clip1.w;
+
+    var previous = 0.0;
+    var previous_depth = clip0.w;
+    var lo = 0.0;
+    var hi = -1.0;
+    var thickness = SSR_THICKNESS;
+    for (var i = 1; i <= SSR_STEPS; i++) {
+        let f = f32(i) / f32(SSR_STEPS);
+        let u = f * f * u_max;
+        let ray_depth = 1.0 / mix(k0, k1, u);
+        let pixel = px0 + delta * u;
+        let scene = scene_depth_at(pixel);
+        let allowed = SSR_THICKNESS + SSR_THICKNESS_PER_DEPTH * scene + (ray_depth - previous_depth);
+        if ray_depth > scene && ray_depth - scene < allowed {
+            lo = previous;
+            hi = u;
+            thickness = allowed;
+            break;
+        }
+        previous = u;
+        previous_depth = ray_depth;
+    }
+    if hi < 0.0 {
+        return vec4<f32>(0.0);
+    }
+    for (var i = 0; i < SSR_REFINE_STEPS; i++) {
+        let mid = 0.5 * (lo + hi);
+        let depth = 1.0 / mix(k0, k1, mid);
+        if ssr_depth_error(px0 + delta * mid, depth) > 0.0 {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    let hit_pixel = px0 + delta * hi;
+    let hit_error = ssr_depth_error(hit_pixel, 1.0 / mix(k0, k1, hi));
+    if hit_error > thickness {
+        return vec4<f32>(0.0);
+    }
+    let uv = hit_pixel / globals.resolution;
+    let border = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    let edge = smoothstep(0.0, SSR_EDGE_FADE, border);
+    let distance_fade = 1.0 - smoothstep(0.6, 1.0, hi / max(u_max, 1e-4));
+    let color = textureSampleLevel(scene_color, scene_sampler, uv, 0.0).rgb;
+    return vec4<f32>(color, edge * distance_fade * toward_camera);
+}
+
 @fragment
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
@@ -638,11 +726,19 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     if normal.y > 0.95 {
         normal = ripple_normal(in.world_pos.xz, length(globals.camera_pos - in.world_pos), ripple_footprint);
     }
+    let rippled = normal.y > 0.95;
     let cos_view = clamp(dot(normal, view), 0.0, 1.0);
     let fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - cos_view, 5.0);
     let reflected = reflect(-view, normal);
     let exposure = weather_exposure();
-    let sky = sky_color(vec3<f32>(reflected.x, abs(reflected.y), reflected.z)) * min(in.sky_exposure, mix(SHADOW_FLOOR, 1.0, sun_vis)) * exposure;
+    var sky = sky_color(vec3<f32>(reflected.x, abs(reflected.y), reflected.z)) * min(in.sky_exposure, mix(SHADOW_FLOOR, 1.0, sun_vis)) * exposure;
+    if effect(FX_SSR) {
+        let smooth_normal = select(normal, normalize(mix(vec3<f32>(0.0, 1.0, 0.0), normal, SSR_RIPPLE_KEEP)), rippled);
+        var ssr_dir = reflect(-view, smooth_normal);
+        ssr_dir = normalize(vec3<f32>(ssr_dir.x, max(ssr_dir.y, SSR_MIN_UP), ssr_dir.z));
+        let hit = ssr_trace(in.world_pos + smooth_normal * 0.02, ssr_dir);
+        sky = mix(sky, hit.rgb, hit.a);
+    }
 
     let sun_up = smoothstep(-0.05, 0.1, globals.sun_dir.y);
     let moon_up = MOON_SPECULAR * smoothstep(-0.05, 0.1, -globals.sun_dir.y);

@@ -927,7 +927,9 @@ impl Renderer {
                 .rev()
                 .filter_map(|(_, mesh)| mesh.water.as_ref())
                 .collect();
-            split = hdr.is_some() && params.effects.water_depth && !water.is_empty();
+            let scene_copy_needed = params.effects.water_depth
+                || (params.effects.ssr && params.effects.water_reflections);
+            split = hdr.is_some() && scene_copy_needed && !water.is_empty();
             let scene_color = hdr.map_or(&view, |targets| &targets.color);
             let mut pass = scene_pass(
                 &mut encoder,
