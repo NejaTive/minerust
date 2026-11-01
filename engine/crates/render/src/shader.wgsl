@@ -93,8 +93,6 @@ const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.5, 0.14, 0.07);
 const WATER_SHALLOW_TINT: vec3<f32> = vec3<f32>(0.55, 1.0, 0.9);
 const WATER_DEEP_DARKEN: f32 = 0.3;
 const SHORE_FADE: f32 = 0.35;
-const FOAM_WIDTH: f32 = 0.6;
-const FOAM_SCALE: f32 = 2.5;
 const WARM_LIGHT_TINT: vec3<f32> = vec3<f32>(1.2, 0.95, 0.7);
 
 @group(0) @binding(0)
@@ -456,17 +454,11 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
         let transmit = exp(-thickness * WATER_ABSORPTION);
         let tint = mix(vec3<f32>(1.0), WATER_SHALLOW_TINT, 1.0 - exp(-thickness * 0.6));
         let deep = texel.rgb * lit * WATER_DEEP_DARKEN;
-        var through = bed * tint * transmit + deep * (vec3<f32>(1.0) - transmit);
-        var foam = 0.0;
-        if normal.y > 0.95 {
-            let pattern = value_noise(in.world_pos.xz * FOAM_SCALE + vec2<f32>(globals.anim_time * 0.3, -globals.anim_time * 0.2)).x;
-            foam = (1.0 - smoothstep(0.0, FOAM_WIDTH, straight)) * smoothstep(0.35, 0.7, pattern);
-        }
-        through = mix(through, vec3<f32>(1.0) * lit, foam);
+        let through = bed * tint * transmit + deep * (vec3<f32>(1.0) - transmit);
         var lit_color = mix(through, sky, fresnel) + vec3<f32>(specular);
         lit_color = apply_fog(lit_color, in.world_pos);
         let edge = smoothstep(0.0, SHORE_FADE, straight);
-        let cover = max(max(edge, foam), alpha_glint);
+        let cover = max(edge, alpha_glint);
         return vec4<f32>(lit_color, cover);
     }
     var color = mix(body, sky, fresnel) + vec3<f32>(specular);
