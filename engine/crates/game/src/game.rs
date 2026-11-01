@@ -16,7 +16,7 @@ use crate::camera::Camera;
 use crate::daytime::{self, DayTime, SkyState};
 use crate::double_tap::DoubleTap;
 use crate::loader::DEFAULT_RADIUS;
-use crate::physics::{Clock, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
+use crate::physics::{Clock, Collision, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
 use crate::rain_cover::RainCover;
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
@@ -252,7 +252,7 @@ impl Game {
         weather::tint_sky(
             daytime::sky_state(self.day.fraction()),
             self.weather.rain(),
-            self.weather.flash(),
+            self.flash(),
         )
     }
 
@@ -265,13 +265,25 @@ impl Game {
     }
 
     pub fn flash(&self) -> f32 {
-        self.weather.flash()
+        if self.camera_biome() == Biome::Taiga {
+            0.0
+        } else {
+            self.weather.flash()
+        }
+    }
+
+    fn camera_biome(&self) -> Biome {
+        let p = self.camera.position.floor().as_ivec3();
+        self.terrain.biome_at(p.x, p.z)
+    }
+
+    pub fn snowing(&self) -> bool {
+        self.weather.rain() > 0.0 && self.camera_biome() == Biome::Taiga
     }
 
     pub fn rain_drops(&self) -> f32 {
         let rain = self.weather.rain();
-        let p = self.camera.position.floor().as_ivec3();
-        if rain > 0.0 && self.terrain.biome_at(p.x, p.z) != Biome::Desert {
+        if rain > 0.0 && self.camera_biome() != Biome::Desert {
             rain
         } else {
             0.0
@@ -417,7 +429,9 @@ impl Game {
             && let Some(hit) = target
             && hit.block.y >= 0
             && !self.world.block(hit.block).is_unbreakable()
-            && let changed = self.world.set_block_supported(hit.block, Block::Air)
+            && let changed = self
+                .world
+                .set_block_supported(hit.block, left_after_break(self.world.block(hit.block)))
             && !changed.is_empty()
         {
             self.apply_edit(&changed, &[], &mut dirty, &mut lit);
@@ -519,10 +533,16 @@ impl Game {
                 break;
             }
             self.sync_prev();
-            self.player.step(
+            self.player.step_with(
                 &input,
                 self.camera.yaw,
-                |pos| self.world.block(pos).is_solid(),
+                |pos| {
+                    let block = self.world.block(pos);
+                    Collision {
+                        height: block.collision_height(),
+                        slippery: block.is_slippery(),
+                    }
+                },
                 |pos| self.world.fluid_height(pos),
             );
         }
@@ -611,6 +631,14 @@ impl Game {
         let (lo, hi) = (ColumnPos::of_block(lo), ColumnPos::of_block(hi));
         (lo.x()..=hi.x())
             .all(|x| (lo.z()..=hi.z()).all(|z| self.world.column(ColumnPos::new(x, z)).is_some()))
+    }
+}
+
+fn left_after_break(block: Block) -> Block {
+    if block == Block::Ice {
+        Block::Water
+    } else {
+        Block::Air
     }
 }
 

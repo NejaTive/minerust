@@ -178,3 +178,78 @@ fn tick_rate_matches_three_cells_per_section_per_step() {
         "turned {turned}, expected {expected}"
     );
 }
+
+fn snowy_world(light_source: Option<IVec3>) -> (World, LightMap) {
+    let (mut world, _) = world_of(&[ColumnPos::ZERO], Block::SnowyGrass);
+    world.set_block(at(8, 8) + IVec3::Y, Block::Snow);
+    if let Some(source) = light_source {
+        world.set_block(source, Block::Glowstone);
+    }
+    let mut light = LightMap::new();
+    light.add_column(&world, ColumnPos::ZERO);
+    (world, light)
+}
+
+#[test]
+fn snow_next_to_a_light_source_melts() {
+    let (mut world, light) = snowy_world(Some(at(9, 8) + IVec3::Y));
+    assert!(light.block(at(8, 8) + IVec3::Y) >= SNOW_MELT_LIGHT);
+    let mut ticks = RandomTicks::new(1);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        w.block(at(8, 8) + IVec3::Y) == Block::Air
+    });
+    assert_eq!(world.block(at(8, 8) + IVec3::Y), Block::Air);
+    assert_eq!(world.block(at(8, 8)), Block::SnowyGrass);
+}
+
+#[test]
+fn snow_far_from_light_stays() {
+    let (mut world, light) = snowy_world(Some(at(8, 8) + IVec3::Y * 6));
+    assert!(light.block(at(8, 8) + IVec3::Y) < SNOW_MELT_LIGHT);
+    let mut ticks = RandomTicks::new(1);
+    run(&mut ticks, &mut world, &light, 20_000, |_| false);
+    assert_eq!(world.block(at(8, 8) + IVec3::Y), Block::Snow);
+}
+
+#[test]
+fn snow_does_not_grow() {
+    let (mut world, light) = snowy_world(None);
+    let mut ticks = RandomTicks::new(1);
+    run(&mut ticks, &mut world, &light, 20_000, |_| false);
+    let snow = (0..SECTION_SIZE)
+        .flat_map(|z| (0..SECTION_SIZE).map(move |x| at(x, z) + IVec3::Y))
+        .filter(|&pos| world.block(pos) == Block::Snow)
+        .count();
+    assert_eq!(snow, 1);
+}
+
+#[test]
+fn snowy_grass_under_stone_turns_to_dirt() {
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::SnowyGrass);
+    world.set_block(at(8, 8) + IVec3::Y, Block::Stone);
+    let mut ticks = RandomTicks::new(1);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        w.block(at(8, 8)) == Block::Dirt
+    });
+    assert_eq!(world.block(at(8, 8)), Block::Dirt);
+}
+
+#[test]
+fn snowy_grass_under_snow_stays() {
+    let (mut world, light) = snowy_world(None);
+    let mut ticks = RandomTicks::new(1);
+    run(&mut ticks, &mut world, &light, 20_000, |_| false);
+    assert_eq!(world.block(at(8, 8)), Block::SnowyGrass);
+}
+
+#[test]
+fn dirt_next_to_snowy_grass_becomes_snowy_grass() {
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::Dirt);
+    world.set_block(at(8, 8), Block::SnowyGrass);
+    let mut ticks = RandomTicks::new(1);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        w.block(at(9, 8)) != Block::Dirt
+    });
+    assert_eq!(world.block(at(9, 8)), Block::SnowyGrass);
+    assert_eq!(count(&world, Block::Grass), 0);
+}

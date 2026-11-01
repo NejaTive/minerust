@@ -28,6 +28,7 @@ fn layout_matches_shader() {
         rain_drops: 315.0,
         flash: 316.0,
         cloud_threshold: 317.0,
+        snow: 318.0,
     };
     let bytes = globals.to_bytes();
     assert_eq!(bytes.len(), 256);
@@ -62,7 +63,7 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 240), 315.0);
     assert_eq!(f32_at(&bytes, 244), 316.0);
     assert_eq!(f32_at(&bytes, 248), 317.0);
-    assert!(bytes[252..].iter().all(|&b| b == 0));
+    assert_eq!(f32_at(&bytes, 252), 318.0);
 }
 
 #[test]

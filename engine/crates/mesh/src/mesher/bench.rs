@@ -76,7 +76,7 @@ fn mesh_stages() {
             }
             let start = Instant::now();
             for data in &meshes {
-                for mesh in [&data.solid, &data.cutout, &data.water] {
+                for mesh in [&data.solid, &data.cutout, &data.water, &data.ice] {
                     let mut copy = MeshData::new();
                     for quad in &mesh.quads {
                         copy.quads.push(*quad);

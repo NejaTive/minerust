@@ -2,9 +2,9 @@ use glam::IVec3;
 
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
-    AO_BRIGHTNESS, CROSS, CUBE_FACE, FACES, Face, LOG_BARK_X, LOG_BARK_Z, TORCH_SIDE, TORCH_TOP,
-    TORCH_WALL, TORCH_WALL_PARTS, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SIDE_SLOPED,
-    WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
+    AO_BRIGHTNESS, CROSS, CUBE_FACE, FACES, Face, LOG_BARK_X, LOG_BARK_Z, SNOW_SIDE, SNOW_TOP,
+    TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW,
+    WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
 use world::block::{
     ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, FluidKind, RenderLayer, Shape, fluid_height_units,
@@ -183,6 +183,7 @@ pub struct SectionMeshes {
     pub solid: MeshData,
     pub cutout: MeshData,
     pub water: MeshData,
+    pub ice: MeshData,
 }
 
 impl SectionMeshes {
@@ -191,6 +192,7 @@ impl SectionMeshes {
             solid: MeshData::new(),
             cutout: MeshData::new(),
             water: MeshData::new(),
+            ice: MeshData::new(),
         }
     }
 }
@@ -279,6 +281,10 @@ pub(crate) fn mesh_cached(
                 }
                 let cell = [x as u8, y as u8, z as u8];
                 let byte = || datas.0[index];
+                if block.shape() == Shape::Layer {
+                    push_layer(&mut meshes.solid, blocks, lights, index, cell, &faces);
+                    continue;
+                }
                 if block.shape() != Shape::Cube {
                     let (sky, block_light) = lights.at(index, 0);
                     let light = [sky, block_light].map(|l| half_average(l, 1));
@@ -289,7 +295,7 @@ pub(crate) fn mesh_cached(
                     for (face_index, (face, normal, _)) in faces.iter().enumerate() {
                         let neighbor = blocks.at(index, *normal);
                         let hidden = if face_index == 0 {
-                            neighbor.fluid() == Some(kind)
+                            neighbor.fluid() == Some(kind) || neighbor == Block::Ice
                         } else {
                             neighbor.shape() == Shape::Cube && neighbor != Block::Air
                         };
@@ -324,6 +330,10 @@ pub(crate) fn mesh_cached(
                             quad
                         });
                     }
+                    continue;
+                }
+                if block == Block::Ice {
+                    push_ice(&mut meshes.ice, blocks, lights, index, cell, &faces);
                     continue;
                 }
                 let lying = block
@@ -413,7 +423,8 @@ fn surface_height(
             let offset = Neighborhood::stride(IVec3::new(dx, 0, dz));
             let block = blocks.at(index, offset);
             if block.fluid() == Some(kind) {
-                if blocks.at(index, offset + up).fluid() == Some(kind) {
+                let above = blocks.at(index, offset + up);
+                if above.fluid() == Some(kind) || above == Block::Ice {
                     return POSITION_UNITS as u8;
                 }
                 let height = u32::from(fluid_height_units(datas.at(index, offset)));
@@ -462,6 +473,69 @@ fn axis_face(block: Block, axis: usize, face_index: usize, face: &Face) -> (Opti
     (block.tile(Facing::Side), template)
 }
 
+type FaceStrides<'a> = [(&'a Face, isize, CornerStrides); 6];
+
+fn push_layer(
+    mesh: &mut MeshData,
+    blocks: &Neighborhood,
+    lights: &Lights,
+    index: usize,
+    cell: [u8; 3],
+    faces: &FaceStrides,
+) {
+    let (sky, block_light) = lights.at(index, 0);
+    let light = [sky, block_light].map(|l| half_average(l, 1));
+    let layer = Tile::Snow.layer() as u8;
+    for (face_index, (_, normal, _)) in faces.iter().enumerate() {
+        let neighbor = blocks.at(index, *normal);
+        if neighbor.is_opaque() || (face_index > 1 && neighbor.shape() == Shape::Layer) {
+            continue;
+        }
+        let template = match face_index {
+            0 => SNOW_TOP,
+            1 => CUBE_FACE + 1,
+            side => SNOW_SIDE + (side - 2) as u8,
+        };
+        mesh.quads.push(Quad::new(
+            cell,
+            template,
+            false,
+            layer,
+            [3; 4],
+            [light[0]; 4],
+            [light[1]; 4],
+        ));
+    }
+}
+
+fn push_ice(
+    mesh: &mut MeshData,
+    blocks: &Neighborhood,
+    lights: &Lights,
+    index: usize,
+    cell: [u8; 3],
+    faces: &FaceStrides,
+) {
+    let layer = Tile::Ice.layer() as u8;
+    for (face_index, (_, normal, _)) in faces.iter().enumerate() {
+        let neighbor = blocks.at(index, *normal);
+        if neighbor.is_opaque() || neighbor == Block::Ice {
+            continue;
+        }
+        let (sky, block_light) = lights.at(index, *normal);
+        let light = [sky, block_light].map(|l| half_average(l, 1));
+        mesh.quads.push(Quad::new(
+            cell,
+            CUBE_FACE + face_index as u8,
+            false,
+            layer,
+            [3; 4],
+            [light[0]; 4],
+            [light[1]; 4],
+        ));
+    }
+}
+
 fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light: [u8; 2]) {
     let quad = |template: u8, layer: u8| {
         Quad::new(
@@ -475,7 +549,7 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
         )
     };
     match block.shape() {
-        Shape::Cube => {}
+        Shape::Cube | Shape::Layer => {}
         Shape::Cross => {
             let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
             for t in CROSS..CROSS + 4 {
@@ -585,5 +659,7 @@ mod bench;
 mod expand;
 #[cfg(test)]
 mod oriented;
+#[cfg(test)]
+mod snow;
 #[cfg(test)]
 mod tests;

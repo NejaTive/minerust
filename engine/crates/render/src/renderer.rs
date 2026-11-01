@@ -45,6 +45,7 @@ pub struct FrameParams {
     pub clouds: bool,
     pub rain: f32,
     pub rain_drops: f32,
+    pub snow: f32,
     pub flash: f32,
 }
 
@@ -71,6 +72,8 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     cutout_pipeline: wgpu::RenderPipeline,
     water_pipeline: wgpu::RenderPipeline,
+    ice_pipeline: wgpu::RenderPipeline,
+    ice_depth_pipeline: wgpu::RenderPipeline,
     outline_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
@@ -311,6 +314,20 @@ impl Renderer {
             render_format,
             BlockPass::Water,
         );
+        let ice_pipeline = create_block_pipeline(
+            &device,
+            &block_layout,
+            &shader,
+            render_format,
+            BlockPass::Ice,
+        );
+        let ice_depth_pipeline = create_block_pipeline(
+            &device,
+            &block_layout,
+            &shader,
+            render_format,
+            BlockPass::IceDepth,
+        );
 
         let gpu_timer = device
             .features()
@@ -326,6 +343,8 @@ impl Renderer {
             pipeline,
             cutout_pipeline,
             water_pipeline,
+            ice_pipeline,
+            ice_depth_pipeline,
             outline_pipeline,
             sky_pipeline,
             cloud_pipeline,
@@ -501,6 +520,7 @@ impl Renderer {
             cloud_color: cloud_color(params.night, params.warm, params.rain, params.flash),
             rain: params.rain,
             rain_drops: params.rain_drops,
+            snow: params.snow,
             flash: params.flash,
             cloud_threshold: f32::from(cloud_threshold(coverage_for_rain(params.rain))),
         };
@@ -621,6 +641,24 @@ impl Renderer {
                 pass.set_pipeline(&self.rain_pipeline);
                 pass.draw(0..RAIN_VERTICES, 0..RAIN_INSTANCES);
                 counts.draw_calls += 1;
+            }
+
+            let ice: Vec<&GpuMesh> = visible
+                .iter()
+                .rev()
+                .filter_map(|(_, mesh)| mesh.ice.as_ref())
+                .collect();
+            if !ice.is_empty() {
+                pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
+                pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
+                for pipeline in [&self.ice_depth_pipeline, &self.ice_pipeline] {
+                    pass.set_pipeline(pipeline);
+                    for mesh in &ice {
+                        mesh.draw(&mut pass);
+                        counts.draw_calls += 1;
+                    }
+                }
+                counts.water_quads += ice.iter().map(|mesh| mesh.quad_count).sum::<u32>();
             }
 
             let water: Vec<&GpuMesh> = visible

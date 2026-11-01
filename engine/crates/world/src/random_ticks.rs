@@ -12,6 +12,7 @@ pub const RANDOM_TICKS_PER_SECTION: usize = 3;
 pub const STEP_TICKS: u32 = 3;
 pub const SPREAD_LIGHT: u8 = 9;
 pub const SPREAD_ATTEMPTS: usize = 4;
+pub const SNOW_MELT_LIGHT: u8 = 12;
 
 const SPREAD_REACH: i32 = 1;
 const SPREAD_BELOW: i32 = 3;
@@ -74,10 +75,12 @@ impl RandomTicks {
         let covered = covers(world.block(above));
         let old = world.block(pos);
         let new = match old {
-            Block::Grass if covered => Block::Dirt,
-            Block::Dirt if !covered && lit(light, above) && self.spreads_to(world, pos) => {
-                Block::Grass
-            }
+            Block::Grass | Block::SnowyGrass if covered => Block::Dirt,
+            Block::Dirt if !covered && lit(light, above) => match self.spread_source(world, pos) {
+                Some(grass) => grass,
+                None => return,
+            },
+            Block::Snow if light.block(pos) >= SNOW_MELT_LIGHT => Block::Air,
             _ => return,
         };
         let changed = world.set_block_supported(pos, new);
@@ -87,10 +90,11 @@ impl RandomTicks {
         ticked.changed.extend(changed);
     }
 
-    fn spreads_to(&mut self, world: &World, pos: IVec3) -> bool {
-        (0..SPREAD_ATTEMPTS).any(|_| {
+    fn spread_source(&mut self, world: &World, pos: IVec3) -> Option<Block> {
+        (0..SPREAD_ATTEMPTS).find_map(|_| {
             let source = pos + self.offset();
-            world.block(source) == Block::Grass && !covers(world.block(source + IVec3::Y))
+            let block = world.block(source);
+            (block.is_grass() && !covers(world.block(source + IVec3::Y))).then_some(block)
         })
     }
 

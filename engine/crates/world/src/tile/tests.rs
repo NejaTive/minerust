@@ -4,8 +4,8 @@ const WATER_ALPHA: u8 = 180;
 
 #[test]
 fn layer_count_for_current_tiles() {
-    assert_eq!(Tile::ALL.len(), 25);
-    assert_eq!(LAYER_COUNT, 55);
+    assert_eq!(Tile::ALL.len(), 28);
+    assert_eq!(LAYER_COUNT, 58);
 }
 
 #[test]
@@ -122,6 +122,8 @@ fn cutout_tiles_have_holes_and_opaque_pixels() {
             );
         } else if tile == Tile::Water {
             assert!(px.chunks(4).all(|p| p[3] == WATER_ALPHA), "{tile:?}");
+        } else if tile == Tile::Ice {
+            assert!(px.chunks(4).all(|p| (100..255).contains(&p[3])), "{tile:?}");
         } else {
             assert!(px.chunks(4).all(|p| p[3] == 255), "{tile:?}");
         }

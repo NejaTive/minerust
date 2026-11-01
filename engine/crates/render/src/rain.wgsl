@@ -23,6 +23,7 @@ struct Globals {
     rain_drops: f32,
     flash: f32,
     cloud_threshold: f32,
+    snow: f32,
 };
 
 @group(0) @binding(0)
@@ -39,6 +40,10 @@ const GRID_RADIUS: i32 = 16;
 const HALF_SPAN: f32 = 16.0;
 const TILE_BLOCKS: f32 = 4.0;
 const FALL_SPEED: f32 = 12.0;
+const SNOW_FALL_SPEED: f32 = 2.5;
+const SNOW_SWAY_RATE: f32 = 1.3;
+const SNOW_SWAY: f32 = 0.12;
+const TWO_PI: f32 = 6.2831853;
 const FADE_START: f32 = 6.0;
 const FADE_END: f32 = 10.0;
 const MIN_DISTANCE: f32 = 0.3;
@@ -99,8 +104,11 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance
     let side = select(-0.5, 0.5, corner == 1u || corner == 2u);
     let y = select(bottom_y, top_y, corner >= 2u);
     let point = vec3<f32>(xz.x, y, xz.y) + right * side;
-    let scroll = fract(globals.anim_time * FALL_SPEED / TILE_BLOCKS);
-    out.uv = vec2<f32>(select(0.0, 1.0, corner == 1u || corner == 2u) + h.x, -y / TILE_BLOCKS - scroll + h2.y);
+    let snowing = globals.snow > 0.5;
+    let fall_speed = select(FALL_SPEED, SNOW_FALL_SPEED, snowing);
+    let scroll = fract(globals.anim_time * fall_speed / TILE_BLOCKS);
+    let sway = select(0.0, sin(globals.anim_time * SNOW_SWAY_RATE + h.y * TWO_PI) * SNOW_SWAY, snowing);
+    out.uv = vec2<f32>(select(0.0, 1.0, corner == 1u || corner == 2u) + h.x + sway, -y / TILE_BLOCKS - scroll + h2.y);
     out.alpha = 1.0 - smoothstep(FADE_START, FADE_END, distance);
     out.height = y - globals.camera_pos.y;
     out.position = globals.view_proj * vec4<f32>(point, 1.0);
@@ -109,7 +117,9 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(rain_tile, tile_sampler, in.uv);
+    let wrapped = fract(in.uv);
+    let tile_row = select(0.0, 0.5, globals.snow > 0.5);
+    let texel = textureSample(rain_tile, tile_sampler, vec2<f32>(wrapped.x, wrapped.y * 0.5 + tile_row));
     let light = mix(1.0, NIGHT_LIGHT, globals.night) * (1.0 + globals.flash);
     let color = mix(texel.rgb, globals.fog_color * 1.5, 0.25) * light;
     return vec4<f32>(color, texel.a * in.alpha * (1.0 - smoothstep(HEIGHT_FADE_START, HEIGHT_FADE_END, abs(in.height))));

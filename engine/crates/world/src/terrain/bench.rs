@@ -38,7 +38,7 @@ fn bench_points() {
                     match terrain.biome_at(x, z) {
                         Biome::Plains => pl += 1,
                         Biome::Forest => fo += 1,
-                        Biome::Desert => {}
+                        Biome::Desert | Biome::Taiga => {}
                     }
                 }
             }
