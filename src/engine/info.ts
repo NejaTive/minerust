@@ -44,6 +44,10 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
       waterReflections: defaults.waterReflections,
       groundFog: defaults.groundFog,
       plantSway: defaults.plantSway,
+      hdr: defaults.hdr,
+      bloom: defaults.bloom,
+      waterDepth: defaults.waterDepth,
+      sunRays: defaults.sunRays,
     },
   }
   list.forEach((block) => block.free())

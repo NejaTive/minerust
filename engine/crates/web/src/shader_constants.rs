@@ -25,6 +25,12 @@ fn shader_constants_match_cpu() {
 }
 
 #[test]
+fn emissive_flag_matches_cpu() {
+    let flag = world::tile::EMISSIVE_FLAG;
+    assert!(BLOCK_SHADER.contains(&format!("const EMISSIVE_FLAG: f32 = {flag:?};")));
+}
+
+#[test]
 fn cloud_shader_constants_match_cpu() {
     assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_MAP: i32 = {CLOUD_MAP};")));
     assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_CELL: f32 = {CLOUD_CELL}.0;")));

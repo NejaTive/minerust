@@ -1,4 +1,5 @@
 use game::Game;
+use game::camera::NEAR;
 use glam::{Vec2, Vec3};
 use render::fog::Fog;
 use render::{Effects, FrameParams};
@@ -26,7 +27,8 @@ pub(crate) fn frame_params(
     let rain = game.rain();
     let camera = game.camera();
     let fog = Fog::for_radius(radius);
-    let view_proj = camera.view_proj(aspect, fog.far_plane(camera.position.y), game.fov_scale());
+    let far = fog.far_plane(camera.position.y);
+    let view_proj = camera.view_proj(aspect, far, game.fov_scale());
     let eye_fluid = game.eye_fluid();
     let sky = game.sky();
     let (fog, background) = match eye_fluid {
@@ -59,5 +61,7 @@ pub(crate) fn frame_params(
         rain_drops: game.rain_drops(),
         flash: game.flash(),
         snow: f32::from(u8::from(game.snowing())),
+        near: NEAR,
+        far,
     }
 }

@@ -61,12 +61,25 @@ fn clouds_shader_validates() {
 }
 
 #[test]
+fn bloom_shader_validates() {
+    let module = naga::front::wgsl::parse_str(BLOOM_SHADER).expect("wgsl parses");
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::empty(),
+    )
+    .validate(&module)
+    .expect("wgsl validates");
+}
+
+#[test]
 fn every_shader_validates_with_the_full_globals_layout() {
     for (name, source) in [
         ("block", BLOCK_SHADER),
         ("sky", SKY_SHADER),
         ("clouds", CLOUDS_SHADER),
         ("rain", RAIN_SHADER),
+        ("post", POST_SHADER),
+        ("rays", RAYS_SHADER),
     ] {
         let module = naga::front::wgsl::parse_str(source).expect(name);
         naga::valid::Validator::new(
@@ -111,6 +124,8 @@ fn bitwise_operators_are_not_mixed_with_arithmetic_without_parentheses() {
         ("sky", SKY_SHADER),
         ("clouds", CLOUDS_SHADER),
         ("rain", RAIN_SHADER),
+        ("post", POST_SHADER),
+        ("rays", RAYS_SHADER),
     ] {
         for line in source.lines() {
             let code = line.split("//").next().unwrap();

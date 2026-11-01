@@ -75,6 +75,22 @@ impl GpuTimer {
         }
     }
 
+    pub(crate) fn begin_writes(&self) -> wgpu::RenderPassTimestampWrites<'_> {
+        wgpu::RenderPassTimestampWrites {
+            query_set: &self.query_set,
+            beginning_of_pass_write_index: Some(0),
+            end_of_pass_write_index: None,
+        }
+    }
+
+    pub(crate) fn end_writes(&self) -> wgpu::RenderPassTimestampWrites<'_> {
+        wgpu::RenderPassTimestampWrites {
+            query_set: &self.query_set,
+            beginning_of_pass_write_index: None,
+            end_of_pass_write_index: Some(1),
+        }
+    }
+
     pub(crate) fn resolve(&self, encoder: &mut wgpu::CommandEncoder, slot: usize) {
         encoder.resolve_query_set(&self.query_set, 0..2, &self.resolve, 0);
         encoder.copy_buffer_to_buffer(&self.resolve, 0, &self.slots[slot].buffer, 0, RESULT_BYTES);

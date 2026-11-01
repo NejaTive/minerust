@@ -26,6 +26,11 @@ pub struct Globals {
     pub flash: f32,
     pub cloud_threshold: f32,
     pub snow: f32,
+    pub resolution: Vec2,
+    pub near: f32,
+    pub far: f32,
+    pub sun_screen: Vec2,
+    pub sun_ray: f32,
 }
 
 pub fn view_dir_matrix(view_proj: Mat4) -> Mat4 {
@@ -41,7 +46,7 @@ pub fn view_dir_matrix(view_proj: Mat4) -> Mat4 {
 }
 
 impl Globals {
-    pub const SIZE: usize = 256;
+    pub const SIZE: usize = 288;
 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let floats = self
@@ -67,7 +72,11 @@ impl Globals {
             .chain([f32::from_bits(self.effects)])
             .chain(self.cloud_color.to_array())
             .chain([self.rain, self.rain_drops, self.flash, self.cloud_threshold])
-            .chain([self.snow]);
+            .chain([self.snow])
+            .chain(self.resolution.to_array())
+            .chain([self.near, self.far])
+            .chain(self.sun_screen.to_array())
+            .chain([self.sun_ray]);
         let mut bytes = [0; Self::SIZE];
         for (chunk, f) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(floats) {
             *chunk = f.to_le_bytes();

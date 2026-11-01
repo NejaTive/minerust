@@ -23,11 +23,20 @@ struct Globals {
     rain_drops: f32,
     flash: f32,
     cloud_threshold: f32,
+    snow: f32,
+    resolution: vec2<f32>,
+    near: f32,
+    far: f32,
+    sun_screen: vec2<f32>,
+    sun_ray: f32,
 };
 
 @group(0) @binding(0)
 var<uniform> globals: Globals;
 
+const FX_HDR: u32 = 16u;
+const HDR_SUN_GAIN: f32 = 6.0;
+const HDR_MOON_GAIN: f32 = 1.5;
 const SUN_HALF: f32 = 0.05;
 const MOON_HALF: f32 = 0.04;
 const SUN_COLOR: vec3<f32> = vec3<f32>(1.6, 1.45, 1.1);
@@ -125,10 +134,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     var moon = square_body(dir, -globals.sun_dir, MOON_HALF);
     let moon_uv = moon.zw;
     moon = moon * vec4<f32>(clear, clear, 1.0, 1.0);
-    let sun_tint = mix(SUN_LOW_COLOR, SUN_COLOR, smoothstep(0.0, 0.4, globals.sun_dir.y));
+    let hdr = (globals.effects & FX_HDR) != 0u;
+    let sun_tint = mix(SUN_LOW_COLOR, SUN_COLOR, smoothstep(0.0, 0.4, globals.sun_dir.y)) * select(1.0, HDR_SUN_GAIN, hdr);
     color += sun_tint * sun.y * 0.5 * above;
     color = mix(color, sun_tint, sun.x * above);
-    let moon_color = MOON_COLOR * (1.0 - 0.5 * moon_surface(moon_uv));
+    let moon_color = MOON_COLOR * (1.0 - 0.5 * moon_surface(moon_uv)) * select(1.0, HDR_MOON_GAIN, hdr);
     color += MOON_COLOR * moon.y * 0.15 * above;
     color = mix(color, moon_color, moon.x * above * (1.0 - sun.x));
 

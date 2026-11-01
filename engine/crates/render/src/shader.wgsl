@@ -23,6 +23,12 @@ struct Globals {
     rain_drops: f32,
     flash: f32,
     cloud_threshold: f32,
+    snow: f32,
+    resolution: vec2<f32>,
+    near: f32,
+    far: f32,
+    sun_screen: vec2<f32>,
+    sun_ray: f32,
 };
 
 // Яркость уровня света — как `light::level_brightness`: 0.8^(15 − уровень), не ниже
@@ -36,6 +42,8 @@ const FX_COLORED_LIGHT: u32 = 1u;
 const FX_WATER_REFLECTIONS: u32 = 2u;
 const FX_GROUND_FOG: u32 = 4u;
 const FX_PLANT_SWAY: u32 = 8u;
+const FX_HDR: u32 = 16u;
+const FX_WATER_DEPTH: u32 = 64u;
 
 fn effect(bit: u32) -> bool {
     return (globals.effects & bit) != 0u;
@@ -75,6 +83,16 @@ const RIPPLE_DETAIL: f32 = 0.3;
 const RIPPLE_WIND_SCALE: f32 = 0.025;
 const SPECULAR_POWER: f32 = 220.0;
 const MOON_SPECULAR: f32 = 0.3;
+// Светящиеся тайлы (лава, светокамень, факел) в HDR ярче 1.0 и дают свечение.
+const HDR_EMISSIVE_LEVEL: f32 = 2.0;
+const EMISSIVE_FLAG: f32 = 4.0;
+const HDR_GLINT_GAIN: f32 = 4.0;
+const REFRACT_STRENGTH: f32 = 0.06;
+const MAX_WATER_THICKNESS: f32 = 48.0;
+const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.5, 0.14, 0.07);
+const WATER_SHALLOW_TINT: vec3<f32> = vec3<f32>(0.55, 1.0, 0.9);
+const WATER_DEEP_DARKEN: f32 = 0.3;
+const SHORE_FADE: f32 = 0.35;
 const WARM_LIGHT_TINT: vec3<f32> = vec3<f32>(1.2, 0.95, 0.7);
 
 @group(0) @binding(0)
@@ -85,10 +103,18 @@ var block_textures: texture_2d_array<f32>;
 var block_sampler: sampler;
 
 // Запись на слой: (кадры, кадров в секунду, прокрутка боковых граней в блоках в секунду,
-// колыхание: 0 нет, 1 листва, 2 трава и цветы).
+// колыхание: 0 нет, 1 листва, 2 трава и цветы; плюс 4 — светящийся тайл, EMISSIVE_FLAG в tile.rs).
 // Строит `world::tile::animation_table`; размер — `LAYER_COUNT`.
 @group(0) @binding(3)
 var<uniform> animation: array<vec4<f32>, 58>;
+
+// Сцена без воды: цвет и глубина копируются перед проходом воды (renderer.rs).
+@group(2) @binding(0)
+var scene_color: texture_2d<f32>;
+@group(2) @binding(1)
+var scene_depth: texture_depth_2d;
+@group(2) @binding(2)
+var scene_sampler: sampler;
 
 @group(1) @binding(0)
 var<storage, read> quads: array<u32>;
@@ -127,6 +153,14 @@ struct VertexOut {
     @location(2) @interpolate(flat) layer: u32,
     @location(3) world_pos: vec3<f32>,
 };
+
+fn is_emissive(flags: f32) -> bool {
+    return flags >= EMISSIVE_FLAG - 0.5;
+}
+
+fn sway_kind(flags: f32) -> f32 {
+    return select(flags, flags - EMISSIVE_FLAG, is_emissive(flags));
+}
 
 fn level_brightness(level: f32) -> f32 {
     return max(pow(LIGHT_BASE, MAX_LIGHT - level), MIN_BRIGHTNESS);
@@ -184,7 +218,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     }
     var world_pos = in.origin + cell + offset / 16.0;
     let layer = (w0 >> 18u) & 0xFFu;
-    world_pos += sway_offset(world_pos, animation[layer].w, offset.y > 0.0);
+    world_pos += sway_offset(world_pos, sway_kind(animation[layer].w), offset.y > 0.0);
     let ao = (w1 >> (2u * corner)) & 3u;
     let sun = (w1 >> (8u + 5u * corner)) & 0x1Fu;
     let block = (w2 >> (5u * corner)) & 0x1Fu;
@@ -246,6 +280,9 @@ fn weather_exposure() -> f32 {
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
     var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in);
     color *= weather_exposure();
+    if effect(FX_HDR) && is_emissive(animation[in.layer].w) {
+        color = max(color, texel * HDR_EMISSIVE_LEVEL);
+    }
     if globals.eye_fluid > 0.5 {
         color *= select(UNDERWATER_TINT, LAVA_TINT, globals.eye_fluid > 1.5);
     }
@@ -362,6 +399,15 @@ fn ripple_normal(p: vec2<f32>, dist: f32, footprint: f32) -> vec3<f32> {
     return normalize(vec3<f32>(-r.x, 1.0, -r.y));
 }
 
+fn linear_depth(raw: f32) -> f32 {
+    return globals.near * globals.far / (globals.far - raw * (globals.far - globals.near));
+}
+
+fn scene_depth_at(pixel: vec2<f32>) -> f32 {
+    let size = vec2<i32>(globals.resolution) - vec2<i32>(1);
+    return linear_depth(textureLoad(scene_depth, clamp(vec2<i32>(pixel), vec2<i32>(0), size), 0));
+}
+
 @fragment
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
@@ -385,12 +431,39 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let moon_up = MOON_SPECULAR * smoothstep(-0.05, 0.1, -globals.sun_dir.y);
     let glint = sun_up * pow(max(dot(reflected, globals.sun_dir), 0.0), SPECULAR_POWER)
         + moon_up * pow(max(dot(reflected, -globals.sun_dir), 0.0), SPECULAR_POWER);
-    let specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sky_exposure);
+    var specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sky_exposure);
+    let alpha_glint = clamp(specular, 0.0, 1.0);
+    if effect(FX_HDR) {
+        specular *= HDR_GLINT_GAIN;
+    }
 
-    let body = texel.rgb * in.shade * max(in.sun_light, in.block_light) * light_tint(in) * exposure;
+    let lit = in.shade * max(in.sun_light, in.block_light) * light_tint(in) * exposure;
+    let body = texel.rgb * lit;
+    if effect(FX_WATER_DEPTH) {
+        let pixel = in.position.xy;
+        let own = linear_depth(in.position.z);
+        let straight = clamp(scene_depth_at(pixel) - own, 0.0, MAX_WATER_THICKNESS);
+        let depth_scale = clamp(straight * 0.5, 0.1, 1.0);
+        let max_uv = (globals.resolution - vec2<f32>(1.0)) / globals.resolution;
+        let shifted_uv = clamp(pixel / globals.resolution + normal.xz * (REFRACT_STRENGTH * depth_scale), vec2<f32>(0.0), max_uv);
+        let shifted_depth = scene_depth_at(shifted_uv * globals.resolution);
+        let behind = shifted_depth > own;
+        let sample_uv = select(pixel / globals.resolution, shifted_uv, behind);
+        let thickness = clamp(select(scene_depth_at(pixel), shifted_depth, behind) - own, 0.0, MAX_WATER_THICKNESS);
+        let bed = textureSampleLevel(scene_color, scene_sampler, sample_uv, 0.0).rgb;
+        let transmit = exp(-thickness * WATER_ABSORPTION);
+        let tint = mix(vec3<f32>(1.0), WATER_SHALLOW_TINT, 1.0 - exp(-thickness * 0.6));
+        let deep = texel.rgb * lit * WATER_DEEP_DARKEN;
+        let through = bed * tint * transmit + deep * (vec3<f32>(1.0) - transmit);
+        var lit_color = mix(through, sky, fresnel) + vec3<f32>(specular);
+        lit_color = apply_fog(lit_color, in.world_pos);
+        let edge = smoothstep(0.0, SHORE_FADE, straight);
+        let cover = max(edge, alpha_glint);
+        return vec4<f32>(lit_color, cover);
+    }
     var color = mix(body, sky, fresnel) + vec3<f32>(specular);
     color = apply_fog(color, in.world_pos);
-    let alpha = max(mix(texel.a * WATER_TOP_ALPHA, 1.0, smoothstep(0.0, 0.5, fresnel)), clamp(specular, 0.0, 1.0));
+    let alpha = max(mix(texel.a * WATER_TOP_ALPHA, 1.0, smoothstep(0.0, 0.5, fresnel)), alpha_glint);
     return vec4<f32>(color, alpha);
 }
 

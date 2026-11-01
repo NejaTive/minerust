@@ -30,9 +30,14 @@ fn layout_matches_shader() {
         flash: 316.0,
         cloud_threshold: 317.0,
         snow: 318.0,
+        resolution: Vec2::new(319.0, 320.0),
+        near: 321.0,
+        far: 322.0,
+        sun_screen: Vec2::new(323.0, 324.0),
+        sun_ray: 325.0,
     };
     let bytes = globals.to_bytes();
-    assert_eq!(bytes.len(), 256);
+    assert_eq!(bytes.len(), 288);
     assert_eq!(f32_at(&bytes, 0), 0.0);
     assert_eq!(f32_at(&bytes, 60), 15.0);
     assert_eq!(f32_at(&bytes, 64), 100.0);
@@ -65,6 +70,13 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 244), 316.0);
     assert_eq!(f32_at(&bytes, 248), 317.0);
     assert_eq!(f32_at(&bytes, 252), 318.0);
+    assert_eq!(f32_at(&bytes, 256), 319.0);
+    assert_eq!(f32_at(&bytes, 260), 320.0);
+    assert_eq!(f32_at(&bytes, 264), 321.0);
+    assert_eq!(f32_at(&bytes, 268), 322.0);
+    assert_eq!(f32_at(&bytes, 272), 323.0);
+    assert_eq!(f32_at(&bytes, 276), 324.0);
+    assert_eq!(f32_at(&bytes, 280), 325.0);
 }
 
 #[test]

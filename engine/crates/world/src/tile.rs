@@ -96,6 +96,10 @@ impl Tile {
         }
     }
 
+    pub fn emissive(self) -> bool {
+        matches!(self, Tile::Glowstone | Tile::Lava | Tile::Torch)
+    }
+
     pub fn layer(self) -> u32 {
         Tile::ALL
             .iter()
@@ -118,6 +122,9 @@ impl Tile {
     }
 }
 
+/// Прибавляется к колыханию в `.w` записи таблицы анимации; читает `shader.wgsl`.
+pub const EMISSIVE_FLAG: f32 = 4.0;
+
 pub const LAYER_COUNT: u32 = {
     let mut sum = 0;
     let mut i = 0;
@@ -132,7 +139,8 @@ pub fn animation_table() -> Vec<[f32; 4]> {
     Tile::ALL
         .iter()
         .flat_map(|&t| {
-            let entry = [t.frames() as f32, t.fps(), t.scroll(), t.sway()];
+            let flags = t.sway() + if t.emissive() { EMISSIVE_FLAG } else { 0.0 };
+            let entry = [t.frames() as f32, t.fps(), t.scroll(), flags];
             (0..t.frames()).map(move |_| entry)
         })
         .collect()
