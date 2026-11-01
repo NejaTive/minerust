@@ -21,6 +21,8 @@ export function applySettings(engine: Engine, s: Settings) {
     s.shadows,
     s.shadowQualityHigh,
     s.cloudShadows,
+    s.ssr,
+    s.autoExposure,
   )
   try {
     engine.apply_settings(payload)
