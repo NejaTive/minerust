@@ -45,7 +45,8 @@ pub(crate) fn create_block_pipeline(
             entry_point: Some(match pass {
                 BlockPass::Solid => "fs_main",
                 BlockPass::Cutout => "fs_cutout",
-                BlockPass::Water | BlockPass::Ice | BlockPass::IceDepth => "fs_water",
+                BlockPass::Water => "fs_water",
+                BlockPass::Ice | BlockPass::IceDepth => "fs_ice",
             }),
             targets: &[Some(wgpu::ColorTargetState {
                 format,

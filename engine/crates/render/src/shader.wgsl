@@ -38,6 +38,13 @@ const FLASH_GAIN: f32 = 1.5;
 const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.25, 0.85, 0.5);
 const DAY_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
 const NIGHT_LIGHT_TINT: vec3<f32> = vec3<f32>(0.7, 0.82, 1.15);
+// Как DUSK_SKY в daytime.rs и DUSK_COLOR в sky.wgsl.
+const DUSK_COLOR: vec3<f32> = vec3<f32>(0.78, 0.32, 0.14);
+const WATER_F0: f32 = 0.02;
+const WATER_TOP_ALPHA: f32 = 0.8;
+const RIPPLE_STRENGTH: f32 = 0.05;
+const SPECULAR_POWER: f32 = 220.0;
+const MOON_SPECULAR: f32 = 0.3;
 const WARM_LIGHT_TINT: vec3<f32> = vec3<f32>(1.2, 0.95, 0.7);
 
 @group(0) @binding(0)
@@ -156,9 +163,13 @@ fn light_tint(in: VertexOut) -> vec3<f32> {
     return luma_normalized(mix(luma_normalized(sun_tint), luma_normalized(BLOCK_LIGHT_TINT), share));
 }
 
+fn weather_exposure() -> f32 {
+    return (1.0 - RAIN_DIM * globals.rain * (1.0 - globals.night)) * (1.0 + FLASH_GAIN * globals.flash);
+}
+
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
     var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in);
-    color *= (1.0 - RAIN_DIM * globals.rain * (1.0 - globals.night)) * (1.0 + FLASH_GAIN * globals.flash);
+    color *= weather_exposure();
     var distance = length(in.world_pos.xz - globals.camera_pos.xz);
     if globals.eye_fluid > 0.5 {
         color *= select(UNDERWATER_TINT, LAVA_TINT, globals.eye_fluid > 1.5);
@@ -188,8 +199,60 @@ fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(shaded(in, texel.rgb), 1.0);
 }
 
+// Небо по лучу — та же формула, что в sky.wgsl (горизонт → зенит и закатное пятно).
+fn sky_color(dir: vec3<f32>) -> vec3<f32> {
+    let tilt = globals.horizon_tilt;
+    let edge = -tilt / sqrt(1.0 + tilt * tilt);
+    let height = clamp((dir.y - edge) / (1.0 - edge), 0.0, 1.0);
+    var color = mix(globals.fog_color, globals.zenith, pow(smoothstep(0.0, 1.0, height), 0.6));
+    let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
+    let side = max(dot(normalize(dir.xz + vec2<f32>(1e-5)), sun_flat), 0.0);
+    let glow = globals.warm * pow(side, 3.0) * exp(-6.0 * height) * smoothstep(0.0, 0.07, height);
+    return mix(color, DUSK_COLOR * 1.3, clamp(glow, 0.0, 1.0));
+}
+
+fn ripple_normal(p: vec2<f32>) -> vec3<f32> {
+    let t = globals.anim_time;
+    let a = vec2<f32>(sin(p.x * 2.3 + p.y * 1.7 + t * 1.1), cos(p.x * 1.9 - p.y * 2.9 + t * 0.9));
+    let b = vec2<f32>(sin(p.y * 5.1 - t * 1.7 + p.x * 1.3), cos(p.x * 4.7 + t * 1.4 - p.y * 0.8));
+    let r = (a + 0.5 * b) * RIPPLE_STRENGTH;
+    return normalize(vec3<f32>(r.x, 1.0, r.y));
+}
+
 @fragment
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
+    let flat_normal = normalize(cross(dpdx(in.world_pos), dpdy(in.world_pos)));
+    if globals.eye_fluid > 0.5 {
+        return vec4<f32>(shaded(in, texel.rgb), texel.a);
+    }
+    let view = normalize(globals.camera_pos - in.world_pos);
+    var normal = select(-flat_normal, flat_normal, dot(flat_normal, view) >= 0.0);
+    if normal.y > 0.95 {
+        normal = ripple_normal(in.world_pos.xz);
+    }
+    let cos_view = clamp(dot(normal, view), 0.0, 1.0);
+    let fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - cos_view, 5.0);
+    let reflected = reflect(-view, normal);
+    let exposure = weather_exposure();
+    let sky = sky_color(vec3<f32>(reflected.x, abs(reflected.y), reflected.z)) * in.sun_light * exposure;
+
+    let sun_up = smoothstep(-0.05, 0.1, globals.sun_dir.y);
+    let moon_up = MOON_SPECULAR * smoothstep(-0.05, 0.1, -globals.sun_dir.y);
+    let glint = sun_up * pow(max(dot(reflected, globals.sun_dir), 0.0), SPECULAR_POWER)
+        + moon_up * pow(max(dot(reflected, -globals.sun_dir), 0.0), SPECULAR_POWER);
+    let specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sun_light);
+
+    let body = texel.rgb * in.shade * max(in.sun_light, in.block_light) * light_tint(in) * exposure;
+    var color = mix(body, sky, fresnel) + vec3<f32>(specular);
+    let distance = length(in.world_pos.xz - globals.camera_pos.xz);
+    color = mix(color, globals.fog_color, smoothstep(globals.fog_start, globals.fog_end, distance));
+    let alpha = max(mix(texel.a * WATER_TOP_ALPHA, 1.0, smoothstep(0.0, 0.5, fresnel)), clamp(specular, 0.0, 1.0));
+    return vec4<f32>(color, alpha);
+}
+
+@fragment
+fn fs_ice(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
     return vec4<f32>(shaded(in, texel.rgb), texel.a);
 }
