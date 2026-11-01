@@ -7,6 +7,7 @@ pub struct Effects {
     pub hdr: bool,
     pub bloom: bool,
     pub water_depth: bool,
+    pub sun_rays: bool,
 }
 
 impl Default for Effects {
@@ -19,6 +20,7 @@ impl Default for Effects {
             hdr: true,
             bloom: true,
             water_depth: true,
+            sun_rays: true,
         }
     }
 }
@@ -33,5 +35,6 @@ impl Effects {
             | u32::from(self.hdr) << 4
             | u32::from(self.bloom && self.hdr) << 5
             | u32::from(self.water_depth && self.hdr) << 6
+            | u32::from(self.sun_rays && self.hdr) << 7
     }
 }

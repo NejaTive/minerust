@@ -47,6 +47,7 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
       hdr: defaults.hdr,
       bloom: defaults.bloom,
       waterDepth: defaults.waterDepth,
+      sunRays: defaults.sunRays,
     },
   }
   list.forEach((block) => block.free())

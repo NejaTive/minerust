@@ -136,6 +136,7 @@ impl Engine {
             hdr: settings.hdr,
             bloom: settings.bloom,
             water_depth: settings.water_depth,
+            sun_rays: settings.sun_rays,
         };
         self.game.set_weather_enabled(settings.weather);
         self.game.set_auto_step(settings.auto_step);

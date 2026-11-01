@@ -109,6 +109,8 @@ pub struct EngineSettings {
     pub bloom: bool,
     #[wasm_bindgen(js_name = waterDepth)]
     pub water_depth: bool,
+    #[wasm_bindgen(js_name = sunRays)]
+    pub sun_rays: bool,
 }
 
 #[wasm_bindgen]
@@ -130,6 +132,7 @@ impl EngineSettings {
         hdr: bool,
         bloom: bool,
         water_depth: bool,
+        sun_rays: bool,
     ) -> EngineSettings {
         EngineSettings {
             render_distance,
@@ -146,6 +149,7 @@ impl EngineSettings {
             hdr,
             bloom,
             water_depth,
+            sun_rays,
         }
     }
 }
@@ -167,6 +171,7 @@ pub fn default_settings() -> EngineSettings {
         hdr: true,
         bloom: true,
         water_depth: true,
+        sun_rays: true,
     }
 }
 

@@ -125,6 +125,17 @@ function checkedOf(e: Event): boolean {
         @change="patch({ waterDepth: checkedOf($event) })"
       />
     </label>
+
+    <label class="row toggle" :class="{ disabled: !settings.hdr }">
+      <span class="name">Солнечные лучи</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.hdr && settings.sunRays"
+        :disabled="!settings.hdr"
+        @change="patch({ sunRays: checkedOf($event) })"
+      />
+    </label>
   </div>
   <button @click="emit('back')">Назад</button>
 </template>

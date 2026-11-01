@@ -1,6 +1,10 @@
 use crate::bloom::{BloomTargets, create_bloom_layout, create_linear_sampler};
+use glam::{Mat4, Vec2, Vec3};
+
 use crate::pipelines::{DEPTH_FORMAT, HDR_FORMAT};
 use crate::shaders;
+
+const RAYS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
 
 pub(crate) struct PostLayouts {
     pub post: wgpu::BindGroupLayout,
@@ -26,6 +30,7 @@ pub(crate) struct HdrTargets {
     pub color_copy: wgpu::Texture,
     pub depth_copy: wgpu::Texture,
     pub scene_copy_group: wgpu::BindGroup,
+    pub rays: wgpu::TextureView,
     pub post_group: wgpu::BindGroup,
     pub bloom: BloomTargets,
 }
@@ -159,6 +164,15 @@ impl HdrTargets {
             width,
             height,
         );
+        let rays = create_target(
+            device,
+            "sun rays",
+            RAYS_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            (width / 2).max(1),
+            (height / 2).max(1),
+        )
+        .create_view(&wgpu::TextureViewDescriptor::default());
         let scene_copy_group = create_scene_copy_group(device, layouts, &color_copy, &depth_copy);
         let color = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let (bloom, bloom_result) = BloomTargets::new(
@@ -185,6 +199,10 @@ impl HdrTargets {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&layouts.sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&rays),
+                },
             ],
         });
         Self {
@@ -193,6 +211,7 @@ impl HdrTargets {
             color_copy,
             depth_copy,
             scene_copy_group,
+            rays,
             post_group,
             bloom,
         }
@@ -227,6 +246,16 @@ pub(crate) fn create_post_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout
                 binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
                 count: None,
             },
         ],
@@ -267,3 +296,67 @@ pub(crate) fn create_post_pipeline(
         cache: None,
     })
 }
+
+pub(crate) fn create_rays_pipeline(
+    device: &wgpu::Device,
+    globals_layout: &wgpu::BindGroupLayout,
+    scene_copy_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = shaders::module(device, "rays", shaders::RAYS_SHADER);
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("rays"),
+        bind_group_layouts: &[Some(globals_layout), Some(scene_copy_layout)],
+        ..Default::default()
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("rays"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(RAYS_FORMAT.into())],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Позиция солнца в UV экрана и сила лучей: гаснут ночью, в дождь, под водой и когда солнце далеко за кадром.
+pub(crate) fn sun_rays(
+    view_proj: Mat4,
+    camera_pos: Vec3,
+    sun_dir: Vec3,
+    night: f32,
+    rain: f32,
+    underwater: bool,
+) -> (Vec2, f32) {
+    let clip = view_proj * (camera_pos + sun_dir.normalize() * SUN_DISTANCE).extend(1.0);
+    if clip.w <= 0.0 || underwater {
+        return (Vec2::ZERO, 0.0);
+    }
+    let ndc = Vec2::new(clip.x, clip.y) / clip.w;
+    let uv = Vec2::new(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let on_screen = 1.0 - smoothstep(1.0, 1.8, ndc.abs().max_element());
+    let day = smoothstep(0.0, 0.25, sun_dir.y);
+    (uv, on_screen * day * (1.0 - night) * (1.0 - rain))
+}
+
+const SUN_DISTANCE: f32 = 100.0;
+
+#[cfg(test)]
+mod tests;

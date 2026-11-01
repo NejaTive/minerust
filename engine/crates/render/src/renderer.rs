@@ -18,7 +18,10 @@ use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_s
 use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
 use crate::pipelines::{HDR_FORMAT, SceneLayouts, ScenePipelines, create_depth_target};
-use crate::post::{HdrTargets, PostLayouts, create_post_pipeline, create_scene_copy_stub};
+use crate::post::{
+    HdrTargets, PostLayouts, create_post_pipeline, create_rays_pipeline, create_scene_copy_stub,
+    sun_rays,
+};
 use crate::rain::{
     RAIN_INSTANCES, RAIN_VERTICES, create_rain_cover_texture, create_rain_tile_texture,
     upload_rain_cover,
@@ -79,6 +82,7 @@ pub struct Renderer {
     hdr_pipelines: Option<ScenePipelines>,
     post_layouts: PostLayouts,
     post_pipeline: Option<wgpu::RenderPipeline>,
+    rays_pipeline: Option<wgpu::RenderPipeline>,
     bloom_pipelines: Option<BloomPipelines>,
     hdr_targets: Option<HdrTargets>,
     cloud_texture: wgpu::Texture,
@@ -371,6 +375,7 @@ impl Renderer {
             hdr_pipelines: None,
             post_layouts,
             post_pipeline: None,
+            rays_pipeline: None,
             bloom_pipelines: None,
             hdr_targets: None,
             cloud_texture,
@@ -435,6 +440,11 @@ impl Renderer {
                 &self.globals_layout,
                 &self.post_layouts.post,
                 self.render_format,
+            ));
+            self.rays_pipeline = Some(create_rays_pipeline(
+                &self.device,
+                &self.globals_layout,
+                &self.post_layouts.scene_copy,
             ));
             self.bloom_pipelines =
                 Some(BloomPipelines::new(&self.device, &self.post_layouts.bloom));
@@ -559,6 +569,18 @@ impl Renderer {
     }
 
     pub fn begin(&mut self, params: &FrameParams) -> Result<Option<PendingFrame>, String> {
+        let (sun_screen, sun_ray) = if params.effects.hdr && params.effects.sun_rays {
+            sun_rays(
+                params.view_proj,
+                params.camera_pos,
+                params.sun_dir,
+                params.night,
+                params.rain,
+                params.eye_fluid.is_some(),
+            )
+        } else {
+            (Vec2::ZERO, 0.0)
+        };
         let [r, g, b] = params.background.to_array().map(f64::from);
         let clear = wgpu::Color { r, g, b, a: 1.0 };
         let globals = Globals {
@@ -592,8 +614,8 @@ impl Renderer {
             resolution: Vec2::new(self.config.width as f32, self.config.height as f32),
             near: params.near,
             far: params.far,
-            sun_screen: Vec2::ZERO,
-            sun_ray: 0.0,
+            sun_screen,
+            sun_ray,
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
@@ -630,6 +652,7 @@ impl Renderer {
             _ => None,
         };
         let hdr = self.hdr_targets.as_ref();
+        let split;
         let pipes = match (&self.hdr_pipelines, hdr) {
             (Some(pipes), Some(_)) => pipes,
             _ => &self.sdr_pipelines,
@@ -656,7 +679,7 @@ impl Renderer {
                 .rev()
                 .filter_map(|(_, mesh)| mesh.water.as_ref())
                 .collect();
-            let split = params.effects.water_depth && !water.is_empty();
+            split = hdr.is_some() && params.effects.water_depth && !water.is_empty();
             let scene_color = hdr.map_or(&view, |targets| &targets.color);
             let mut pass = scene_pass(
                 &mut encoder,
@@ -782,6 +805,38 @@ impl Renderer {
                 }
             }
             self.frame_counts = counts;
+        }
+        if let (Some(targets), Some(rays)) = (hdr, &self.rays_pipeline)
+            && sun_ray > 0.0
+        {
+            if !split {
+                encoder.copy_texture_to_texture(
+                    copy_info(&self.depth_texture),
+                    copy_info(&targets.depth_copy),
+                    wgpu::Extent3d {
+                        width: self.config.width,
+                        height: self.config.height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("sun rays"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &targets.rays,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(rays);
+            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+            pass.set_bind_group(1, &targets.scene_copy_group, &[]);
+            pass.draw(0..3, 0..1);
         }
         if let (Some(targets), Some(bloom)) = (hdr, &self.bloom_pipelines)
             && params.effects.bloom
