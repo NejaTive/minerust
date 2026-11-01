@@ -466,9 +466,16 @@ fn shadowed_sun(sun_light: f32, sun_vis: f32) -> f32 {
 }
 
 fn shaded(in: VertexOut, texel: vec3<f32>, sun_vis: f32) -> vec3<f32> {
+    return shaded_glow(in, texel, sun_vis, vec3<f32>(0.0));
+}
+
+fn shaded_glow(in: VertexOut, texel: vec3<f32>, sun_vis: f32, glow: vec3<f32>) -> vec3<f32> {
     let sun_light = shadowed_sun(in.sun_light, sun_vis);
     var color = texel * in.shade * max(sun_light, in.block_light) * light_tint(in);
     color *= weather_exposure();
+    if any(glow > vec3<f32>(0.0)) {
+        color = min(color + glow * weather_exposure(), max(color, vec3<f32>(GLOW_CEILING)));
+    }
     if effect(FX_HDR) && is_emissive(animation[in.layer].w) {
         color = max(color, texel * HDR_EMISSIVE_LEVEL);
     }
@@ -487,6 +494,23 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, false)), 1.0);
 }
 
+const LEAF_GLOW_POWER: f32 = 3.0;
+const LEAF_GLOW_TINT: vec3<f32> = vec3<f32>(1.6, 1.3, 0.45);
+const LEAF_GLOW_GAIN: f32 = 0.4;
+const GLOW_SHADOW_FLOOR: f32 = 0.35;
+// Ниже порога bloom (THRESHOLD в bloom.wgsl).
+const GLOW_CEILING: f32 = 0.95;
+
+fn foliage_glow(in: VertexOut, sun_vis: f32) -> f32 {
+    if !effect(FX_SHADOWS) || is_emissive(animation[in.layer].w) || globals.eye_fluid > 0.5 {
+        return 0.0;
+    }
+    let toward_light = dot(normalize(in.world_pos - globals.camera_pos), shadows.light.xyz);
+    let full_sky = level_brightness(MAX_LIGHT - globals.darkness);
+    let canopy = clamp(in.sun_light / full_sky, 0.0, 1.0);
+    return pow(max(toward_light, 0.0), LEAF_GLOW_POWER) * mix(GLOW_SHADOW_FLOOR, 1.0, sun_vis) * canopy * shadows.light.w;
+}
+
 // Листва, кресты, факел: дырки через `discard`. Альфа в текстуре двоичная на каждом
 // мип-уровне (texture.rs), поэтому порог не зависит от расстояния, а смешение пайплайну
 // не нужно.
@@ -497,7 +521,9 @@ fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
     if texel.a < 0.5 {
         discard;
     }
-    return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, true)), 1.0);
+    let sun_vis = sun_visibility(in, normal, true);
+    let glow = foliage_glow(in, sun_vis) * LEAF_GLOW_GAIN;
+    return vec4<f32>(shaded_glow(in, texel.rgb, sun_vis, texel.rgb * LEAF_GLOW_TINT * glow), 1.0);
 }
 
 // Одинаково в sky.wgsl и shader.wgsl: туман сцены сходится с горизонтом неба.
