@@ -29,6 +29,7 @@ const defaults = defaultSettings({
   waterReflections: true,
   groundFog: true,
   plantSway: true,
+  hdr: true,
 })
 
 const load = (data: Record<string, string> = {}) =>
@@ -41,13 +42,14 @@ describe('loadSettings', () => {
 
   it('погода и шейдерные эффекты по умолчанию включены', () => {
     const s = load()
-    expect([s.weather, s.coloredLight, s.waterReflections, s.groundFog, s.plantSway]).toEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-    ])
+    expect([
+      s.weather,
+      s.coloredLight,
+      s.waterReflections,
+      s.groundFog,
+      s.plantSway,
+      s.hdr,
+    ]).toEqual([true, true, true, true, true, true])
   })
 
   it('читает сохранённые значения', () => {
@@ -63,6 +65,7 @@ describe('loadSettings', () => {
       [KEYS.waterReflections]: 'false',
       [KEYS.groundFog]: 'false',
       [KEYS.plantSway]: 'false',
+      [KEYS.hdr]: 'false',
       [KEYS.showDebug]: 'true',
     }
     expect(load(data)).toEqual({
@@ -77,6 +80,7 @@ describe('loadSettings', () => {
       waterReflections: false,
       groundFog: false,
       plantSway: false,
+      hdr: false,
       showDebug: true,
     })
   })

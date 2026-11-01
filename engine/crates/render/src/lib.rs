@@ -9,6 +9,7 @@ mod gpu_timer;
 mod layout;
 mod outline;
 mod pipelines;
+mod post;
 mod quad_indices;
 mod rain;
 pub mod renderer;

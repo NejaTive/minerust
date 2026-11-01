@@ -24,6 +24,12 @@ struct Globals {
     rain_drops: f32,
     flash: f32,
     cloud_threshold: f32,
+    snow: f32,
+    resolution: vec2<f32>,
+    near: f32,
+    far: f32,
+    sun_screen: vec2<f32>,
+    sun_ray: f32,
 };
 
 @group(0) @binding(0)

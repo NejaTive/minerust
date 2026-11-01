@@ -23,6 +23,12 @@ struct Globals {
     rain_drops: f32,
     flash: f32,
     cloud_threshold: f32,
+    snow: f32,
+    resolution: vec2<f32>,
+    near: f32,
+    far: f32,
+    sun_screen: vec2<f32>,
+    sun_ray: f32,
 };
 
 // Яркость уровня света — как `light::level_brightness`: 0.8^(15 − уровень), не ниже
@@ -36,6 +42,7 @@ const FX_COLORED_LIGHT: u32 = 1u;
 const FX_WATER_REFLECTIONS: u32 = 2u;
 const FX_GROUND_FOG: u32 = 4u;
 const FX_PLANT_SWAY: u32 = 8u;
+const FX_HDR: u32 = 16u;
 
 fn effect(bit: u32) -> bool {
     return (globals.effects & bit) != 0u;
@@ -75,6 +82,9 @@ const RIPPLE_DETAIL: f32 = 0.3;
 const RIPPLE_WIND_SCALE: f32 = 0.025;
 const SPECULAR_POWER: f32 = 220.0;
 const MOON_SPECULAR: f32 = 0.3;
+// В HDR яркий блочный свет (факелы, лава, светокамень) выходит за 1.0 и даёт свечение.
+const HDR_EMISSIVE_GAIN: f32 = 1.5;
+const HDR_GLINT_GAIN: f32 = 4.0;
 const WARM_LIGHT_TINT: vec3<f32> = vec3<f32>(1.2, 0.95, 0.7);
 
 @group(0) @binding(0)
@@ -243,8 +253,16 @@ fn weather_exposure() -> f32 {
     return (1.0 - RAIN_DIM * globals.rain * (1.0 - globals.night)) * (1.0 + FLASH_GAIN * globals.flash);
 }
 
+fn emissive_boost(in: VertexOut) -> f32 {
+    if !effect(FX_HDR) {
+        return 1.0;
+    }
+    let block_share = smoothstep(0.0, 0.2, in.block_light - in.sun_light);
+    return 1.0 + HDR_EMISSIVE_GAIN * block_share * smoothstep(0.7, 1.0, in.block_light);
+}
+
 fn shaded(in: VertexOut, texel: vec3<f32>) -> vec3<f32> {
-    var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in);
+    var color = texel * in.shade * max(in.sun_light, in.block_light) * light_tint(in) * emissive_boost(in);
     color *= weather_exposure();
     if globals.eye_fluid > 0.5 {
         color *= select(UNDERWATER_TINT, LAVA_TINT, globals.eye_fluid > 1.5);
@@ -385,12 +403,16 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
     let moon_up = MOON_SPECULAR * smoothstep(-0.05, 0.1, -globals.sun_dir.y);
     let glint = sun_up * pow(max(dot(reflected, globals.sun_dir), 0.0), SPECULAR_POWER)
         + moon_up * pow(max(dot(reflected, -globals.sun_dir), 0.0), SPECULAR_POWER);
-    let specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sky_exposure);
+    var specular = glint * (1.0 - globals.rain) * smoothstep(0.4, 1.0, in.sky_exposure);
+    let alpha_glint = clamp(specular, 0.0, 1.0);
+    if effect(FX_HDR) {
+        specular *= HDR_GLINT_GAIN;
+    }
 
     let body = texel.rgb * in.shade * max(in.sun_light, in.block_light) * light_tint(in) * exposure;
     var color = mix(body, sky, fresnel) + vec3<f32>(specular);
     color = apply_fog(color, in.world_pos);
-    let alpha = max(mix(texel.a * WATER_TOP_ALPHA, 1.0, smoothstep(0.0, 0.5, fresnel)), clamp(specular, 0.0, 1.0));
+    let alpha = max(mix(texel.a * WATER_TOP_ALPHA, 1.0, smoothstep(0.0, 0.5, fresnel)), alpha_glint);
     return vec4<f32>(color, alpha);
 }
 

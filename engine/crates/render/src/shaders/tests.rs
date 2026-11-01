@@ -67,6 +67,7 @@ fn every_shader_validates_with_the_full_globals_layout() {
         ("sky", SKY_SHADER),
         ("clouds", CLOUDS_SHADER),
         ("rain", RAIN_SHADER),
+        ("post", POST_SHADER),
     ] {
         let module = naga::front::wgsl::parse_str(source).expect(name);
         naga::valid::Validator::new(
@@ -111,6 +112,7 @@ fn bitwise_operators_are_not_mixed_with_arithmetic_without_parentheses() {
         ("sky", SKY_SHADER),
         ("clouds", CLOUDS_SHADER),
         ("rain", RAIN_SHADER),
+        ("post", POST_SHADER),
     ] {
         for line in source.lines() {
             let code = line.split("//").next().unwrap();

@@ -93,6 +93,16 @@ function checkedOf(e: Event): boolean {
         @change="patch({ plantSway: checkedOf($event) })"
       />
     </label>
+
+    <label class="row toggle">
+      <span class="name">HDR и тонмаппинг</span>
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.hdr"
+        @change="patch({ hdr: checkedOf($event) })"
+      />
+    </label>
   </div>
   <button @click="emit('back')">Назад</button>
 </template>

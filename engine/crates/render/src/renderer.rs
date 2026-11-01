@@ -16,10 +16,8 @@ use crate::globals::{Globals, view_dir_matrix};
 use crate::gpu_mesh::{ColumnMeshes, GpuMesh, SceneBuffers, SectionMesh, upload_section};
 use crate::gpu_timer::GpuTimer;
 use crate::outline::{OUTLINE_VERTEX_SIZE, OUTLINE_VERTICES, outline_bytes};
-use crate::pipelines::{
-    BlockPass, create_block_pipeline, create_cloud_pipeline, create_depth_view,
-    create_outline_pipeline, create_rain_pipeline, create_sky_pipeline,
-};
+use crate::pipelines::{HDR_FORMAT, SceneLayouts, ScenePipelines, create_depth_view};
+use crate::post::{HdrTargets, create_post_layout, create_post_pipeline};
 use crate::rain::{
     RAIN_INSTANCES, RAIN_VERTICES, create_rain_cover_texture, create_rain_tile_texture,
     upload_rain_cover,
@@ -49,6 +47,8 @@ pub struct FrameParams {
     pub rain_drops: f32,
     pub snow: f32,
     pub flash: f32,
+    pub near: f32,
+    pub far: f32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -71,15 +71,14 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_format: wgpu::TextureFormat,
-    pipeline: wgpu::RenderPipeline,
-    cutout_pipeline: wgpu::RenderPipeline,
-    water_pipeline: wgpu::RenderPipeline,
-    ice_pipeline: wgpu::RenderPipeline,
-    ice_depth_pipeline: wgpu::RenderPipeline,
-    outline_pipeline: wgpu::RenderPipeline,
-    sky_pipeline: wgpu::RenderPipeline,
-    cloud_pipeline: wgpu::RenderPipeline,
-    rain_pipeline: wgpu::RenderPipeline,
+    globals_layout: wgpu::BindGroupLayout,
+    scene_layouts: SceneLayouts,
+    shader: wgpu::ShaderModule,
+    sdr_pipelines: ScenePipelines,
+    hdr_pipelines: Option<ScenePipelines>,
+    post_layout: wgpu::BindGroupLayout,
+    post_pipeline: Option<wgpu::RenderPipeline>,
+    hdr_targets: Option<HdrTargets>,
     cloud_texture: wgpu::Texture,
     rain_cover_texture: wgpu::Texture,
     outline_buffer: wgpu::Buffer,
@@ -285,51 +284,18 @@ impl Renderer {
             ],
             ..Default::default()
         });
-        let outline_pipeline = create_outline_pipeline(&device, &pipeline_layout, render_format);
-        let sky_pipeline = create_sky_pipeline(&device, &pipeline_layout, render_format);
-        let cloud_pipeline = create_cloud_pipeline(&device, &pipeline_layout, render_format);
-        let rain_pipeline = create_rain_pipeline(&device, &pipeline_layout, render_format);
+        let scene_layouts = SceneLayouts {
+            plain: pipeline_layout,
+            blocks: block_layout,
+        };
         let outline_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outline"),
             size: (OUTLINE_VERTICES * OUTLINE_VERTEX_SIZE) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let pipeline = create_block_pipeline(
-            &device,
-            &block_layout,
-            &shader,
-            render_format,
-            BlockPass::Solid,
-        );
-        let cutout_pipeline = create_block_pipeline(
-            &device,
-            &block_layout,
-            &shader,
-            render_format,
-            BlockPass::Cutout,
-        );
-        let water_pipeline = create_block_pipeline(
-            &device,
-            &block_layout,
-            &shader,
-            render_format,
-            BlockPass::Water,
-        );
-        let ice_pipeline = create_block_pipeline(
-            &device,
-            &block_layout,
-            &shader,
-            render_format,
-            BlockPass::Ice,
-        );
-        let ice_depth_pipeline = create_block_pipeline(
-            &device,
-            &block_layout,
-            &shader,
-            render_format,
-            BlockPass::IceDepth,
-        );
+        let sdr_pipelines = ScenePipelines::new(&device, &scene_layouts, &shader, render_format);
+        let post_layout = create_post_layout(&device);
 
         let gpu_timer = device
             .features()
@@ -342,15 +308,14 @@ impl Renderer {
             queue,
             config,
             render_format,
-            pipeline,
-            cutout_pipeline,
-            water_pipeline,
-            ice_pipeline,
-            ice_depth_pipeline,
-            outline_pipeline,
-            sky_pipeline,
-            cloud_pipeline,
-            rain_pipeline,
+            globals_layout,
+            scene_layouts,
+            shader,
+            sdr_pipelines,
+            hdr_pipelines: None,
+            post_layout,
+            post_pipeline: None,
+            hdr_targets: None,
             cloud_texture,
             rain_cover_texture,
             outline_buffer,
@@ -376,6 +341,43 @@ impl Renderer {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         self.depth_view = create_depth_view(&self.device, width, height);
+        if self.hdr_targets.is_some() {
+            self.hdr_targets = Some(HdrTargets::new(
+                &self.device,
+                &self.post_layout,
+                width,
+                height,
+            ));
+        }
+    }
+
+    fn sync_hdr(&mut self, enabled: bool) {
+        if !enabled {
+            self.hdr_targets = None;
+            return;
+        }
+        if self.hdr_targets.is_none() {
+            self.hdr_targets = Some(HdrTargets::new(
+                &self.device,
+                &self.post_layout,
+                self.config.width,
+                self.config.height,
+            ));
+        }
+        if self.hdr_pipelines.is_none() {
+            self.hdr_pipelines = Some(ScenePipelines::new(
+                &self.device,
+                &self.scene_layouts,
+                &self.shader,
+                HDR_FORMAT,
+            ));
+            self.post_pipeline = Some(create_post_pipeline(
+                &self.device,
+                &self.globals_layout,
+                &self.post_layout,
+                self.render_format,
+            ));
+        }
     }
 
     pub fn set_cloud_mask(&self, mask: &CloudMask) {
@@ -526,6 +528,11 @@ impl Renderer {
             snow: params.snow,
             flash: params.flash,
             cloud_threshold: f32::from(cloud_threshold(coverage_for_rain(params.rain))),
+            resolution: Vec2::new(self.config.width as f32, self.config.height as f32),
+            near: params.near,
+            far: params.far,
+            sun_screen: Vec2::ZERO,
+            sun_ray: 0.0,
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, &globals.to_bytes());
@@ -550,6 +557,7 @@ impl Renderer {
             format: Some(self.render_format),
             ..Default::default()
         });
+        self.sync_hdr(params.effects.hdr);
 
         let mut encoder = self
             .device
@@ -560,11 +568,17 @@ impl Renderer {
             Some(timer) if self.gpu_timing => timer.acquire(),
             _ => None,
         };
+        let hdr = self.hdr_targets.as_ref();
+        let pipes = match (&self.hdr_pipelines, hdr) {
+            (Some(pipes), Some(_)) => pipes,
+            _ => &self.sdr_pipelines,
+        };
         {
+            let timer = self.gpu_timer.as_ref().filter(|_| timer_slot.is_some());
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: hdr.map_or(&view, |targets| &targets.color),
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -580,12 +594,16 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: timer_slot
-                    .and(self.gpu_timer.as_ref())
-                    .map(GpuTimer::pass_writes),
+                timestamp_writes: timer.map(|timer| {
+                    if hdr.is_some() {
+                        timer.begin_writes()
+                    } else {
+                        timer.pass_writes()
+                    }
+                }),
                 ..Default::default()
             });
-            pass.set_pipeline(&self.pipeline);
+            pass.set_pipeline(&pipes.solid);
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
             pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
             pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
@@ -611,7 +629,7 @@ impl Renderer {
                     counts.draw_calls += 1;
                 }
             }
-            pass.set_pipeline(&self.cutout_pipeline);
+            pass.set_pipeline(&pipes.cutout);
             for (_, section) in &visible {
                 if let Some(mesh) = &section.cutout {
                     mesh.draw(&mut pass);
@@ -622,26 +640,26 @@ impl Renderer {
             self.drawn_sections = visible.len() as u32;
 
             if self.outline_block.is_some() {
-                pass.set_pipeline(&self.outline_pipeline);
+                pass.set_pipeline(&pipes.outline);
                 pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
                 pass.draw(0..OUTLINE_VERTICES as u32, 0..1);
                 counts.draw_calls += 1;
             }
 
             if params.eye_fluid.is_none() {
-                pass.set_pipeline(&self.sky_pipeline);
+                pass.set_pipeline(&pipes.sky);
                 pass.draw(0..3, 0..1);
                 counts.draw_calls += 1;
             }
 
             if params.clouds && params.eye_fluid.is_none() {
-                pass.set_pipeline(&self.cloud_pipeline);
+                pass.set_pipeline(&pipes.cloud);
                 pass.draw(0..CLOUD_VERTICES, 0..CLOUD_INSTANCES);
                 counts.draw_calls += 1;
             }
 
             if params.rain_drops > 0.0 && params.eye_fluid.is_none() {
-                pass.set_pipeline(&self.rain_pipeline);
+                pass.set_pipeline(&pipes.rain);
                 pass.draw(0..RAIN_VERTICES, 0..RAIN_INSTANCES);
                 counts.draw_calls += 1;
             }
@@ -654,7 +672,7 @@ impl Renderer {
             if !ice.is_empty() {
                 pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
                 pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
-                for pipeline in [&self.ice_depth_pipeline, &self.ice_pipeline] {
+                for pipeline in [&pipes.ice_depth, &pipes.ice] {
                     pass.set_pipeline(pipeline);
                     for mesh in &ice {
                         mesh.draw(&mut pass);
@@ -670,7 +688,7 @@ impl Renderer {
                 .filter_map(|(_, mesh)| mesh.water.as_ref())
                 .collect();
             if !water.is_empty() {
-                pass.set_pipeline(&self.water_pipeline);
+                pass.set_pipeline(&pipes.water);
                 pass.set_bind_group(1, self.buffers.arena.bind_group(), &[]);
                 pass.set_vertex_buffer(0, self.buffers.slots.buffer().slice(..));
                 for mesh in water {
@@ -680,6 +698,30 @@ impl Renderer {
                 }
             }
             self.frame_counts = counts;
+        }
+        if let Some(targets) = hdr {
+            let timer = self.gpu_timer.as_ref().filter(|_| timer_slot.is_some());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("post"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: timer.map(GpuTimer::end_writes),
+                ..Default::default()
+            });
+            if let Some(post) = &self.post_pipeline {
+                pass.set_pipeline(post);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(1, &targets.post_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
         }
         if let (Some(timer), Some(slot)) = (&self.gpu_timer, timer_slot) {
             timer.resolve(&mut encoder, slot);
