@@ -556,3 +556,56 @@ fn snow_layer_follows_the_ground_through_caves() {
         }
     }
 }
+
+#[test]
+fn column_biome_bytes_follow_biome_weights() {
+    let terrain = Terrain::new(7);
+    let key = ColumnPos::new(3, -5);
+    let bytes = terrain.column_biome_bytes(key);
+    assert_eq!(bytes.len(), 16 * 16 * 4);
+    let origin = key.origin();
+    for (dx, dz) in [(0, 0), (5, 9), (15, 15)] {
+        let at = ((dz * 16 + dx) * 4) as usize;
+        let expected =
+            crate::biome_color::weights_bytes(terrain.biome_weights(origin.x + dx, origin.z + dz));
+        assert_eq!(bytes[at..at + 4], expected);
+    }
+}
+
+#[test]
+fn flat_world_is_all_plains() {
+    let terrain = Terrain::of(1, WorldType::Flat);
+    let bytes = terrain.column_biome_bytes(ColumnPos::new(0, 0));
+    assert!(bytes.chunks(4).all(|w| w == [255, 0, 0, 0]));
+}
+
+#[test]
+fn climates_blend_smoothly_between_neighbours() {
+    let terrain = Terrain::new(11);
+    let palette = crate::biome_color::BiomePalette::constants();
+    let color = |x: i32| {
+        let w = crate::biome_color::weights_bytes(terrain.biome_weights(x, 0));
+        crate::biome_color::blend(&palette.grass, w)
+    };
+    let step = (-2000..2000)
+        .map(|x| {
+            let (a, b) = (color(x), color(x + 1));
+            (0..3).map(|c| (a[c] - b[c]).abs()).fold(0.0_f32, f32::max)
+        })
+        .fold(0.0_f32, f32::max);
+    assert!(
+        step < 0.05,
+        "grass color jumps by {step} between adjacent blocks"
+    );
+}
+
+#[test]
+#[ignore]
+fn column_biome_bytes_timing() {
+    let terrain = Terrain::new(1);
+    let start = std::time::Instant::now();
+    for i in 0..200 {
+        std::hint::black_box(terrain.column_biome_bytes(ColumnPos::new(i, i)));
+    }
+    println!("column_biome_bytes: {:?} per column", start.elapsed() / 200);
+}

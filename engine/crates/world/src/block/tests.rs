@@ -45,7 +45,8 @@ fn selectable_by_name() {
 
 #[test]
 fn icon_is_side_face() {
-    let pixels = |tile| Some(tile_pixels(tile));
+    let set = TextureSet::standard();
+    let pixels = |tile| Some(set.icon_pixels(tile));
     assert_eq!(icon_pixels(Block::Grass), pixels(Tile::GrassSide));
     assert_eq!(icon_pixels(Block::Log), pixels(Tile::LogSide));
     assert_eq!(icon_pixels(Block::Stone), pixels(Tile::Stone));

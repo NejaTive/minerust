@@ -2,6 +2,7 @@ use std::io::Read;
 
 use serde_json::Value;
 
+use crate::biome_color::{BiomePalette, BiomeTint, Colormap};
 use crate::textures::{
     DecodedImage, MAX_LAYERS, TextureSet, TileTexture, WHITE, decode_png, scale_nearest,
 };
@@ -19,13 +20,12 @@ const PANEL_HEIGHT_UNITS: u32 = 166;
 const PANEL_FLAT_X_UNITS: u32 = 80;
 const PANEL_FLAT_Y_UNITS: u32 = 30;
 const PANEL_EDGE_UNITS: u32 = 80;
+const COLORMAP_DIR: &str = "assets/minecraft/textures/colormap/";
 const MIN_TILE_SIZE: u32 = 16;
 const MAX_TILE_SIZE: u32 = 512;
 const MAX_ENTRY_BYTES: u64 = 64 << 20;
 const WATER_MAX_ALPHA: u8 = 180;
 
-const GRASS: [f32; 3] = rgb(0x79C05A);
-const OAK_LEAVES: [f32; 3] = rgb(0x59AE30);
 const BIRCH_LEAVES: [f32; 3] = rgb(0x80A755);
 const SPRUCE_LEAVES: [f32; 3] = rgb(0x619961);
 const WATER: [f32; 3] = rgb(0x3F76E4);
@@ -56,36 +56,36 @@ pub struct GuiImages {
     pub panel_slice: u32,
 }
 
-fn source(tile: Tile) -> (&'static str, [f32; 3]) {
+fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
     match tile {
-        Tile::GrassTop => ("grass_top", GRASS),
-        Tile::GrassSide => ("grass_side", WHITE),
-        Tile::Dirt => ("dirt", WHITE),
-        Tile::Stone => ("stone", WHITE),
-        Tile::Sand => ("sand", WHITE),
-        Tile::LogSide => ("log_oak", WHITE),
-        Tile::LogTop => ("log_oak_top", WHITE),
-        Tile::Leaves => ("leaves_oak", OAK_LEAVES),
-        Tile::Water => ("water_still", WATER),
-        Tile::Glowstone => ("glowstone", WHITE),
-        Tile::TallGrass => ("tallgrass", GRASS),
-        Tile::Poppy => ("flower_rose", WHITE),
-        Tile::Dandelion => ("flower_dandelion", WHITE),
-        Tile::Torch => ("torch_on", WHITE),
-        Tile::Gravel => ("gravel", WHITE),
-        Tile::Lava => ("lava_still", WHITE),
-        Tile::Obsidian => ("obsidian", WHITE),
-        Tile::Cobblestone => ("cobblestone", WHITE),
-        Tile::BirchLogSide => ("log_birch", WHITE),
-        Tile::BirchLogTop => ("log_birch_top", WHITE),
-        Tile::BirchLeaves => ("leaves_birch", BIRCH_LEAVES),
-        Tile::SpruceLogSide => ("log_spruce", WHITE),
-        Tile::SpruceLogTop => ("log_spruce_top", WHITE),
-        Tile::SpruceLeaves => ("leaves_spruce", SPRUCE_LEAVES),
-        Tile::Bedrock => ("bedrock", WHITE),
-        Tile::SnowyGrassSide => ("grass_side_snowed", WHITE),
-        Tile::Snow => ("snow", WHITE),
-        Tile::Ice => ("ice", WHITE),
+        Tile::GrassTop => ("grass_top", WHITE, BiomeTint::Grass),
+        Tile::GrassSide => ("grass_side", WHITE, BiomeTint::None),
+        Tile::Dirt => ("dirt", WHITE, BiomeTint::None),
+        Tile::Stone => ("stone", WHITE, BiomeTint::None),
+        Tile::Sand => ("sand", WHITE, BiomeTint::None),
+        Tile::LogSide => ("log_oak", WHITE, BiomeTint::None),
+        Tile::LogTop => ("log_oak_top", WHITE, BiomeTint::None),
+        Tile::Leaves => ("leaves_oak", WHITE, BiomeTint::Foliage),
+        Tile::Water => ("water_still", WATER, BiomeTint::None),
+        Tile::Glowstone => ("glowstone", WHITE, BiomeTint::None),
+        Tile::TallGrass => ("tallgrass", WHITE, BiomeTint::Grass),
+        Tile::Poppy => ("flower_rose", WHITE, BiomeTint::None),
+        Tile::Dandelion => ("flower_dandelion", WHITE, BiomeTint::None),
+        Tile::Torch => ("torch_on", WHITE, BiomeTint::None),
+        Tile::Gravel => ("gravel", WHITE, BiomeTint::None),
+        Tile::Lava => ("lava_still", WHITE, BiomeTint::None),
+        Tile::Obsidian => ("obsidian", WHITE, BiomeTint::None),
+        Tile::Cobblestone => ("cobblestone", WHITE, BiomeTint::None),
+        Tile::BirchLogSide => ("log_birch", WHITE, BiomeTint::None),
+        Tile::BirchLogTop => ("log_birch_top", WHITE, BiomeTint::None),
+        Tile::BirchLeaves => ("leaves_birch", BIRCH_LEAVES, BiomeTint::None),
+        Tile::SpruceLogSide => ("log_spruce", WHITE, BiomeTint::None),
+        Tile::SpruceLogTop => ("log_spruce_top", WHITE, BiomeTint::None),
+        Tile::SpruceLeaves => ("leaves_spruce", SPRUCE_LEAVES, BiomeTint::None),
+        Tile::Bedrock => ("bedrock", WHITE, BiomeTint::None),
+        Tile::SnowyGrassSide => ("grass_side_snowed", WHITE, BiomeTint::None),
+        Tile::Snow => ("snow", WHITE, BiomeTint::None),
+        Tile::Ice => ("ice", WHITE, BiomeTint::None),
     }
 }
 
@@ -329,11 +329,13 @@ fn build(
             continue;
         };
         let mut texture = build_tile(found, size);
-        texture.tint = source(tile).1;
+        let (_, tint, biome) = source(tile);
+        texture.tint = tint;
+        texture.biome = biome;
         if tile == Tile::GrassSide
             && let Some(overlay) = &overlay
         {
-            apply_overlay(&mut texture, overlay, size);
+            add_overlay(&mut texture, overlay, size);
         }
         if tile == Tile::Water {
             for p in texture.layers.as_chunks_mut::<4>().0 {
@@ -343,13 +345,20 @@ fn build(
         tiles.push(texture);
     }
 
-    let layers: u32 = tiles.iter().map(|t| t.frames).sum();
+    let layers: u32 = tiles.iter().map(TileTexture::layer_span).sum();
     if layers as usize > MAX_LAYERS {
         return Err(format!(
             "too many animation frames: {layers} (limit {MAX_LAYERS})"
         ));
     }
-    Ok(TextureSet::from_tiles(size, tiles))
+    let mut colormap = |name: &str| {
+        read(&format!("{COLORMAP_DIR}{name}.png"))
+            .and_then(|b| decode_png(&b).ok())
+            .and_then(|image| Colormap::from_image(&image))
+    };
+    let palette =
+        BiomePalette::from_colormaps(colormap("grass").as_ref(), colormap("foliage").as_ref());
+    Ok(TextureSet::from_tiles(size, tiles, palette))
 }
 
 fn build_tile(found: &Found, size: u32) -> TileTexture {
@@ -384,6 +393,8 @@ fn animated(
         fps: 20.0 / ticks as f32,
         tint: WHITE,
         interpolate,
+        biome: BiomeTint::None,
+        overlay: false,
     }
 }
 
@@ -401,28 +412,16 @@ fn scaled(standard: &TextureSet, tile: Tile, size: u32) -> TileTexture {
         fps: src.fps,
         tint: src.tint,
         interpolate: src.interpolate,
+        biome: src.biome,
+        overlay: src.overlay,
     }
 }
 
-fn apply_overlay(texture: &mut TileTexture, overlay: &DecodedImage, size: u32) {
+fn add_overlay(texture: &mut TileTexture, overlay: &DecodedImage, size: u32) {
     let width = overlay.width;
     let top = scale_nearest(&overlay.rgba[..(width * width * 4) as usize], width, size);
-    let tint = GRASS;
-    for layer in texture.layers.chunks_exact_mut((size * size * 4) as usize) {
-        for (dst, src) in layer
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(top.as_chunks::<4>().0)
-        {
-            let alpha = f32::from(src[3]) / 255.0;
-            for c in 0..3 {
-                let tinted = f32::from(src[c]) * tint[c];
-                dst[c] = (f32::from(dst[c]) * (1.0 - alpha) + tinted * alpha).round() as u8;
-            }
-            dst[3] = dst[3].max(src[3]);
-        }
-    }
+    texture.layers.extend_from_slice(&top);
+    texture.overlay = true;
 }
 
 fn parse_animation(mcmeta: &[u8], frames: usize) -> Option<Animation> {
