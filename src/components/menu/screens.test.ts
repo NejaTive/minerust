@@ -15,6 +15,7 @@ describe('backTarget', () => {
     expect(backTarget('graphics', false)).toBe('settings')
     expect(backTarget('graphics', true)).toBe('settings')
   })
+  it('из текстур-пака — в настройки', () => expect(backTarget('textures', true)).toBe('settings'))
   it('из управления: без мира — в настройки, в паузе — в паузу', () => {
     expect(backTarget('controls', false)).toBe('settings')
     expect(backTarget('controls', true)).toBe('main')

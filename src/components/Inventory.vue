@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, useTemplateRef, watch } from 'vue'
-import { BLOCK_ICON_SIZE, paintBlockIconsIn } from '../engine/blockIcon'
+import { paintBlockIconsIn } from '../engine/blockIcon'
 import { blockLabel, engineInfo } from '../engine/info'
+import { texturePacks } from '../engine/useTexturePack'
 import { useSettings } from '../settings/useSettings'
 
 const { slots, slot, putInSlot, swapSlots, clearSlot } = useSettings()
@@ -14,7 +15,7 @@ const paint = () => paintBlockIconsIn(root.value)
 
 onMounted(paint)
 watch(
-  [palette, slots],
+  [palette, slots, () => texturePacks.state.revision],
   async () => {
     await nextTick()
     paint()
@@ -84,7 +85,7 @@ function onHotbarContextMenu(e: MouseEvent, index: number) {
           @click="putSelected(block.name)"
           @dragstart="onPaletteDragStart($event, block.name)"
         >
-          <canvas :data-block="block.name" :width="BLOCK_ICON_SIZE" :height="BLOCK_ICON_SIZE" />
+          <canvas :data-block="block.name" />
         </button>
       </div>
       <div class="hotbar-row">
@@ -101,12 +102,7 @@ function onHotbarContextMenu(e: MouseEvent, index: number) {
           @contextmenu="onHotbarContextMenu($event, index)"
           @click="selectSlot(index)"
         >
-          <canvas
-            v-if="name"
-            :data-block="name"
-            :width="BLOCK_ICON_SIZE"
-            :height="BLOCK_ICON_SIZE"
-          />
+          <canvas v-if="name" :data-block="name" />
           <span class="number">{{ index + 1 }}</span>
         </div>
       </div>
