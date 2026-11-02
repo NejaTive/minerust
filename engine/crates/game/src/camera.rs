@@ -4,7 +4,7 @@ use glam::{Mat4, Vec3};
 pub const DEFAULT_FOV: f32 = 70.0;
 pub const MIN_FOV: f32 = 60.0;
 pub const MAX_FOV: f32 = 110.0;
-const NEAR: f32 = 0.1;
+pub const NEAR: f32 = 0.1;
 const BASE_SENSITIVITY: f32 = 0.002;
 pub const DEFAULT_SENSITIVITY: f32 = 1.0;
 pub const MIN_SENSITIVITY: f32 = 0.25;

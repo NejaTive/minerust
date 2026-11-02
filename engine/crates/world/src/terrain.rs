@@ -18,8 +18,10 @@ const BEACH_SAND_DEPTH: i32 = 3;
 const PLAINS_AMPLITUDE: f32 = 6.0;
 const DESERT_AMPLITUDE: f32 = 4.0;
 const FOREST_AMPLITUDE: f32 = 14.0;
+const TAIGA_AMPLITUDE: f32 = 9.0;
 const HILLS_AMPLITUDE: f32 = 34.0;
 
+const TAIGA_COLD: (f32, f32) = (0.55, 0.7);
 const BEDROCK_SCATTER: i32 = 3;
 const SALT_BEDROCK: u64 = 30;
 pub const FLAT_SURFACE: i32 = 4;
@@ -46,6 +48,7 @@ pub enum Biome {
     Plains,
     Desert,
     Forest,
+    Taiga,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -53,11 +56,15 @@ pub struct BiomeWeights {
     pub plains: f32,
     pub desert: f32,
     pub forest: f32,
+    pub taiga: f32,
 }
 
 impl BiomeWeights {
     pub fn dominant(self) -> Biome {
-        if self.desert > self.plains.max(self.forest) {
+        let land = self.plains.max(self.forest);
+        if self.taiga > land.max(self.desert) {
+            Biome::Taiga
+        } else if self.desert > land {
             Biome::Desert
         } else if self.forest > self.plains {
             Biome::Forest
@@ -125,17 +132,20 @@ impl Terrain {
                 plains: 1.0,
                 desert: 0.0,
                 forest: 0.0,
+                taiga: 0.0,
             };
         }
         let (x, z) = (x as f32, z as f32);
         let temperature = self.temperature.get_noise_2d(x, z);
         let humidity = self.humidity.get_noise_2d(x, z);
         let desert = smoothstep(0.05, 0.25, temperature) * smoothstep(0.1, 0.3, -humidity);
-        let forest = smoothstep(0.1, 0.3, humidity);
+        let taiga = smoothstep(-TAIGA_COLD.0, -TAIGA_COLD.1, temperature);
+        let forest = smoothstep(0.1, 0.3, humidity) * (1.0 - taiga);
         BiomeWeights {
-            plains: 1.0 - desert - forest,
+            plains: (1.0 - desert - forest - taiga).max(0.0),
             desert,
             forest,
+            taiga,
         }
     }
 
@@ -156,6 +166,7 @@ impl Terrain {
         let amplitude = w.plains * PLAINS_AMPLITUDE
             + w.desert * DESERT_AMPLITUDE
             + w.forest * FOREST_AMPLITUDE
+            + w.taiga * TAIGA_AMPLITUDE
             + HILLS_AMPLITUDE * hills;
         let y = SEA_LEVEL + amplitude * self.height.get_noise_2d(x, z);
         (y.floor() as i32).clamp(1, WORLD_HEIGHT - 2)
@@ -202,7 +213,9 @@ impl Terrain {
                 let (wx, wz) = (origin.x + x, origin.z + z);
                 let weights = self.biome_weights(wx, wz);
                 let surface = self.surface(wx, wz, weights);
-                let desert = weights.dominant() == Biome::Desert;
+                let biome = weights.dominant();
+                let desert = biome == Biome::Desert;
+                let taiga = biome == Biome::Taiga;
                 let sand_depth = if desert {
                     (3.0 + weights.desert).round() as i32
                 } else if BEACH.contains(&surface) {
@@ -214,6 +227,8 @@ impl Terrain {
                     Block::Gravel
                 } else if surface < WATER_LEVEL {
                     Block::Dirt
+                } else if taiga {
+                    Block::SnowyGrass
                 } else {
                     Block::Grass
                 };
@@ -231,7 +246,15 @@ impl Terrain {
                     column.set(IVec3::new(x, y, z), block);
                 }
                 for y in surface + 1..=WATER_LEVEL {
-                    column.set(IVec3::new(x, y, z), Block::Water);
+                    let water = if taiga && y == WATER_LEVEL {
+                        Block::Ice
+                    } else {
+                        Block::Water
+                    };
+                    column.set(IVec3::new(x, y, z), water);
+                }
+                if column.get(IVec3::new(x, surface, z)) == Block::SnowyGrass {
+                    column.set(IVec3::new(x, surface + 1, z), Block::Snow);
                 }
             }
         }

@@ -3,12 +3,62 @@ use crate::outline::OUTLINE_VERTEX_SIZE;
 use crate::shaders;
 
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub(crate) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
+pub(crate) struct SceneLayouts {
+    pub plain: wgpu::PipelineLayout,
+    pub blocks: wgpu::PipelineLayout,
+    pub water: wgpu::PipelineLayout,
+}
+
+pub(crate) struct ScenePipelines {
+    pub solid: wgpu::RenderPipeline,
+    pub cutout: wgpu::RenderPipeline,
+    pub water: wgpu::RenderPipeline,
+    pub ice: wgpu::RenderPipeline,
+    pub ice_depth: wgpu::RenderPipeline,
+    pub outline: wgpu::RenderPipeline,
+    pub sky: wgpu::RenderPipeline,
+    pub cloud: wgpu::RenderPipeline,
+    pub rain: wgpu::RenderPipeline,
+}
+
+impl ScenePipelines {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        layouts: &SceneLayouts,
+        shader: &wgpu::ShaderModule,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        let block = |pass| {
+            let layout = if pass == BlockPass::Water {
+                &layouts.water
+            } else {
+                &layouts.blocks
+            };
+            create_block_pipeline(device, layout, shader, format, pass)
+        };
+        Self {
+            solid: block(BlockPass::Solid),
+            cutout: block(BlockPass::Cutout),
+            water: block(BlockPass::Water),
+            ice: block(BlockPass::Ice),
+            ice_depth: block(BlockPass::IceDepth),
+            outline: create_outline_pipeline(device, &layouts.plain, format),
+            sky: create_sky_pipeline(device, &layouts.plain, format),
+            cloud: create_cloud_pipeline(device, &layouts.plain, format),
+            rain: create_rain_pipeline(device, &layouts.plain, format),
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockPass {
     Solid,
     Cutout,
     Water,
+    Ice,
+    IceDepth,
 }
 
 pub(crate) fn create_block_pipeline(
@@ -18,12 +68,18 @@ pub(crate) fn create_block_pipeline(
     format: wgpu::TextureFormat,
     pass: BlockPass,
 ) -> wgpu::RenderPipeline {
-    let water = pass == BlockPass::Water;
+    let water = matches!(
+        pass,
+        BlockPass::Water | BlockPass::Ice | BlockPass::IceDepth
+    );
+    let ice = matches!(pass, BlockPass::Ice | BlockPass::IceDepth);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(match pass {
             BlockPass::Solid => "main",
             BlockPass::Cutout => "cutout",
             BlockPass::Water => "water",
+            BlockPass::Ice => "ice",
+            BlockPass::IceDepth => "ice depth",
         }),
         layout: Some(layout),
         vertex: wgpu::VertexState {
@@ -38,24 +94,33 @@ pub(crate) fn create_block_pipeline(
                 BlockPass::Solid => "fs_main",
                 BlockPass::Cutout => "fs_cutout",
                 BlockPass::Water => "fs_water",
+                BlockPass::Ice | BlockPass::IceDepth => "fs_ice",
             }),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: water.then_some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
+                write_mask: if pass == BlockPass::IceDepth {
+                    wgpu::ColorWrites::empty()
+                } else {
+                    wgpu::ColorWrites::ALL
+                },
             })],
             compilation_options: Default::default(),
         }),
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: (!water).then_some(wgpu::Face::Back),
+            cull_mode: (!water || ice).then_some(wgpu::Face::Back),
             ..Default::default()
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: Some(!water),
-            depth_compare: Some(wgpu::CompareFunction::Less),
+            depth_write_enabled: Some(!water || pass == BlockPass::IceDepth),
+            depth_compare: Some(if pass == BlockPass::Ice {
+                wgpu::CompareFunction::LessEqual
+            } else {
+                wgpu::CompareFunction::Less
+            }),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
@@ -63,6 +128,62 @@ pub(crate) fn create_block_pipeline(
         multiview_mask: None,
         cache: None,
     })
+}
+
+pub(crate) struct ShadowPipelines {
+    pub solid: wgpu::RenderPipeline,
+    pub cutout: wgpu::RenderPipeline,
+}
+
+impl ShadowPipelines {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        layout: &wgpu::PipelineLayout,
+        shader: &wgpu::ShaderModule,
+    ) -> Self {
+        let pipeline = |cutout: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(if cutout { "shadow cutout" } else { "shadow" }),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("vs_shadow"),
+                    buffers: &[Some(slot_layout())],
+                    compilation_options: Default::default(),
+                },
+                fragment: cutout.then_some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some("fs_shadow_cutout"),
+                    targets: &[],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState {
+                        constant: 2,
+                        slope_scale: 2.0,
+                        clamp: 0.0,
+                    },
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        Self {
+            solid: pipeline(false),
+            cutout: pipeline(true),
+        }
+    }
 }
 
 pub(crate) fn create_outline_pipeline(
@@ -228,11 +349,11 @@ pub(crate) fn create_rain_pipeline(
     })
 }
 
-pub(crate) fn create_depth_view(
+pub(crate) fn create_depth_target(
     device: &wgpu::Device,
     width: u32,
     height: u32,
-) -> wgpu::TextureView {
+) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("depth"),
         size: wgpu::Extent3d {
@@ -244,8 +365,9 @@ pub(crate) fn create_depth_view(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: DEPTH_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
 }

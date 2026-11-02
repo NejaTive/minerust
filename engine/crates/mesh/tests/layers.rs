@@ -52,6 +52,7 @@ fn every_quad_lands_in_the_mesh_of_its_blocks_layer() {
                 (&section.solid, RenderLayer::Opaque),
                 (&section.cutout, RenderLayer::Cutout),
                 (&section.water, RenderLayer::Translucent),
+                (&section.ice, RenderLayer::Translucent),
             ] {
                 for quad in &mesh.quads {
                     let [x, y, z] = quad.cell().map(i32::from);

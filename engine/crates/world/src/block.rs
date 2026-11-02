@@ -28,6 +28,9 @@ pub enum Block {
     SpruceLog,
     SpruceLeaves,
     Bedrock,
+    SnowyGrass,
+    Snow,
+    Ice,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -46,6 +49,8 @@ impl FluidKind {
 }
 
 pub const WATER_SURFACE: f32 = 0.875;
+pub const SNOW_UNITS: u8 = 2;
+pub const SNOW_HEIGHT: f32 = SNOW_UNITS as f32 / 16.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RenderLayer {
@@ -59,6 +64,7 @@ pub enum Shape {
     Cube,
     Cross,
     Torch,
+    Layer,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -122,6 +128,7 @@ pub struct BlockDef {
     pub falls: bool,
     pub unbreakable: bool,
     pub random_ticks: bool,
+    pub slippery: bool,
     pub data: DataKind,
     pub fluid: Option<FluidKind>,
     pub emission: u8,
@@ -145,6 +152,7 @@ impl BlockDef {
         falls: false,
         unbreakable: false,
         random_ticks: false,
+        slippery: false,
         data: DataKind::None,
         fluid: None,
         emission: 0,
@@ -197,7 +205,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 22] = [
+pub const BLOCKS: [BlockDef; 25] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -286,10 +294,32 @@ pub const BLOCKS: [BlockDef; 22] = [
         unbreakable: true,
         ..BlockDef::uniform("bedrock", "коренная порода", Tile::Bedrock)
     },
+    BlockDef {
+        top: Some(Tile::Snow),
+        side: Some(Tile::SnowyGrassSide),
+        bottom: Some(Tile::Dirt),
+        random_ticks: true,
+        ..BlockDef::uniform("snowy_grass", "заснеженная трава", Tile::Dirt)
+    },
+    BlockDef {
+        solid: false,
+        opaque: false,
+        replaceable: true,
+        needs_support: true,
+        random_ticks: true,
+        shape: Shape::Layer,
+        ..BlockDef::uniform("snow", "снег", Tile::Snow)
+    },
+    BlockDef {
+        opaque: false,
+        slippery: true,
+        layer: RenderLayer::Translucent,
+        ..BlockDef::uniform("ice", "лёд", Tile::Ice)
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 22] = [
+    pub const ALL: [Block; 25] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -312,6 +342,9 @@ impl Block {
         Block::SpruceLog,
         Block::SpruceLeaves,
         Block::Bedrock,
+        Block::SnowyGrass,
+        Block::Snow,
+        Block::Ice,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -324,6 +357,22 @@ impl Block {
 
     pub fn is_solid(self) -> bool {
         self.def().solid
+    }
+
+    pub fn collision_height(self) -> f32 {
+        match self.shape() {
+            Shape::Layer => SNOW_HEIGHT,
+            _ if self.is_solid() => 1.0,
+            _ => 0.0,
+        }
+    }
+
+    pub fn is_slippery(self) -> bool {
+        self.def().slippery
+    }
+
+    pub fn is_grass(self) -> bool {
+        matches!(self, Block::Grass | Block::SnowyGrass)
     }
 
     pub fn is_targetable(self) -> bool {
@@ -363,6 +412,7 @@ impl Block {
                 let (a, b) = (rotate(min), rotate(max));
                 (a.min(b), a.max(b))
             }
+            Shape::Layer => (Vec3::ZERO, Vec3::new(1.0, SNOW_HEIGHT, 1.0)),
             _ => (Vec3::ZERO, Vec3::ONE),
         }
     }

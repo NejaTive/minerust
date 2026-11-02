@@ -435,3 +435,49 @@ fn placement_data_by_face() {
         Some(ATTACH_POS_Z)
     );
 }
+
+#[test]
+fn snow_lies_on_solid_tops_and_leaves_only() {
+    let mut world = floor_world();
+    let pos = IVec3::new(3, 11, 3);
+    for support in [
+        Block::Grass,
+        Block::SnowyGrass,
+        Block::Leaves,
+        Block::Ice,
+        Block::Stone,
+    ] {
+        world.set_block(pos - IVec3::Y, support);
+        assert!(world.can_place(pos, Block::Snow), "{support:?}");
+    }
+    for support in [
+        Block::Air,
+        Block::Water,
+        Block::Snow,
+        Block::TallGrass,
+        Block::Torch,
+    ] {
+        world.set_block(pos - IVec3::Y, support);
+        assert!(!world.can_place(pos, Block::Snow), "{support:?}");
+    }
+}
+
+#[test]
+fn breaking_the_ground_removes_snow_above() {
+    let mut world = floor_world();
+    let ground = IVec3::new(3, 10, 3);
+    world.set_block(ground, Block::SnowyGrass);
+    world.set_block(ground + IVec3::Y, Block::Snow);
+    let changed = world.set_block_supported(ground, Block::Air);
+    assert!(changed.contains(&(ground + IVec3::Y)));
+    assert_eq!(world.block(ground + IVec3::Y), Block::Air);
+}
+
+#[test]
+fn snow_is_replaced_by_placed_blocks() {
+    let mut world = floor_world();
+    let pos = IVec3::new(3, 11, 3);
+    world.set_block(pos - IVec3::Y, Block::SnowyGrass);
+    world.set_block(pos, Block::Snow);
+    assert!(world.can_place(pos, Block::Stone));
+}

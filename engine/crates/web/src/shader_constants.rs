@@ -10,9 +10,9 @@ fn sky_shader_constants_match_cpu() {
     // Закатный цвет в шейдере неба дублирует `DUSK_SKY`: тёплое пятно должно быть
     // того же оттенка, что и тонировка неба.
     let [r, g, b] = DUSK_SKY;
-    assert!(SKY_SHADER.contains(&format!(
-        "const DUSK_COLOR: vec3<f32> = vec3<f32>({r}, {g}, {b});"
-    )));
+    let dusk = format!("const DUSK_COLOR: vec3<f32> = vec3<f32>({r}, {g}, {b});");
+    assert!(SKY_SHADER.contains(&dusk));
+    assert!(BLOCK_SHADER.contains(&dusk));
 }
 
 #[test]
@@ -25,6 +25,12 @@ fn shader_constants_match_cpu() {
 }
 
 #[test]
+fn emissive_flag_matches_cpu() {
+    let flag = world::tile::EMISSIVE_FLAG;
+    assert!(BLOCK_SHADER.contains(&format!("const EMISSIVE_FLAG: f32 = {flag:?};")));
+}
+
+#[test]
 fn cloud_shader_constants_match_cpu() {
     assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_MAP: i32 = {CLOUD_MAP};")));
     assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_CELL: f32 = {CLOUD_CELL}.0;")));
@@ -32,6 +38,14 @@ fn cloud_shader_constants_match_cpu() {
     assert!(CLOUDS_SHADER.contains(&format!("const CLOUD_HEIGHT: f32 = {CLOUD_HEIGHT}.0;")));
     assert!(CLOUDS_SHADER.contains("const GRID_RADIUS: i32 = 32;"));
     assert!(CLOUDS_SHADER.contains("const GRID_SIZE: u32 = 64u;"));
+}
+
+#[test]
+fn block_shader_cloud_shadow_constants_match_cpu() {
+    assert!(BLOCK_SHADER.contains(&format!("const CLOUD_MAP: i32 = {CLOUD_MAP};")));
+    assert!(BLOCK_SHADER.contains(&format!("const CLOUD_CELL: f32 = {CLOUD_CELL}.0;")));
+    let plane = CLOUD_Y as f32 + CLOUD_HEIGHT as f32 * 0.5;
+    assert!(BLOCK_SHADER.contains(&format!("const CLOUD_SHADOW_PLANE_Y: f32 = {plane:?};")));
 }
 
 #[test]

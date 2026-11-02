@@ -220,15 +220,17 @@ fn trees_keep_their_distance() {
     }
 }
 
+fn trees_in(biome: Biome) -> Vec<&'static Tree> {
+    let terrain = Terrain::new(1337);
+    forest_trees()
+        .iter()
+        .filter(|t| terrain.biome_at(t.base.x, t.base.z) == biome)
+        .collect()
+}
+
 #[test]
 fn forest_mix_matches_the_shares() {
-    let terrain = Terrain::new(1337);
-    let forest: Vec<&Tree> = forest_trees()
-        .iter()
-        .filter(|t| {
-            terrain.biome_at(t.base.x, t.base.z) == Biome::Forest && t.base.y <= HIGHLAND_HEIGHT
-        })
-        .collect();
+    let forest = trees_in(Biome::Forest);
     assert!(forest.len() > 2000, "{} forest trees", forest.len());
     let share =
         |kind| forest.iter().filter(|t| t.kind == kind).count() as f32 / forest.len() as f32;
@@ -238,21 +240,15 @@ fn forest_mix_matches_the_shares() {
         share(TreeKind::Spruce),
         share(TreeKind::BigOak),
     );
-    assert!((0.45..0.55).contains(&oak), "oak {oak}");
-    assert!((0.25..0.35).contains(&birch), "birch {birch}");
-    assert!((0.06..0.14).contains(&spruce), "spruce {spruce}");
-    assert!((0.06..0.14).contains(&big), "big oak {big}");
+    assert!((0.50..0.60).contains(&oak), "oak {oak}");
+    assert!((0.28..0.38).contains(&birch), "birch {birch}");
+    assert_eq!(spruce, 0.0);
+    assert!((0.07..0.17).contains(&big), "big oak {big}");
 }
 
 #[test]
-fn plains_grow_only_oak_and_birch_below_the_hills() {
-    let terrain = Terrain::new(1337);
-    let plains: Vec<&Tree> = forest_trees()
-        .iter()
-        .filter(|t| {
-            terrain.biome_at(t.base.x, t.base.z) == Biome::Plains && t.base.y <= HIGHLAND_HEIGHT
-        })
-        .collect();
+fn plains_grow_only_oak_and_birch() {
+    let plains = trees_in(Biome::Plains);
     assert!(plains.len() > 20, "{} plains trees", plains.len());
     assert!(
         plains
@@ -262,21 +258,33 @@ fn plains_grow_only_oak_and_birch_below_the_hills() {
 }
 
 #[test]
-fn hills_are_mostly_spruce_in_forest_and_plains() {
+fn spruce_grows_only_in_taiga() {
     let terrain = Terrain::new(1337);
-    for biome in [Biome::Forest, Biome::Plains] {
-        let hills: Vec<&Tree> = forest_trees()
+    let spruces: Vec<&Tree> = of_kind(TreeKind::Spruce).collect();
+    assert!(spruces.len() > 100, "{} spruces", spruces.len());
+    assert!(
+        spruces
             .iter()
-            .filter(|t| t.base.y > HIGHLAND_HEIGHT && terrain.biome_at(t.base.x, t.base.z) == biome)
-            .collect();
-        assert!(hills.len() > 10, "{biome:?}: {} trees", hills.len());
-        let spruce = hills.iter().filter(|t| t.kind == TreeKind::Spruce).count();
-        assert!(
-            spruce * 10 >= hills.len() * 7,
-            "{biome:?}: {spruce}/{}",
-            hills.len()
-        );
-    }
+            .all(|t| terrain.biome_at(t.base.x, t.base.z) == Biome::Taiga)
+    );
+}
+
+#[test]
+fn taiga_grows_only_spruce() {
+    let taiga = trees_in(Biome::Taiga);
+    assert!(taiga.len() > 500, "{} taiga trees", taiga.len());
+    assert!(taiga.iter().all(|t| t.kind == TreeKind::Spruce));
+}
+
+#[test]
+fn high_ground_outside_taiga_has_no_spruce() {
+    let terrain = Terrain::new(1337);
+    let high: Vec<&Tree> = forest_trees()
+        .iter()
+        .filter(|t| t.base.y > 78 && terrain.biome_at(t.base.x, t.base.z) != Biome::Taiga)
+        .collect();
+    assert!(high.len() > 10, "{} high trees", high.len());
+    assert!(high.iter().all(|t| t.kind != TreeKind::Spruce));
 }
 
 #[test]
@@ -297,8 +305,8 @@ fn no_trees_in_water_or_on_beaches() {
 #[test]
 fn forest_is_denser_than_plains_and_desert_is_empty() {
     let terrain = Terrain::new(1337);
-    let mut area = [0; 3];
-    let mut trees = [0; 3];
+    let mut area = [0; 4];
+    let mut trees = [0; 4];
     for z in -1024..1024 {
         for x in -1024..1024 {
             if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
@@ -402,7 +410,15 @@ fn assert_seamless(kind: TreeKind) {
                             .min()
                             .unwrap();
                         if from_edge >= MAX_REACH {
-                            assert_eq!(column.get(local), window[index(world)], "{world}");
+                            let without_snow = |block| match block {
+                                Block::Snow => Block::Air,
+                                block => block,
+                            };
+                            assert_eq!(
+                                without_snow(column.get(local)),
+                                without_snow(window[index(world)]),
+                                "{world}"
+                            );
                             compared += 1;
                         }
                     }
@@ -438,6 +454,50 @@ fn leaves_do_not_replace_logs_or_ground() {
                 if ground.get(p) != Block::Air {
                     assert_eq!(column.get(p), ground.get(p), "{p}");
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn taiga_crowns_carry_snow_on_top_only() {
+    let terrain = Terrain::new(1337);
+    let tree = *of_kind(TreeKind::Spruce).next().unwrap();
+    let key = ColumnPos::of_block(tree.base);
+    let column = terrain.generate_trees(key);
+    let origin = key.origin();
+    let mut snowy = 0;
+    for leaf in tree.leaves() {
+        let local = leaf - origin;
+        if !Column::contains(local) || !Column::contains(local + IVec3::Y) {
+            continue;
+        }
+        if column.get(local) != Block::SpruceLeaves {
+            continue;
+        }
+        let above = column.get(local + IVec3::Y);
+        if above == Block::Snow {
+            snowy += 1;
+        } else {
+            assert!(above.is_opaque() || above == Block::SpruceLeaves || above.is_log());
+        }
+    }
+    assert!(snowy > 0, "no snow on the spruce at {}", tree.base);
+}
+
+#[test]
+fn oak_crowns_outside_taiga_stay_bare() {
+    let terrain = Terrain::new(1337);
+    let tree = of_kind(TreeKind::Oak)
+        .find(|t| terrain.biome_at(t.base.x, t.base.z) == Biome::Forest)
+        .copied()
+        .unwrap();
+    let key = ColumnPos::of_block(tree.base);
+    let column = terrain.generate_trees(key);
+    for y in 0..WORLD_HEIGHT {
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                assert_ne!(column.get(IVec3::new(x, y, z)), Block::Snow);
             }
         }
     }

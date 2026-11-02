@@ -20,5 +20,8 @@
   { "name": "birch_leaves", "label": "берёзовая листва", "placeable": true },
   { "name": "spruce_log", "label": "еловое бревно", "placeable": true },
   { "name": "spruce_leaves", "label": "хвоя", "placeable": true },
-  { "name": "bedrock", "label": "коренная порода", "placeable": true }
+  { "name": "bedrock", "label": "коренная порода", "placeable": true },
+  { "name": "snowy_grass", "label": "заснеженная трава", "placeable": true },
+  { "name": "snow", "label": "снег", "placeable": true },
+  { "name": "ice", "label": "лёд", "placeable": true }
 ]

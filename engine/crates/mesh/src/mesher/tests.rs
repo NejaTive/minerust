@@ -29,7 +29,7 @@ fn full(_: IVec3) -> u8 {
     MAX_LIGHT
 }
 
-fn world_light(world: &World) -> LightMap {
+pub(super) fn world_light(world: &World) -> LightMap {
     let mut light = LightMap::new();
     for key in world.keys().collect::<Vec<_>>() {
         light.add_column(world, key);
@@ -527,10 +527,31 @@ fn world_face_count(world: &World, key: ColumnPos) -> (usize, usize) {
                 let pos = origin + IVec3::new(x, y, z);
                 let block = world.block(pos);
                 let neighbors = FACES.iter().map(|face| world.block(pos + face.normal));
-                if block.is_water() {
-                    water += neighbors.filter(|&n| n == Block::Air).count();
-                } else if block == Block::Lava {
-                    solid += neighbors.filter(|&n| n == Block::Air).count();
+                if let Some(kind) = block.fluid() {
+                    let visible = neighbors
+                        .enumerate()
+                        .filter(|&(i, n)| {
+                            if i == 0 {
+                                n.fluid() != Some(kind)
+                            } else {
+                                n == Block::Air || n.shape() != Shape::Cube
+                            }
+                        })
+                        .count();
+                    if block.is_water() {
+                        water += visible;
+                    } else {
+                        solid += visible;
+                    }
+                } else if block == Block::Ice {
+                    water += neighbors
+                        .filter(|&n| !n.is_opaque() && n != Block::Ice)
+                        .count();
+                } else if block == Block::Snow {
+                    solid += neighbors
+                        .enumerate()
+                        .filter(|&(i, n)| !n.is_opaque() && (i < 2 || n != Block::Snow))
+                        .count();
                 } else if block != Block::Air {
                     solid += neighbors.filter(|n| !n.is_opaque()).count();
                 }
@@ -660,16 +681,18 @@ fn tree_on_column_border_matches_whole_world() {
     }
 }
 
-fn world_mesh(world: &World, light: &LightMap, key: SectionPos) -> [(Vec<Vertex>, Vec<u16>); 3] {
+fn world_mesh(world: &World, light: &LightMap, key: SectionPos) -> [(Vec<Vertex>, Vec<u16>); 4] {
     let SectionMeshes {
         solid,
         cutout,
         water,
+        ice,
     } = mesh_world_section(world, light, key, AO).unwrap();
     [
         (vertices(&solid), indices(&solid)),
         (vertices(&cutout), indices(&cutout)),
         (vertices(&water), indices(&water)),
+        (vertices(&ice), indices(&ice)),
     ]
 }
 

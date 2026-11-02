@@ -25,6 +25,19 @@ const defaults = defaultSettings({
   autoStep: true,
   mouseSensitivity: 1,
   fov: 70,
+  coloredLight: true,
+  waterReflections: true,
+  groundFog: true,
+  plantSway: true,
+  hdr: true,
+  bloom: true,
+  waterDepth: true,
+  sunRays: true,
+  shadows: true,
+  shadowQualityHigh: true,
+  cloudShadows: true,
+  ssr: true,
+  autoExposure: true,
 })
 
 const load = (data: Record<string, string> = {}) =>
@@ -35,8 +48,24 @@ describe('loadSettings', () => {
     expect(load()).toEqual({ ...defaults, showDebug: false })
   })
 
-  it('погода по умолчанию включена', () => {
-    expect(load().weather).toBe(true)
+  it('погода и шейдерные эффекты по умолчанию включены', () => {
+    const s = load()
+    expect([
+      s.weather,
+      s.coloredLight,
+      s.waterReflections,
+      s.groundFog,
+      s.plantSway,
+      s.hdr,
+      s.bloom,
+      s.waterDepth,
+      s.sunRays,
+      s.shadows,
+      s.shadowQualityHigh,
+      s.cloudShadows,
+      s.ssr,
+      s.autoExposure,
+    ]).toEqual(Array(14).fill(true))
   })
 
   it('читает сохранённые значения', () => {
@@ -48,6 +77,19 @@ describe('loadSettings', () => {
       [KEYS.autoStep]: 'false',
       [KEYS.mouseSensitivity]: '1.5',
       [KEYS.fov]: '90',
+      [KEYS.coloredLight]: 'false',
+      [KEYS.waterReflections]: 'false',
+      [KEYS.groundFog]: 'false',
+      [KEYS.plantSway]: 'false',
+      [KEYS.hdr]: 'false',
+      [KEYS.bloom]: 'false',
+      [KEYS.waterDepth]: 'false',
+      [KEYS.sunRays]: 'false',
+      [KEYS.shadows]: 'false',
+      [KEYS.shadowQualityHigh]: 'false',
+      [KEYS.cloudShadows]: 'false',
+      [KEYS.ssr]: 'false',
+      [KEYS.autoExposure]: 'false',
       [KEYS.showDebug]: 'true',
     }
     expect(load(data)).toEqual({
@@ -58,6 +100,19 @@ describe('loadSettings', () => {
       autoStep: false,
       mouseSensitivity: 1.5,
       fov: 90,
+      coloredLight: false,
+      waterReflections: false,
+      groundFog: false,
+      plantSway: false,
+      hdr: false,
+      bloom: false,
+      waterDepth: false,
+      sunRays: false,
+      shadows: false,
+      shadowQualityHigh: false,
+      cloudShadows: false,
+      ssr: false,
+      autoExposure: false,
       showDebug: true,
     })
   })
@@ -95,6 +150,10 @@ describe('loadSettings', () => {
     expect(load({ [KEYS.clouds]: '1' }).clouds).toBe(false)
     expect(load({ [KEYS.autoStep]: '1' }).autoStep).toBe(false)
     expect(load({ [KEYS.weather]: '1' }).weather).toBe(false)
+    expect(load({ [KEYS.coloredLight]: '1' }).coloredLight).toBe(false)
+    expect(load({ [KEYS.waterReflections]: '1' }).waterReflections).toBe(false)
+    expect(load({ [KEYS.groundFog]: '1' }).groundFog).toBe(false)
+    expect(load({ [KEYS.plantSway]: '1' }).plantSway).toBe(false)
   })
 
   it('чистит ключи убранных настроек', () => {

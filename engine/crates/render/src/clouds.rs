@@ -13,6 +13,12 @@ const RAIN_CLOUD: Vec3 = Vec3::new(0.38, 0.4, 0.45);
 const FLASH_CLOUD: Vec3 = Vec3::new(0.9, 0.93, 1.0);
 const DUSK_STRENGTH: f32 = 0.8;
 
+const CLOUD_SHADOW_STRENGTH: f32 = 0.45;
+
+pub(crate) fn cloud_shadow_strength(light_strength: f32, rain: f32) -> f32 {
+    light_strength * CLOUD_SHADOW_STRENGTH * (1.0 - 2.0 * rain).clamp(0.0, 1.0)
+}
+
 pub(crate) fn cloud_color(night: f32, warm: f32, rain: f32, flash: f32) -> Vec3 {
     let dull = DAY_CLOUD
         .lerp(NIGHT_CLOUD, night)

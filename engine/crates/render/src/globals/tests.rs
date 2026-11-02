@@ -23,14 +23,21 @@ fn layout_matches_shader() {
         warm: 307.0,
         horizon_tilt: 308.0,
         star_rotation: Vec2::new(309.0, 310.0),
+        effects: 0b1010,
         cloud_color: Vec3::new(311.0, 312.0, 313.0),
         rain: 314.0,
         rain_drops: 315.0,
         flash: 316.0,
         cloud_threshold: 317.0,
+        snow: 318.0,
+        resolution: Vec2::new(319.0, 320.0),
+        near: 321.0,
+        far: 322.0,
+        sun_screen: Vec2::new(323.0, 324.0),
+        sun_ray: 325.0,
     };
     let bytes = globals.to_bytes();
-    assert_eq!(bytes.len(), 256);
+    assert_eq!(bytes.len(), 288);
     assert_eq!(f32_at(&bytes, 0), 0.0);
     assert_eq!(f32_at(&bytes, 60), 15.0);
     assert_eq!(f32_at(&bytes, 64), 100.0);
@@ -54,7 +61,7 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 208), 308.0);
     assert_eq!(f32_at(&bytes, 212), 309.0);
     assert_eq!(f32_at(&bytes, 216), 310.0);
-    assert_eq!(f32_at(&bytes, 220), 0.0);
+    assert_eq!(bytes[220..224], 0b1010u32.to_le_bytes());
     assert_eq!(f32_at(&bytes, 224), 311.0);
     assert_eq!(f32_at(&bytes, 228), 312.0);
     assert_eq!(f32_at(&bytes, 232), 313.0);
@@ -62,7 +69,14 @@ fn layout_matches_shader() {
     assert_eq!(f32_at(&bytes, 240), 315.0);
     assert_eq!(f32_at(&bytes, 244), 316.0);
     assert_eq!(f32_at(&bytes, 248), 317.0);
-    assert!(bytes[252..].iter().all(|&b| b == 0));
+    assert_eq!(f32_at(&bytes, 252), 318.0);
+    assert_eq!(f32_at(&bytes, 256), 319.0);
+    assert_eq!(f32_at(&bytes, 260), 320.0);
+    assert_eq!(f32_at(&bytes, 264), 321.0);
+    assert_eq!(f32_at(&bytes, 268), 322.0);
+    assert_eq!(f32_at(&bytes, 272), 323.0);
+    assert_eq!(f32_at(&bytes, 276), 324.0);
+    assert_eq!(f32_at(&bytes, 280), 325.0);
 }
 
 #[test]

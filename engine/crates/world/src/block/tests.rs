@@ -1,6 +1,6 @@
 use super::*;
 
-const ALL: [Block; 22] = Block::ALL;
+const ALL: [Block; 25] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -8,7 +8,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(22), Err(22));
+    assert_eq!(Block::try_from(25), Err(25));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -53,7 +53,8 @@ fn solid_and_opaque() {
             block,
             Block::TallGrass | Block::Poppy | Block::Dandelion | Block::Torch
         );
-        let solid = !matches!(block, Block::Air | Block::Water | Block::Lava) && !plant;
+        let solid =
+            !matches!(block, Block::Air | Block::Water | Block::Lava | Block::Snow) && !plant;
         assert_eq!(block.is_solid(), solid, "{block:?}");
         let opaque = !matches!(
             block,
@@ -63,9 +64,19 @@ fn solid_and_opaque() {
                 | Block::SpruceLeaves
                 | Block::Water
                 | Block::Lava
+                | Block::Snow
+                | Block::Ice
         ) && !plant;
-        assert_eq!(block.is_targetable(), solid || plant, "{block:?}");
-        assert_eq!(block.needs_support(), plant, "{block:?}");
+        assert_eq!(
+            block.is_targetable(),
+            solid || plant || block == Block::Snow,
+            "{block:?}"
+        );
+        assert_eq!(
+            block.needs_support(),
+            plant || block == Block::Snow,
+            "{block:?}"
+        );
         assert_eq!(block.is_opaque(), opaque, "{block:?}");
         assert_eq!(block.is_water(), block == Block::Water, "{block:?}");
     }
@@ -82,7 +93,7 @@ fn render_layers() {
             | Block::Poppy
             | Block::Dandelion
             | Block::Torch => RenderLayer::Cutout,
-            Block::Water => RenderLayer::Translucent,
+            Block::Water | Block::Ice => RenderLayer::Translucent,
             _ => RenderLayer::Opaque,
         };
         assert_eq!(block.render_layer(), layer, "{block:?}");
@@ -112,7 +123,7 @@ fn replaceable_cells() {
     for block in ALL {
         let expected = matches!(
             block,
-            Block::Air | Block::Water | Block::Lava | Block::TallGrass
+            Block::Air | Block::Water | Block::Lava | Block::TallGrass | Block::Snow
         );
         assert_eq!(block.is_replaceable(), expected, "{block:?}");
     }
@@ -326,4 +337,75 @@ fn only_bedrock_is_unbreakable() {
     assert!(def.solid && def.opaque && def.selectable);
     assert_eq!(def.label, "коренная порода");
     assert_eq!(Block::from_name("bedrock"), Some(Block::Bedrock));
+}
+
+#[test]
+fn snow_is_a_thin_replaceable_layer_on_support() {
+    let snow = Block::Snow;
+    assert_eq!(snow.shape(), Shape::Layer);
+    assert!(!snow.is_solid() && !snow.is_opaque());
+    assert!(snow.needs_support() && snow.is_replaceable() && snow.is_targetable());
+    assert_eq!(snow.support_dir(0), Some(IVec3::NEG_Y));
+    assert_eq!(snow.collision_height(), 2.0 / 16.0);
+    assert_eq!(
+        snow.bounds(0),
+        (Vec3::ZERO, Vec3::new(1.0, 2.0 / 16.0, 1.0))
+    );
+    assert_eq!(snow.render_layer(), RenderLayer::Opaque);
+    assert_eq!(Block::from_name("snow"), Some(Block::Snow));
+}
+
+#[test]
+fn collision_height_is_full_for_solids_only() {
+    for block in ALL {
+        let expected = match block {
+            Block::Snow => 2.0 / 16.0,
+            block if block.is_solid() => 1.0,
+            _ => 0.0,
+        };
+        assert_eq!(block.collision_height(), expected, "{block:?}");
+    }
+}
+
+#[test]
+fn only_ice_is_slippery() {
+    for block in ALL {
+        assert_eq!(block.is_slippery(), block == Block::Ice, "{block:?}");
+    }
+    let ice = Block::Ice;
+    assert!(ice.is_solid() && !ice.is_opaque());
+    assert_eq!(ice.render_layer(), RenderLayer::Translucent);
+    assert_eq!(Block::from_name("ice"), Some(Block::Ice));
+}
+
+#[test]
+fn snowy_grass_has_snow_top_striped_side_and_dirt_bottom() {
+    let block = Block::SnowyGrass;
+    assert_eq!(block.tile(Facing::Top), Some(Tile::Snow));
+    assert_eq!(block.tile(Facing::Side), Some(Tile::SnowyGrassSide));
+    assert_eq!(block.tile(Facing::Bottom), Some(Tile::Dirt));
+    assert_eq!(block.random_ticks(), Block::Grass.random_ticks());
+    assert!(block.is_grass() && Block::Grass.is_grass() && !Block::Dirt.is_grass());
+    assert_eq!(Block::from_name("snowy_grass"), Some(Block::SnowyGrass));
+}
+
+#[test]
+fn snow_tile_is_whitish_and_ice_is_light_blue() {
+    let mean = |tile| {
+        let pixels = tile_pixels(tile);
+        let n = (pixels.len() / 4) as u32;
+        [0, 1, 2].map(|c| pixels.chunks(4).map(|p| u32::from(p[c])).sum::<u32>() / n)
+    };
+    let [r, g, b] = mean(Tile::Snow);
+    assert!(r > 215 && g > 220 && b > 230 && b >= r, "{r} {g} {b}");
+    let [r, g, b] = mean(Tile::Ice);
+    assert!(b > r + 40 && g > r, "{r} {g} {b}");
+}
+
+#[test]
+fn snowy_side_has_white_stripe_over_dirt() {
+    let pixels = tile_pixels(Tile::SnowyGrassSide);
+    let row = |y: usize| &pixels[y * 64..(y + 1) * 64];
+    assert!(row(0).chunks(4).all(|p| p[0] > 190 && p[2] > 220));
+    assert!(row(15).chunks(4).all(|p| p[2] < p[0]));
 }

@@ -1,5 +1,9 @@
 mod arena;
+mod bloom;
 mod clouds;
+mod effects;
+mod exposure;
+mod exposure_pass;
 pub mod fog;
 mod frustum;
 mod globals;
@@ -8,11 +12,16 @@ mod gpu_timer;
 mod layout;
 mod outline;
 mod pipelines;
+mod post;
 mod quad_indices;
 mod rain;
 pub mod renderer;
 pub mod shaders;
+mod shadow;
+mod shadow_map;
 mod slots;
 mod texture;
 
+pub use effects::Effects;
 pub use renderer::{FrameCounts, FrameParams, PendingFrame, Renderer};
+pub use shadow::ShadowQuality;

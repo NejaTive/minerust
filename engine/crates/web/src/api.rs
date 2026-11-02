@@ -97,11 +97,34 @@ pub struct EngineSettings {
     #[wasm_bindgen(js_name = mouseSensitivity)]
     pub mouse_sensitivity: f32,
     pub fov: f32,
+    #[wasm_bindgen(js_name = coloredLight)]
+    pub colored_light: bool,
+    #[wasm_bindgen(js_name = waterReflections)]
+    pub water_reflections: bool,
+    #[wasm_bindgen(js_name = groundFog)]
+    pub ground_fog: bool,
+    #[wasm_bindgen(js_name = plantSway)]
+    pub plant_sway: bool,
+    pub hdr: bool,
+    pub bloom: bool,
+    #[wasm_bindgen(js_name = waterDepth)]
+    pub water_depth: bool,
+    #[wasm_bindgen(js_name = sunRays)]
+    pub sun_rays: bool,
+    pub shadows: bool,
+    #[wasm_bindgen(js_name = shadowQualityHigh)]
+    pub shadow_quality_high: bool,
+    #[wasm_bindgen(js_name = cloudShadows)]
+    pub cloud_shadows: bool,
+    pub ssr: bool,
+    #[wasm_bindgen(js_name = autoExposure)]
+    pub auto_exposure: bool,
 }
 
 #[wasm_bindgen]
 impl EngineSettings {
     #[wasm_bindgen(constructor)]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         render_distance: i32,
         ambient_occlusion: bool,
@@ -110,6 +133,19 @@ impl EngineSettings {
         auto_step: bool,
         mouse_sensitivity: f32,
         fov: f32,
+        colored_light: bool,
+        water_reflections: bool,
+        ground_fog: bool,
+        plant_sway: bool,
+        hdr: bool,
+        bloom: bool,
+        water_depth: bool,
+        sun_rays: bool,
+        shadows: bool,
+        shadow_quality_high: bool,
+        cloud_shadows: bool,
+        ssr: bool,
+        auto_exposure: bool,
     ) -> EngineSettings {
         EngineSettings {
             render_distance,
@@ -119,6 +155,19 @@ impl EngineSettings {
             auto_step,
             mouse_sensitivity,
             fov,
+            colored_light,
+            water_reflections,
+            ground_fog,
+            plant_sway,
+            hdr,
+            bloom,
+            water_depth,
+            sun_rays,
+            shadows,
+            shadow_quality_high,
+            cloud_shadows,
+            ssr,
+            auto_exposure,
         }
     }
 }
@@ -133,6 +182,19 @@ pub fn default_settings() -> EngineSettings {
         auto_step: true,
         mouse_sensitivity: DEFAULT_SENSITIVITY,
         fov: DEFAULT_FOV,
+        colored_light: true,
+        water_reflections: true,
+        ground_fog: true,
+        plant_sway: true,
+        hdr: true,
+        bloom: true,
+        water_depth: true,
+        sun_rays: true,
+        shadows: true,
+        shadow_quality_high: true,
+        cloud_shadows: true,
+        ssr: true,
+        auto_exposure: true,
     }
 }
 

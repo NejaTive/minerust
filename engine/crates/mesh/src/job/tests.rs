@@ -32,6 +32,7 @@ fn same(a: &SectionMeshes, b: &SectionMeshes) -> bool {
     a.solid.quads == b.solid.quads
         && a.cutout.quads == b.cutout.quads
         && a.water.quads == b.water.quads
+        && a.ice.quads == b.ice.quads
 }
 
 #[test]

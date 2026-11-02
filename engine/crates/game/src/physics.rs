@@ -16,6 +16,7 @@ pub const FLY_SPRINT_FACTOR: f32 = 2.0;
 pub const SPRINT_FOV_SCALE: f32 = 1.1;
 pub const SPRINT_FOV_TIME: f32 = 0.15;
 pub const AIR_ACCEL: f32 = 10.0;
+pub const ICE_ACCEL: f32 = 3.0;
 pub const STEP_HEIGHT: f32 = 1.0;
 pub const STEP_SMOOTH_TIME: f32 = 0.12;
 
@@ -70,6 +71,23 @@ pub fn medium(kind: FluidKind) -> &'static Medium {
 }
 
 const EPS: f32 = 1e-3;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Collision {
+    pub height: f32,
+    pub slippery: bool,
+}
+
+impl Collision {
+    pub const NONE: Collision = Collision {
+        height: 0.0,
+        slippery: false,
+    };
+    pub const FULL: Collision = Collision {
+        height: 1.0,
+        slippery: false,
+    };
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -196,6 +214,32 @@ impl Player {
         is_solid: impl Fn(IVec3) -> bool,
         fluid: impl Fn(IVec3) -> Option<(FluidKind, f32)>,
     ) {
+        let collision = |pos| {
+            if is_solid(pos) {
+                Collision::FULL
+            } else {
+                Collision::NONE
+            }
+        };
+        self.step_with(input, yaw, collision, fluid);
+    }
+
+    fn on_ice(&self, collision: &impl Fn(IVec3) -> Collision) -> bool {
+        let below = IVec3::new(
+            self.feet.x.floor() as i32,
+            (self.feet.y - 2.0 * EPS).floor() as i32,
+            self.feet.z.floor() as i32,
+        );
+        self.on_ground && collision(below).slippery
+    }
+
+    pub fn step_with(
+        &mut self,
+        input: &Input,
+        yaw: f32,
+        collision: impl Fn(IVec3) -> Collision,
+        fluid: impl Fn(IVec3) -> Option<(FluidKind, f32)>,
+    ) {
         let (sin, cos) = yaw.sin_cos();
         let forward = Vec3::new(cos, 0.0, sin);
         let right = Vec3::new(-sin, 0.0, cos);
@@ -234,11 +278,13 @@ impl Player {
                     WALK_SPEED
                 };
                 let target = Vec2::new(wish.x, wish.z) * speed;
-                let horizontal = if self.on_ground {
+                let current = Vec2::new(self.velocity.x, self.velocity.z);
+                let horizontal = if self.on_ice(&collision) {
+                    current.move_towards(target, ICE_ACCEL * TICK)
+                } else if self.on_ground {
                     target
                 } else {
-                    Vec2::new(self.velocity.x, self.velocity.z)
-                        .move_towards(target, AIR_ACCEL * TICK)
+                    current.move_towards(target, AIR_ACCEL * TICK)
                 };
                 self.velocity.x = horizontal.x;
                 self.velocity.z = horizontal.y;
@@ -268,9 +314,9 @@ impl Player {
         let mut against_wall = false;
         for axis in [1, 0, 2] {
             let before = self.feet;
-            let mut blocked = self.move_axis(axis, delta[axis], &is_solid);
+            let mut blocked = self.move_axis(axis, delta[axis], &collision);
             if blocked && axis != 1 && can_step && self.on_ground {
-                blocked = !self.step_up(before, axis, delta[axis], &is_solid);
+                blocked = !self.step_up(before, axis, delta[axis], &collision);
             }
             against_wall |= blocked && axis != 1;
         }
@@ -294,15 +340,15 @@ impl Player {
         start: Vec3,
         axis: usize,
         delta: f32,
-        is_solid: &impl Fn(IVec3) -> bool,
+        collision: &impl Fn(IVec3) -> Collision,
     ) -> bool {
         let saved = (self.feet, self.velocity);
         self.feet = start;
-        let raised = !self.move_axis(1, STEP_HEIGHT, is_solid)
-            && !self.move_axis(axis, delta, is_solid)
+        let raised = !self.move_axis(1, STEP_HEIGHT, collision)
+            && !self.move_axis(axis, delta, collision)
             && {
                 self.on_ground = false;
-                self.move_axis(1, -STEP_HEIGHT, is_solid) && self.feet.y > start.y + EPS
+                self.move_axis(1, -STEP_HEIGHT, collision) && self.feet.y > start.y + EPS
             };
         if raised {
             self.step_offset += self.feet.y - start.y;
@@ -313,7 +359,12 @@ impl Player {
         false
     }
 
-    fn move_axis(&mut self, axis: usize, delta: f32, is_solid: &impl Fn(IVec3) -> bool) -> bool {
+    fn move_axis(
+        &mut self,
+        axis: usize,
+        delta: f32,
+        collision: &impl Fn(IVec3) -> Collision,
+    ) -> bool {
         if delta == 0.0 {
             return false;
         }
@@ -325,20 +376,27 @@ impl Player {
         };
         let lo = (min + EPS).floor().as_ivec3();
         let hi = (max - EPS).floor().as_ivec3();
-        let blocked = |layer: i32| {
+        let (a, b) = match axis {
+            0 => (1, 2),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        let cells = |layer: i32| {
             let mut pos = lo;
             pos[axis] = layer;
-            let (a, b) = match axis {
-                0 => (1, 2),
-                1 => (0, 2),
-                _ => (0, 1),
-            };
-            (lo[a]..=hi[a]).any(|i| {
-                (lo[b]..=hi[b]).any(|j| {
-                    pos[a] = i;
-                    pos[b] = j;
-                    is_solid(pos)
+            (lo[a]..=hi[a]).flat_map(move |i| {
+                (lo[b]..=hi[b]).map(move |j| {
+                    let mut cell = pos;
+                    cell[a] = i;
+                    cell[b] = j;
+                    cell
                 })
+            })
+        };
+        let blocked = |layer: i32| {
+            cells(layer).any(|cell| {
+                let height = collision(cell).height;
+                height > 0.0 && (axis == 1 || min.y + EPS < cell.y as f32 + height)
             })
         };
 
@@ -350,15 +408,29 @@ impl Player {
                 self.velocity[axis] = 0.0;
                 return true;
             }
+        } else if axis == 1 {
+            let first = (min.y + EPS).floor() as i32;
+            let last = (min.y + delta - EPS).floor() as i32;
+            let floor = (last..=first)
+                .flat_map(cells)
+                .filter_map(|cell| {
+                    let height = collision(cell).height;
+                    (height > 0.0).then_some(cell.y as f32 + height)
+                })
+                .filter(|&top| top <= min.y + EPS && top >= min.y + delta - EPS)
+                .reduce(f32::max);
+            if let Some(top) = floor {
+                self.feet.y = top;
+                self.velocity.y = 0.0;
+                self.on_ground = true;
+                return true;
+            }
         } else {
             let first = (min[axis] + EPS).floor() as i32 - 1;
             let last = (min[axis] + delta + EPS).floor() as i32;
             if let Some(layer) = (last..=first).rev().find(|&layer| blocked(layer)) {
                 self.feet[axis] = (layer + 1) as f32 + below;
                 self.velocity[axis] = 0.0;
-                if axis == 1 {
-                    self.on_ground = true;
-                }
                 return true;
             }
         }

@@ -90,13 +90,17 @@ pub(crate) struct SectionMesh {
     pub(crate) solid: Option<GpuMesh>,
     pub(crate) cutout: Option<GpuMesh>,
     pub(crate) water: Option<GpuMesh>,
+    pub(crate) ice: Option<GpuMesh>,
     pub(crate) min: Vec3,
     pub(crate) max: Vec3,
 }
 
 impl SectionMesh {
     pub(crate) fn release(self, buffers: &mut SceneBuffers) {
-        for mesh in [self.solid, self.cutout, self.water].into_iter().flatten() {
+        for mesh in [self.solid, self.cutout, self.water, self.ice]
+            .into_iter()
+            .flatten()
+        {
             mesh.free(buffers);
         }
     }
@@ -111,7 +115,7 @@ pub(crate) fn upload_section(
     data: &SectionMeshes,
     min: Vec3,
 ) -> Result<Option<SectionMesh>, String> {
-    let meshes = [&data.solid, &data.cutout, &data.water];
+    let meshes = [&data.solid, &data.cutout, &data.water, &data.ice];
     let most = meshes.iter().map(|m| m.quads.len()).max().unwrap_or(0);
     buffers.indices.ensure(
         device,
@@ -129,15 +133,16 @@ pub(crate) fn upload_section(
             }
         }
     }
-    let [solid, cutout, water]: [Option<GpuMesh>; 3] =
+    let [solid, cutout, water, ice]: [Option<GpuMesh>; 4] =
         uploaded.try_into().unwrap_or_else(|_| unreachable!());
-    if solid.is_none() && cutout.is_none() && water.is_none() {
+    if [&solid, &cutout, &water, &ice].iter().all(|m| m.is_none()) {
         return Ok(None);
     }
     Ok(Some(SectionMesh {
         solid,
         cutout,
         water,
+        ice,
         min,
         max: min + SECTION_SIZE as f32,
     }))

@@ -1,5 +1,5 @@
 use game::Game;
-use render::Renderer;
+use render::{Effects, Renderer, ShadowQuality};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 use world::block::Block;
@@ -22,6 +22,7 @@ pub struct Engine {
     streamer: Streamer,
     profiler: Profiler,
     clouds: bool,
+    effects: Effects,
 }
 
 #[wasm_bindgen]
@@ -66,6 +67,7 @@ impl Engine {
             streamer,
             profiler,
             clouds: true,
+            effects: Effects::default(),
         })
     }
 
@@ -126,6 +128,25 @@ impl Engine {
         self.streamer
             .set_ambient_occlusion(settings.ambient_occlusion, &self.game, &self.renderer);
         self.clouds = settings.clouds;
+        self.effects = Effects {
+            colored_light: settings.colored_light,
+            water_reflections: settings.water_reflections,
+            ground_fog: settings.ground_fog,
+            plant_sway: settings.plant_sway,
+            hdr: settings.hdr,
+            bloom: settings.bloom,
+            water_depth: settings.water_depth,
+            sun_rays: settings.sun_rays,
+            shadows: settings.shadows,
+            cloud_shadows: settings.cloud_shadows,
+            ssr: settings.ssr,
+            auto_exposure: settings.auto_exposure,
+            shadow_quality: if settings.shadow_quality_high {
+                ShadowQuality::High
+            } else {
+                ShadowQuality::Low
+            },
+        };
         self.game.set_weather_enabled(settings.weather);
         self.game.set_auto_step(settings.auto_step);
         self.game
@@ -181,6 +202,7 @@ impl Engine {
             .set_camera_state(&state)
             .map_err(|_| JsError::new(BAD_CAMERA_STATE))?;
         self.profiler.restart_load();
+        self.renderer.reset_exposure();
         Ok(())
     }
 
@@ -267,7 +289,7 @@ impl Engine {
 
     pub fn render(&mut self, time: f32) -> Result<(), JsError> {
         let t_start = self.profiler.tick();
-        self.game.update(time);
+        let dt = self.game.update(time);
         let t_stream = self.profiler.tick();
         self.streamer
             .update(&mut self.game, &mut self.renderer, &mut self.profiler);
@@ -291,6 +313,8 @@ impl Engine {
             self.streamer.radius(),
             self.renderer.aspect(),
             self.clouds,
+            self.effects,
+            dt,
         );
         let Some(pending) = self.renderer.begin(&params).map_err(|e| JsError::new(&e))? else {
             return Ok(());

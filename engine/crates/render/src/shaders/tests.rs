@@ -61,12 +61,25 @@ fn clouds_shader_validates() {
 }
 
 #[test]
+fn bloom_shader_validates() {
+    let module = naga::front::wgsl::parse_str(BLOOM_SHADER).expect("wgsl parses");
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::empty(),
+    )
+    .validate(&module)
+    .expect("wgsl validates");
+}
+
+#[test]
 fn every_shader_validates_with_the_full_globals_layout() {
     for (name, source) in [
         ("block", BLOCK_SHADER),
         ("sky", SKY_SHADER),
         ("clouds", CLOUDS_SHADER),
         ("rain", RAIN_SHADER),
+        ("post", POST_SHADER),
+        ("rays", RAYS_SHADER),
     ] {
         let module = naga::front::wgsl::parse_str(source).expect(name);
         naga::valid::Validator::new(
@@ -111,6 +124,8 @@ fn bitwise_operators_are_not_mixed_with_arithmetic_without_parentheses() {
         ("sky", SKY_SHADER),
         ("clouds", CLOUDS_SHADER),
         ("rain", RAIN_SHADER),
+        ("post", POST_SHADER),
+        ("rays", RAYS_SHADER),
     ] {
         for line in source.lines() {
             let code = line.split("//").next().unwrap();
@@ -126,4 +141,18 @@ fn bitwise_operators_are_not_mixed_with_arithmetic_without_parentheses() {
 fn bitwise_lint_catches_the_bad_pattern() {
     assert!(mixes_bitwise_with_arithmetic("let a = x * 3u ^ y;"));
     assert!(!mixes_bitwise_with_arithmetic("let a = (x * 3u) ^ y;"));
+}
+
+#[test]
+fn shadow_data_size_matches_rust_layout() {
+    let module = module();
+    let (_, data) = module
+        .types
+        .iter()
+        .find(|(_, t)| t.name.as_deref() == Some("ShadowData"))
+        .expect("ShadowData");
+    let naga::TypeInner::Struct { span, .. } = data.inner else {
+        panic!("ShadowData is not a struct");
+    };
+    assert_eq!(span as usize, crate::shadow::ShadowData::SIZE);
 }

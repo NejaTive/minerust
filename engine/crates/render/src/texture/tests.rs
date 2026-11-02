@@ -39,6 +39,13 @@ fn generates_every_layer_with_all_mips() {
             assert!(layer.chunks(4).all(|p| p[3] == WATER_ALPHA), "{tile:?}");
             continue;
         }
+        if tile == Tile::Ice {
+            assert!(
+                layer.chunks(4).all(|p| (100..255).contains(&p[3])),
+                "{tile:?}"
+            );
+            continue;
+        }
         assert!(
             layer.chunks(4).all(|p| p[3] == 0 || p[3] == 255),
             "{tile:?}"

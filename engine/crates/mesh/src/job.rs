@@ -144,7 +144,7 @@ pub fn run_job(job: &[u8]) -> Vec<u8> {
         }
         let meshes = mesh_cached(&blocks, &lights, &datas, options);
         out.push(sy);
-        for mesh in [&meshes.solid, &meshes.cutout, &meshes.water] {
+        for mesh in [&meshes.solid, &meshes.cutout, &meshes.water, &meshes.ice] {
             out.extend_from_slice(&(mesh.quads.len() as u32).to_le_bytes());
             for quad in &mesh.quads {
                 out.extend(quad.words().into_iter().flat_map(u32::to_le_bytes));
@@ -174,13 +174,14 @@ pub fn decode_result(bytes: &[u8]) -> JobResult {
             at += len * QUAD_BYTES;
             MeshData { quads }
         };
-        let (solid, cutout, water) = (read_mesh(), read_mesh(), read_mesh());
+        let (solid, cutout, water, ice) = (read_mesh(), read_mesh(), read_mesh(), read_mesh());
         sections.push((
             sy,
             SectionMeshes {
                 solid,
                 cutout,
                 water,
+                ice,
             },
         ));
     }

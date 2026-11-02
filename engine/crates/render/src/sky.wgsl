@@ -17,16 +17,26 @@ struct Globals {
     horizon_tilt: f32,
     star_cos: f32,
     star_sin: f32,
+    effects: u32,
     cloud_color: vec3<f32>,
     rain: f32,
     rain_drops: f32,
     flash: f32,
     cloud_threshold: f32,
+    snow: f32,
+    resolution: vec2<f32>,
+    near: f32,
+    far: f32,
+    sun_screen: vec2<f32>,
+    sun_ray: f32,
 };
 
 @group(0) @binding(0)
 var<uniform> globals: Globals;
 
+const FX_HDR: u32 = 16u;
+const HDR_SUN_GAIN: f32 = 6.0;
+const HDR_MOON_GAIN: f32 = 1.5;
 const SUN_HALF: f32 = 0.05;
 const MOON_HALF: f32 = 0.04;
 const SUN_COLOR: vec3<f32> = vec3<f32>(1.6, 1.45, 1.1);
@@ -100,6 +110,14 @@ fn square_body(dir: vec3<f32>, light: vec3<f32>, half_size: f32) -> vec4<f32> {
     return vec4<f32>(disc * front, halo * front, u, v);
 }
 
+// Одинаково в sky.wgsl и shader.wgsl: туман сцены сходится с горизонтом неба.
+fn dusk_glow(dir: vec3<f32>, height: f32) -> f32 {
+    let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
+    let side = max(dot(normalize(dir.xz + vec2<f32>(1e-5)), sun_flat), 0.0);
+    let glow = globals.warm * pow(side, 3.0) * exp(-6.0 * height) * smoothstep(0.0, 0.07, height);
+    return clamp(glow, 0.0, 1.0);
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let dir = normalize((globals.view_dir * vec4<f32>(in.ndc, 1.0, 0.0)).xyz);
@@ -108,10 +126,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let height = clamp((dir.y - edge) / (1.0 - edge), 0.0, 1.0);
     var color = mix(globals.fog_color, globals.zenith, pow(smoothstep(0.0, 1.0, height), 0.6));
 
-    let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
-    let side = max(dot(normalize(dir.xz + vec2<f32>(1e-5)), sun_flat), 0.0);
-    let glow = globals.warm * pow(side, 3.0) * exp(-6.0 * height) * smoothstep(0.0, 0.07, height);
-    color = mix(color, DUSK_COLOR * 1.3, clamp(glow, 0.0, 1.0));
+    color = mix(color, DUSK_COLOR * 1.3, dusk_glow(dir, height));
 
     let above = smoothstep(edge - 0.06, edge - 0.03, dir.y);
     let clear = 1.0 - globals.rain;
@@ -119,10 +134,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     var moon = square_body(dir, -globals.sun_dir, MOON_HALF);
     let moon_uv = moon.zw;
     moon = moon * vec4<f32>(clear, clear, 1.0, 1.0);
-    let sun_tint = mix(SUN_LOW_COLOR, SUN_COLOR, smoothstep(0.0, 0.4, globals.sun_dir.y));
+    let hdr = (globals.effects & FX_HDR) != 0u;
+    let sun_tint = mix(SUN_LOW_COLOR, SUN_COLOR, smoothstep(0.0, 0.4, globals.sun_dir.y)) * select(1.0, HDR_SUN_GAIN, hdr);
     color += sun_tint * sun.y * 0.5 * above;
     color = mix(color, sun_tint, sun.x * above);
-    let moon_color = MOON_COLOR * (1.0 - 0.5 * moon_surface(moon_uv));
+    let moon_color = MOON_COLOR * (1.0 - 0.5 * moon_surface(moon_uv)) * select(1.0, HDR_MOON_GAIN, hdr);
     color += MOON_COLOR * moon.y * 0.15 * above;
     color = mix(color, moon_color, moon.x * above * (1.0 - sun.x));
 

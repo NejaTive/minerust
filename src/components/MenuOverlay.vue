@@ -5,6 +5,7 @@ import { pauseMenuEscAction } from '../input/lock-policy'
 import type { Settings, SettingsLimits } from '../settings/settings'
 import { useWorlds, type CreateWorldForm } from '../world/useWorlds'
 import ControlsScreen from './menu/ControlsScreen.vue'
+import GraphicsScreen from './menu/GraphicsScreen.vue'
 import CreateWorldScreen from './menu/CreateWorldScreen.vue'
 import DeleteWorldScreen from './menu/DeleteWorldScreen.vue'
 import PauseScreen from './menu/PauseScreen.vue'
@@ -86,7 +87,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
       <TitleScreen @go="go" />
       <p class="version">{{ VERSION }}</p>
     </template>
-    <div v-else class="panel px-frame" role="dialog" aria-modal="true" :aria-label="TITLES[screen]">
+    <div
+      v-else
+      class="panel px-frame"
+      :class="{ fit: screen === 'graphics' }"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="TITLES[screen]"
+    >
       <h1>{{ screen === 'main' ? 'Пауза' : TITLES[screen] }}</h1>
 
       <PauseScreen
@@ -127,6 +135,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
         :show-controls="!inWorld"
         @update:settings="emit('update:settings', $event)"
         @controls="go('controls')"
+        @graphics="go('graphics')"
+        @back="back"
+      />
+      <GraphicsScreen
+        v-else-if="screen === 'graphics'"
+        :settings="settings"
+        :limits="limits"
+        @update:settings="emit('update:settings', $event)"
         @back="back"
       />
       <ControlsScreen v-else @back="back" />
@@ -157,6 +173,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
   width: min(624px, 100%);
   margin: auto;
   padding: 20px;
+}
+.fit {
+  max-height: 100%;
 }
 h1 {
   margin: 0 0 6px;
