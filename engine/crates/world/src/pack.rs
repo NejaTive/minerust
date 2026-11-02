@@ -8,6 +8,17 @@ use crate::textures::{
 use crate::tile::Tile;
 
 const BLOCKS_DIR: &str = "assets/minecraft/textures/blocks/";
+const GUI_DIR: &str = "assets/minecraft/textures/gui/";
+const GUI_WIDGETS: &str = "widgets.png";
+const GUI_ICONS: &str = "icons.png";
+const GUI_INVENTORY: &str = "container/inventory.png";
+const GUI_SIZE_UNITS: u32 = 256;
+const PANEL_CORNER_UNITS: u32 = 4;
+const PANEL_WIDTH_UNITS: u32 = 176;
+const PANEL_HEIGHT_UNITS: u32 = 166;
+const PANEL_FLAT_X_UNITS: u32 = 80;
+const PANEL_FLAT_Y_UNITS: u32 = 30;
+const PANEL_EDGE_UNITS: u32 = 80;
 const MIN_TILE_SIZE: u32 = 16;
 const MAX_TILE_SIZE: u32 = 512;
 const MAX_ENTRY_BYTES: u64 = 64 << 20;
@@ -31,6 +42,18 @@ pub struct TexturePack {
     pub textures: TextureSet,
     pub description: String,
     pub icon: Option<Vec<u8>>,
+    pub gui: GuiImages,
+}
+
+/// PNG-листы интерфейса; координаты в них считаются в единицах 256×256 (`width / 256` пикселей на единицу).
+#[derive(Clone)]
+pub struct GuiImages {
+    pub widgets: Vec<u8>,
+    pub icons: Vec<u8>,
+    pub inventory: Vec<u8>,
+    /// Девять квадратов 3×3 из углов, краёв и фона панели инвентаря, для `border-image`.
+    pub panel: Vec<u8>,
+    pub panel_slice: u32,
 }
 
 fn source(tile: Tile) -> (&'static str, [f32; 3]) {
@@ -94,10 +117,12 @@ pub fn load(zip_bytes: &[u8]) -> Result<TexturePack, String> {
     };
     let textures = build(&mut read, Some(&builtin().textures))?;
     let (description, icon) = read_meta(&mut read);
+    let gui = gui_images(&mut read);
     Ok(TexturePack {
         textures,
         description,
         icon,
+        gui,
     })
 }
 
@@ -108,7 +133,82 @@ pub fn builtin() -> TexturePack {
         textures,
         description: "Faithful 32x".into(),
         icon: None,
+        gui: builtin_gui(),
     }
+}
+
+pub fn builtin_gui() -> GuiImages {
+    gui_images(&mut |_| None)
+}
+
+fn gui_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> GuiImages {
+    let mut sheet = |name: &str| {
+        read(&format!("{GUI_DIR}{name}"))
+            .and_then(|bytes| {
+                let image = decode_png(&bytes).ok()?;
+                (image.width >= MIN_TILE_SIZE && image.width == image.height)
+                    .then_some((bytes, image))
+            })
+            .unwrap_or_else(|| {
+                let bytes = builtin_gui_file(name).expect("built-in gui sheets are complete");
+                let image = decode_png(bytes).expect("built-in gui sheets are valid");
+                (bytes.to_vec(), image)
+            })
+    };
+    let (widgets, _) = sheet(GUI_WIDGETS);
+    let (icons, _) = sheet(GUI_ICONS);
+    let (inventory, image) = sheet(GUI_INVENTORY);
+    let (panel, panel_slice) = panel_image(&image);
+    GuiImages {
+        widgets,
+        icons,
+        inventory,
+        panel,
+        panel_slice,
+    }
+}
+
+fn panel_image(sheet: &DecodedImage) -> (Vec<u8>, u32) {
+    let width = sheet.width;
+    let unit = |v: u32| v * width / GUI_SIZE_UNITS;
+    let corner = unit(PANEL_CORNER_UNITS).max(1);
+    let right = unit(PANEL_WIDTH_UNITS) - corner;
+    let bottom = unit(PANEL_HEIGHT_UNITS) - corner;
+    let edge = unit(PANEL_EDGE_UNITS);
+    let out = corner * 3;
+    let mut rgba = vec![0u8; (out * out * 4) as usize];
+    let cells = [
+        ((0, 0), (0, 0)),
+        ((1, 0), (edge, 0)),
+        ((2, 0), (right, 0)),
+        ((0, 1), (0, edge)),
+        ((1, 1), (unit(PANEL_FLAT_X_UNITS), unit(PANEL_FLAT_Y_UNITS))),
+        ((2, 1), (right, edge)),
+        ((0, 2), (0, bottom)),
+        ((1, 2), (edge, bottom)),
+        ((2, 2), (right, bottom)),
+    ];
+    for ((cx, cy), (sx, sy)) in cells {
+        for y in 0..corner {
+            for x in 0..corner {
+                let from = (((sy + y) * width + sx + x) * 4) as usize;
+                let to = (((cy * corner + y) * out + cx * corner + x) * 4) as usize;
+                rgba[to..to + 4].copy_from_slice(&sheet.rgba[from..from + 4]);
+            }
+        }
+    }
+    (encode_png(out, &rgba), corner)
+}
+
+fn encode_png(size: u32, rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, size, size);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().expect("png header");
+    writer.write_image_data(rgba).expect("png data");
+    writer.finish().expect("png end");
+    out
 }
 
 macro_rules! builtin_files {
@@ -158,6 +258,19 @@ fn builtin_file(path: &str) -> Option<&'static [u8]> {
     BUILTIN
         .iter()
         .find(|(file, _)| *file == name)
+        .map(|(_, bytes)| *bytes)
+}
+
+const BUILTIN_GUI: &[(&str, &[u8])] = builtin_files![
+    "gui/widgets.png",
+    "gui/icons.png",
+    "gui/container/inventory.png",
+];
+
+fn builtin_gui_file(name: &str) -> Option<&'static [u8]> {
+    BUILTIN_GUI
+        .iter()
+        .find(|(file, _)| file.strip_prefix("gui/") == Some(name))
         .map(|(_, bytes)| *bytes)
 }
 
