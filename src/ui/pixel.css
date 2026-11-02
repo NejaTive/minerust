@@ -51,6 +51,32 @@ body,
   text-rendering: optimizeSpeed;
 }
 
+.px-scroll {
+  padding-right: 8px;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .px-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--px-btn) var(--px-panel-dark);
+  }
+}
+.px-scroll::-webkit-scrollbar {
+  width: 12px;
+}
+.px-scroll::-webkit-scrollbar-track {
+  background: var(--px-panel-dark);
+}
+.px-scroll::-webkit-scrollbar-thumb {
+  background: var(--px-btn);
+  border-radius: 0;
+  box-shadow:
+    inset 2px 2px 0 var(--px-btn-light),
+    inset -2px -2px 0 var(--px-btn-dark);
+}
+.px-scroll::-webkit-scrollbar-button {
+  display: none;
+}
+
 .px-menu-bg {
   background:
     linear-gradient(rgb(0 0 0 / 0.62), rgb(0 0 0 / 0.62)),
