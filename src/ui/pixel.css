@@ -36,6 +36,7 @@
   --px-red-light: #d46a6a;
   --px-red-dark: #5c1f1f;
   --px-tile: 64px;
+  --gui-u: 2px;
 }
 
 html,
@@ -92,16 +93,18 @@ body,
     inset -4px -4px 0 var(--px-panel-dark);
 }
 
-.px-slot {
-  box-sizing: border-box;
-  background: rgb(0 0 0 / 0.45);
-  border: 4px solid;
-  border-color: #373737 #fff #fff #373737;
+.gui-panel {
+  border: calc(4 * var(--gui-u)) solid transparent;
+  border-image: var(--gui-panel) var(--gui-panel-slice) fill / calc(4 * var(--gui-u)) stretch;
+  image-rendering: pixelated;
 }
-.px-slot.selected {
-  background: rgb(255 255 255 / 0.2);
-  border-color: #fff;
-  box-shadow: 0 0 0 2px var(--px-black);
+
+.gui-slot {
+  box-sizing: border-box;
+  background: var(--gui-inventory) calc(-7 * var(--gui-u)) calc(-83 * var(--gui-u)) /
+    calc(256 * var(--gui-u)) calc(256 * var(--gui-u)) no-repeat;
+  border: 0;
+  image-rendering: pixelated;
 }
 
 .px-text {
@@ -124,53 +127,63 @@ body,
   color: var(--px-text-dim);
 }
 .px-menu button {
+  position: relative;
   box-sizing: border-box;
-  min-height: 44px;
-  padding: 6px 12px;
+  height: calc(20 * var(--gui-u));
+  padding: 0 12px;
   color: var(--px-text);
   font: inherit;
   text-shadow: inherit;
-  background: var(--px-btn);
-  border: 2px solid var(--px-black);
-  box-shadow:
-    inset 2px 2px 0 var(--px-btn-light),
-    inset -2px -2px 0 var(--px-btn-dark);
+  background: none;
+  border: 0;
   cursor: pointer;
+  isolation: isolate;
+}
+.px-menu button::before,
+.px-menu button::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: -1;
+  content: '';
+  background: var(--gui-widgets) no-repeat;
+  background-size: calc(256 * var(--gui-u)) calc(256 * var(--gui-u));
+  background-position-y: calc(-66 * var(--gui-u));
+  image-rendering: pixelated;
+}
+.px-menu button::before {
+  right: 50%;
+  left: 0;
+  background-position-x: 0;
+}
+.px-menu button::after {
+  right: 0;
+  left: 50%;
+  background-position-x: calc(100% + 56 * var(--gui-u));
+}
+.px-menu button:hover:not(:disabled)::before,
+.px-menu button:hover:not(:disabled)::after,
+.px-menu button:focus-visible::before,
+.px-menu button:focus-visible::after {
+  background-position-y: calc(-86 * var(--gui-u));
+}
+.px-menu button:disabled::before,
+.px-menu button:disabled::after {
+  background-position-y: calc(-46 * var(--gui-u));
 }
 .px-menu button:hover:not(:disabled),
 .px-menu button:focus-visible {
   color: var(--px-text-hover);
-  border-color: #fff;
   outline: none;
-}
-.px-menu button:active:not(:disabled) {
-  box-shadow:
-    inset 2px 2px 0 var(--px-btn-dark),
-    inset -2px -2px 0 var(--px-btn-light);
 }
 .px-menu button:disabled {
   color: var(--px-text-dim);
   text-shadow: none;
-  background: var(--px-btn-off);
-  box-shadow:
-    inset 2px 2px 0 #7a7a7a,
-    inset -2px -2px 0 #444;
   cursor: default;
 }
-.px-menu button.primary {
-  background: var(--px-green);
-  box-shadow:
-    inset 2px 2px 0 var(--px-green-light),
-    inset -2px -2px 0 var(--px-green-dark);
-}
-.px-menu button.danger {
-  background: var(--px-red);
-  box-shadow:
-    inset 2px 2px 0 var(--px-red-light),
-    inset -2px -2px 0 var(--px-red-dark);
-}
 .px-menu button.selected {
-  border-color: #fff;
+  outline: 2px solid #fff;
+  outline-offset: -2px;
 }
 .px-menu input[type='text'] {
   box-sizing: border-box;

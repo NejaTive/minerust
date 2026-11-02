@@ -1,10 +1,27 @@
 import { reactive } from 'vue'
 import type { PackStore } from './packStore'
 
+export interface GuiBytes {
+  widgets: Uint8Array
+  icons: Uint8Array
+  inventory: Uint8Array
+  panel: Uint8Array
+  panelSlice: number
+}
+
+export interface GuiUrls {
+  widgets: string
+  icons: string
+  inventory: string
+  panel: string
+  panelSlice: number
+}
+
 export interface PackDescription {
   description: string
   icon?: Uint8Array
   tileSize: number
+  gui?: GuiBytes
 }
 
 export interface PackTarget {
@@ -17,6 +34,7 @@ export interface PackState {
   name: string
   description: string
   iconUrl: string | undefined
+  gui: GuiUrls | undefined
   tileSize: number
   error: string
   busy: boolean
@@ -32,12 +50,18 @@ export function createPackManager(deps: {
   parse: (bytes: Uint8Array) => PackDescription
   iconUrl?: (icon: Uint8Array) => string
   revokeIconUrl?: (url: string) => void
+  gui?: {
+    standard: () => GuiBytes
+    url: (bytes: Uint8Array) => string
+    revoke: (url: string) => void
+  }
 }) {
   const state = reactive<PackState>({
     active: false,
     name: '',
     description: '',
     iconUrl: undefined,
+    gui: undefined,
     tileSize: DEFAULT_TILE_SIZE,
     error: '',
     busy: false,
@@ -47,8 +71,24 @@ export function createPackManager(deps: {
   let bytes: Uint8Array | undefined
   let restored: Promise<void> | undefined
 
+  function showGui(bytes: GuiBytes | undefined) {
+    const gui = deps.gui
+    if (!gui) return
+    const old = state.gui
+    const source = bytes ?? gui.standard()
+    state.gui = {
+      widgets: gui.url(source.widgets),
+      icons: gui.url(source.icons),
+      inventory: gui.url(source.inventory),
+      panel: gui.url(source.panel),
+      panelSlice: source.panelSlice,
+    }
+    if (old) for (const url of [old.widgets, old.icons, old.inventory, old.panel]) gui.revoke(url)
+  }
+
   function show(name: string, info: PackDescription) {
     clearIcon()
+    showGui(info.gui)
     state.active = true
     state.name = name
     state.description = info.description
@@ -63,6 +103,7 @@ export function createPackManager(deps: {
 
   function showStandard() {
     clearIcon()
+    showGui(undefined)
     bytes = undefined
     state.active = false
     state.name = ''
@@ -79,6 +120,7 @@ export function createPackManager(deps: {
 
   async function doRestore() {
     try {
+      showGui(undefined)
       const stored = await deps.store.load()
       if (!stored) return
       show(stored.name, deps.parse(stored.bytes))

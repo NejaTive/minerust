@@ -1,7 +1,12 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it, vi } from 'vitest'
 import { createIndexedDbPackStore, createMemoryPackStore } from './packStore'
-import { createPackManager, type PackDescription, type PackTarget } from './texturePack'
+import {
+  createPackManager,
+  type GuiBytes,
+  type PackDescription,
+  type PackTarget,
+} from './texturePack'
 
 const bytes = (...values: number[]) => new Uint8Array(values)
 
@@ -97,5 +102,60 @@ describe('хранилище пака в IndexedDB', () => {
     expect(await store.load()).toEqual({ name: 'a.zip', bytes: bytes(1, 2, 3) })
     await store.clear()
     expect(await store.load()).toBeNull()
+  })
+})
+
+describe('интерфейс из пака', () => {
+  const gui = (tag: number): GuiBytes => ({
+    widgets: bytes(tag, 1),
+    icons: bytes(tag, 2),
+    inventory: bytes(tag, 3),
+    panel: bytes(tag, 4),
+    panelSlice: 8,
+  })
+
+  function guiSetup() {
+    const urls: string[] = []
+    const revoked: string[] = []
+    const manager = createPackManager({
+      store: createMemoryPackStore(),
+      parse: () => ({ description: '', tileSize: 32, gui: gui(7) }),
+      gui: {
+        standard: () => gui(0),
+        url: (b) => {
+          const url = `blob:${b[0]}-${b[1]}-${urls.length}`
+          urls.push(url)
+          return url
+        },
+        revoke: (url) => revoked.push(url),
+      },
+    })
+    return { manager, urls, revoked }
+  }
+
+  it('не обращается к wasm при создании, встроенный интерфейс — при restore', async () => {
+    const { manager, urls } = guiSetup()
+    expect(urls).toHaveLength(0)
+    expect(manager.state.gui).toBeUndefined()
+    await manager.restore()
+    expect(urls).toHaveLength(4)
+    expect(manager.state.gui).toMatchObject({ widgets: 'blob:0-1-0', panelSlice: 8 })
+  })
+
+  it('пак подменяет интерфейс и освобождает старые URL, сброс возвращает встроенный', async () => {
+    const { manager, urls, revoked } = guiSetup()
+    await manager.restore()
+    await manager.install('pack.zip', bytes(1))
+    expect(manager.state.gui?.widgets).toBe('blob:7-1-4')
+    expect(revoked).toEqual(urls.slice(0, 4))
+    await manager.reset()
+    expect(manager.state.gui?.widgets).toMatch(/^blob:0-1-/)
+    expect(revoked).toHaveLength(8)
+  })
+
+  it('сохранённый пак виден без движка', async () => {
+    const { manager } = guiSetup()
+    await manager.install('pack.zip', bytes(1))
+    expect(manager.state.gui?.icons).toBe('blob:7-2-5')
   })
 })
