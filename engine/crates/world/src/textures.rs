@@ -1,19 +1,24 @@
+use crate::biome_color::{BiomePalette, BiomeTint};
 use crate::tile::{EMISSIVE_FLAG, Tile};
 
 pub const MAX_LAYERS: usize = 256;
 pub const WHITE: [f32; 3] = [1.0; 3];
 
 pub struct TileTexture {
+    /// Кадры подряд; при `overlay` последний слой — наложение, окрашиваемое травой биома.
     pub layers: Vec<u8>,
     pub frames: u32,
     pub fps: f32,
     pub tint: [f32; 3],
     pub interpolate: bool,
+    pub biome: BiomeTint,
+    pub overlay: bool,
 }
 
 pub struct TextureSet {
     size: u32,
     tiles: Vec<TileTexture>,
+    palette: BiomePalette,
 }
 
 pub struct DecodedImage {
@@ -86,7 +91,13 @@ impl TileTexture {
             fps: 0.0,
             tint: WHITE,
             interpolate: false,
+            biome: BiomeTint::None,
+            overlay: false,
         }
+    }
+
+    pub fn layer_span(&self) -> u32 {
+        self.frames + u32::from(self.overlay)
     }
 }
 
@@ -95,9 +106,17 @@ impl TextureSet {
         crate::pack::builtin().textures
     }
 
-    pub fn from_tiles(size: u32, tiles: Vec<TileTexture>) -> TextureSet {
+    pub fn from_tiles(size: u32, tiles: Vec<TileTexture>, palette: BiomePalette) -> TextureSet {
         assert_eq!(tiles.len(), Tile::ALL.len());
-        TextureSet { size, tiles }
+        TextureSet {
+            size,
+            tiles,
+            palette,
+        }
+    }
+
+    pub fn palette(&self) -> &BiomePalette {
+        &self.palette
     }
 
     pub fn size(&self) -> u32 {
@@ -109,13 +128,13 @@ impl TextureSet {
     }
 
     pub fn layer_count(&self) -> u32 {
-        self.tiles.iter().map(|t| t.frames).sum()
+        self.tiles.iter().map(TileTexture::layer_span).sum()
     }
 
     pub fn first_layer(&self, tile: Tile) -> u32 {
         self.tiles[..tile.layer() as usize]
             .iter()
-            .map(|t| t.frames)
+            .map(TileTexture::layer_span)
             .sum()
     }
 
@@ -123,8 +142,9 @@ impl TextureSet {
         (self.size * self.size * 4) as usize
     }
 
-    /// Запись на тайл: `[кадры, fps, прокрутка, флаги]`, `[первый слой, интерполяция, 0, 0]`,
-    /// `[оттенок rgb, 0]`; раскладку читает `shader.wgsl` (`TileAnim`).
+    /// Запись на тайл: `[кадры, fps, прокрутка, флаги]`, `[первый слой, интерполяция, слой
+    /// наложения, есть наложение]`, `[оттенок rgb, окраска биомом]`; раскладку читает
+    /// `shader.wgsl` (`TileAnim`).
     pub fn animation_table(&self) -> Vec<[[f32; 4]; 3]> {
         let mut first = 0;
         Tile::ALL
@@ -134,10 +154,15 @@ impl TextureSet {
                 let flags = tile.sway() + if tile.emissive() { EMISSIVE_FLAG } else { 0.0 };
                 let entry = [
                     [t.frames as f32, t.fps, 0.0, flags],
-                    [first as f32, f32::from(u8::from(t.interpolate)), 0.0, 0.0],
-                    [t.tint[0], t.tint[1], t.tint[2], 0.0],
+                    [
+                        first as f32,
+                        f32::from(u8::from(t.interpolate)),
+                        (first + t.frames) as f32,
+                        f32::from(u8::from(t.overlay)),
+                    ],
+                    [t.tint[0], t.tint[1], t.tint[2], t.biome.code()],
                 ];
-                first += t.frames;
+                first += t.layer_span();
                 entry
             })
             .collect()
@@ -148,8 +173,27 @@ impl TextureSet {
     }
 
     pub fn icon_pixels(&self, tile: Tile) -> Vec<u8> {
-        let tint = self.tile(tile).tint;
+        let texture = self.tile(tile);
+        let plains = self.palette.plains(texture.biome);
+        let tint: [f32; 3] = std::array::from_fn(|c| texture.tint[c] * plains[c]);
         let mut pixels = self.tile_pixels(tile);
+        if texture.overlay {
+            let grass = self.palette.plains(BiomeTint::Grass);
+            let start = texture.frames as usize * self.frame_bytes();
+            let overlay = &texture.layers[start..start + self.frame_bytes()];
+            for (dst, src) in pixels
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(overlay.as_chunks::<4>().0)
+            {
+                let alpha = f32::from(src[3]) / 255.0;
+                for c in 0..3 {
+                    let over = f32::from(src[c]) * grass[c];
+                    dst[c] = (f32::from(dst[c]) * (1.0 - alpha) + over * alpha).round() as u8;
+                }
+            }
+        }
         for p in pixels.as_chunks_mut::<4>().0 {
             for c in 0..3 {
                 p[c] = (f32::from(p[c]) * tint[c]).round().min(255.0) as u8;

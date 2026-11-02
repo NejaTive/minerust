@@ -12,12 +12,13 @@ pub fn generate(set: &TextureSet) -> Vec<u8> {
     let mut data = Vec::new();
     for tile in Tile::ALL {
         let texture = set.tile(tile);
-        for frame in texture.layers.chunks_exact(set.frame_bytes()) {
+        for (index, frame) in texture.layers.chunks_exact(set.frame_bytes()).enumerate() {
+            let cutout = tile.is_cutout() || index >= texture.frames as usize;
             let mut level = frame.to_vec();
             let mut size = size;
             data.extend_from_slice(&level);
             while size > 1 {
-                level = downsample(&level, size, tile.is_cutout());
+                level = downsample(&level, size, cutout);
                 size /= 2;
                 data.extend_from_slice(&level);
             }
