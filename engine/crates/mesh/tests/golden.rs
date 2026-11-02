@@ -172,7 +172,7 @@ fn oriented_scene_matches_golden() {
     assert_eq!(hash, GOLDEN_ORIENTED, "oriented: {hash:#x}");
 }
 
-const GOLDEN_ORIENTED: u64 = 0xeff95ad1fdd8c92b;
+const GOLDEN_ORIENTED: u64 = 0xdf81dc4645d46957;
 const GOLDEN_BLOCKS: [u64; 5] = [
     0x9f755dba3546bd87,
     0x30f0276577331ae9,
@@ -181,10 +181,10 @@ const GOLDEN_BLOCKS: [u64; 5] = [
     0x19764ac8b007518c,
 ];
 const GOLDEN_MESHES: [u64; 5] = [
-    0xa94f0518d27d0c4a,
-    0xd3a432e64b2f9c10,
+    0x8727454c5922b88a,
+    0x3d1e96dc491b9938,
     0x2f6e2ca0accc1b54,
-    0xbb5b5f72d42b1c06,
-    0xd0c8b2fc98771474,
+    0x40cf1f574545829e,
+    0x25917c278bfb0d14,
 ];
 const GOLDEN_FLAT: u64 = 0x37dceff88f4c0f25;

@@ -13,10 +13,10 @@ use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
 use world::pos::{ColumnPos, SectionPos};
 use world::section::{SECTION_SIZE, Section};
-use world::tile::{LAYER_COUNT, Tile};
+use world::tile::{TILE_COUNT, Tile};
 use world::world::World;
 
-const _: () = assert!(LAYER_COUNT <= 256);
+const _: () = assert!(TILE_COUNT <= 256);
 
 pub struct MeshData {
     pub quads: Vec<Quad>,

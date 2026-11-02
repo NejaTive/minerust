@@ -38,6 +38,7 @@ use crate::shadow::{
 };
 use crate::shadow_map::{ShadowMap, comparison_sampler};
 use crate::texture::{create_animation_table, create_block_textures};
+use world::textures::TextureSet;
 
 pub struct FrameParams {
     pub view_proj: Mat4,
@@ -190,6 +191,7 @@ pub struct Renderer {
     shadow_map: ShadowMap,
     shadow_dir: Option<Vec3>,
     shadow_pipelines: ShadowPipelines,
+    shadow_pass_layout: wgpu::BindGroupLayout,
     shadow_pass_buffers: [wgpu::Buffer; MAX_CASCADES],
     shadow_pass_groups: [wgpu::BindGroup; MAX_CASCADES],
     column_meshes: HashMap<ColumnPos, ColumnMeshes>,
@@ -202,6 +204,43 @@ pub struct Renderer {
     scene_copy_stub: wgpu::BindGroup,
     drawn_sections: u32,
     frame_counts: FrameCounts,
+}
+
+fn shadow_pass_groups(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    globals_buffer: &wgpu::Buffer,
+    global_sources: &GlobalSources,
+    buffers: &[wgpu::Buffer; MAX_CASCADES],
+) -> [wgpu::BindGroup; MAX_CASCADES] {
+    std::array::from_fn(|i| {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow pass"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&global_sources.block_textures),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&global_sources.block_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: global_sources.animation_table.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: buffers[i].as_entire_binding(),
+                },
+            ],
+        })
+    })
 }
 
 fn copy_info(texture: &wgpu::Texture) -> wgpu::TexelCopyTextureInfo<'_> {
@@ -295,8 +334,9 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let block_textures = create_block_textures(&device, &queue);
-        let animation_table = create_animation_table(&device);
+        let standard = TextureSet::standard();
+        let block_textures = create_block_textures(&device, &queue, &standard);
+        let animation_table = create_animation_table(&device, &standard);
         let block_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("blocks"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -502,36 +542,13 @@ impl Renderer {
                 mapped_at_creation: false,
             })
         });
-        let shadow_pass_groups = std::array::from_fn(|i| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("shadow pass"),
-                layout: &shadow_pass_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: globals_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(
-                            &global_sources.block_textures,
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&global_sources.block_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: global_sources.animation_table.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: shadow_pass_buffers[i].as_entire_binding(),
-                    },
-                ],
-            })
-        });
+        let shadow_pass_groups = shadow_pass_groups(
+            &device,
+            &shadow_pass_layout,
+            &globals_buffer,
+            &global_sources,
+            &shadow_pass_buffers,
+        );
         let sdr_pipelines = ScenePipelines::new(&device, &scene_layouts, &shader, render_format);
 
         let gpu_timer = device
@@ -568,6 +585,7 @@ impl Renderer {
             shadow_map,
             shadow_dir: None,
             shadow_pipelines,
+            shadow_pass_layout,
             shadow_pass_buffers,
             shadow_pass_groups,
             column_meshes: HashMap::new(),
@@ -649,6 +667,25 @@ impl Renderer {
             &self.globals_layout,
             &self.globals_buffer,
             &self.shadow_map.view,
+        );
+    }
+
+    pub fn set_textures(&mut self, textures: &TextureSet) {
+        self.global_sources.block_textures =
+            create_block_textures(&self.device, &self.queue, textures);
+        self.global_sources.animation_table = create_animation_table(&self.device, textures);
+        self.globals_bind_group = self.global_sources.bind_group(
+            &self.device,
+            &self.globals_layout,
+            &self.globals_buffer,
+            &self.shadow_map.view,
+        );
+        self.shadow_pass_groups = shadow_pass_groups(
+            &self.device,
+            &self.shadow_pass_layout,
+            &self.globals_buffer,
+            &self.global_sources,
+            &self.shadow_pass_buffers,
         );
     }
 

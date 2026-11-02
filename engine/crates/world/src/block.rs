@@ -1,6 +1,7 @@
 use glam::{IVec3, Vec3};
 
-use crate::tile::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile, tile_pixels};
+use crate::textures::TextureSet;
+use crate::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW, Tile};
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -386,9 +387,9 @@ impl Block {
     pub fn bounds(self, data: u8) -> (Vec3, Vec3) {
         match self.shape() {
             Shape::Torch => {
-                let unit = 1.0 / TILE_SIZE as f32;
+                let unit = 1.0 / PIXEL_GRID as f32;
                 let (lo, hi) = (TORCH_PIXELS.0 as f32 * unit, TORCH_PIXELS.1 as f32 * unit);
-                let height = (TILE_SIZE - TORCH_TOP_ROW) as f32 * unit;
+                let height = (PIXEL_GRID - TORCH_TOP_ROW) as f32 * unit;
                 let Some(support) = self.support_dir(data).filter(|dir| dir.y == 0) else {
                     return (Vec3::new(lo, 0.0, lo), Vec3::new(hi, height, hi));
                 };
@@ -515,8 +516,9 @@ impl Block {
             .find(|block| block.def().selectable && block.def().name == name)
     }
 
-    pub fn icon_pixels(self) -> Option<Vec<u8>> {
-        self.tile(Facing::Side).map(tile_pixels)
+    pub fn icon_pixels(self, textures: &TextureSet) -> Option<Vec<u8>> {
+        self.tile(Facing::Side)
+            .map(|tile| textures.icon_pixels(tile))
     }
 
     pub fn tile(self, facing: Facing) -> Option<Tile> {

@@ -1,15 +1,20 @@
 use wgpu::util::DeviceExt;
-use world::tile::{LAYER_COUNT, TILE_SIZE, Tile, animation_table, tile_frames};
+use world::tile::Tile;
 
-pub const MIP_LEVELS: u32 = TILE_SIZE.ilog2() + 1;
+use world::textures::TextureSet;
 
-pub fn generate() -> Vec<u8> {
-    let frame_bytes = (TILE_SIZE * TILE_SIZE * 4) as usize;
+pub fn mip_levels(size: u32) -> u32 {
+    size.ilog2() + 1
+}
+
+pub fn generate(set: &TextureSet) -> Vec<u8> {
+    let size = set.size();
     let mut data = Vec::new();
     for tile in Tile::ALL {
-        for frame in tile_frames(tile).chunks_exact(frame_bytes) {
+        let texture = set.tile(tile);
+        for frame in texture.layers.chunks_exact(set.frame_bytes()) {
             let mut level = frame.to_vec();
-            let mut size = TILE_SIZE;
+            let mut size = size;
             data.extend_from_slice(&level);
             while size > 1 {
                 level = downsample(&level, size, tile.is_cutout());
@@ -81,9 +86,11 @@ fn linear_to_srgb(c: f32) -> u8 {
     (c * 255.0).round() as u8
 }
 
-pub(crate) fn create_animation_table(device: &wgpu::Device) -> wgpu::Buffer {
-    let bytes: Vec<u8> = animation_table()
+pub(crate) fn create_animation_table(device: &wgpu::Device, set: &TextureSet) -> wgpu::Buffer {
+    let bytes: Vec<u8> = set
+        .animation_table()
         .into_iter()
+        .flatten()
         .flatten()
         .flat_map(f32::to_le_bytes)
         .collect();
@@ -97,17 +104,18 @@ pub(crate) fn create_animation_table(device: &wgpu::Device) -> wgpu::Buffer {
 pub(crate) fn create_block_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    set: &TextureSet,
 ) -> wgpu::TextureView {
     let texture = device.create_texture_with_data(
         queue,
         &wgpu::TextureDescriptor {
             label: Some("blocks"),
             size: wgpu::Extent3d {
-                width: TILE_SIZE,
-                height: TILE_SIZE,
-                depth_or_array_layers: LAYER_COUNT,
+                width: set.size(),
+                height: set.size(),
+                depth_or_array_layers: set.layer_count(),
             },
-            mip_level_count: MIP_LEVELS,
+            mip_level_count: mip_levels(set.size()),
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -115,7 +123,7 @@ pub(crate) fn create_block_textures(
             view_formats: &[],
         },
         wgpu::util::TextureDataOrder::LayerMajor,
-        &generate(),
+        &generate(set),
     );
     texture.create_view(&wgpu::TextureViewDescriptor {
         dimension: Some(wgpu::TextureViewDimension::D2Array),
