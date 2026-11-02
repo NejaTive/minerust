@@ -18,7 +18,7 @@ const played = (ts: number) =>
   <p v-if="!persistent" class="warn">
     Хранилище недоступно — миры не сохранятся после перезагрузки
   </p>
-  <ul v-if="worlds.length" class="list" role="listbox" aria-label="Миры">
+  <ul v-if="worlds.length" class="list px-scroll" role="listbox" aria-label="Миры">
     <li v-for="world in worlds" :key="world.id">
       <button
         class="row"
@@ -55,7 +55,7 @@ const played = (ts: number) =>
   gap: 6px;
   max-height: 288px;
   margin: 0;
-  padding: 0;
+  padding: 0 8px 0 0;
   overflow-y: auto;
   list-style: none;
 }
