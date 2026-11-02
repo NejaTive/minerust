@@ -27,6 +27,43 @@ pub struct PackInfo {
     description: String,
     icon: Option<Vec<u8>>,
     tile_size: u32,
+    gui: world::pack::GuiImages,
+}
+
+#[wasm_bindgen]
+pub struct GuiSheets(world::pack::GuiImages);
+
+#[wasm_bindgen]
+impl GuiSheets {
+    #[wasm_bindgen(getter)]
+    pub fn widgets(&self) -> Vec<u8> {
+        self.0.widgets.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn icons(&self) -> Vec<u8> {
+        self.0.icons.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn inventory(&self) -> Vec<u8> {
+        self.0.inventory.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn panel(&self) -> Vec<u8> {
+        self.0.panel.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = panelSlice)]
+    pub fn panel_slice(&self) -> u32 {
+        self.0.panel_slice
+    }
+}
+
+#[wasm_bindgen(js_name = builtinGui)]
+pub fn builtin_gui() -> GuiSheets {
+    GuiSheets(world::pack::builtin_gui())
 }
 
 impl PackInfo {
@@ -35,6 +72,7 @@ impl PackInfo {
             description: pack.description.clone(),
             icon: pack.icon.clone(),
             tile_size: pack.textures.size(),
+            gui: pack.gui.clone(),
         }
     }
 }
@@ -60,6 +98,11 @@ impl PackInfo {
     #[wasm_bindgen(getter, js_name = tileSize)]
     pub fn tile_size(&self) -> u32 {
         self.tile_size
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn gui(&self) -> GuiSheets {
+        GuiSheets(self.gui.clone())
     }
 }
 

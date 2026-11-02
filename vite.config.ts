@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { configDefaults, defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 
 const { version } = JSON.parse(readFileSync('./package.json', 'utf8'))
@@ -25,6 +25,7 @@ export default defineConfig({
   },
   // ES-воркеры: у воркера есть динамический import wasm, формат по умолчанию (iife) его не соберёт.
   worker: { format: 'es' },
+  test: { exclude: [...configDefaults.exclude, '.claude/worktrees/**'] },
   resolve: {
     alias: {
       // Результат `wasm-pack build engine/crates/web --target web --out-dir ../../pkg`

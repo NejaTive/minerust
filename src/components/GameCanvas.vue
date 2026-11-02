@@ -34,14 +34,13 @@ defineExpose({ requestLock, releaseCursor, save })
   position: fixed;
   top: 50%;
   left: 50%;
-  width: 20px;
-  height: 20px;
+  width: calc(15 * var(--gui-u));
+  height: calc(15 * var(--gui-u));
   transform: translate(-50%, -50%);
   pointer-events: none;
   mix-blend-mode: difference;
-  background:
-    linear-gradient(#fff, #fff) center / 2px 100% no-repeat,
-    linear-gradient(#fff, #fff) center / 100% 2px no-repeat;
+  background: var(--gui-icons) 0 0 / calc(256 * var(--gui-u)) calc(256 * var(--gui-u)) no-repeat;
+  image-rendering: pixelated;
 }
 .error {
   position: fixed;

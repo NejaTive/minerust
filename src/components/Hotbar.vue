@@ -28,7 +28,7 @@ watch(
     <div
       v-for="(name, index) in slots"
       :key="index"
-      class="slot px-slot"
+      class="slot"
       :class="{ selected: index === slotIndex }"
       :title="name ? blockLabel(name) : undefined"
     >
@@ -42,32 +42,47 @@ watch(
 .hotbar {
   position: fixed;
   left: 50%;
-  bottom: 16px;
+  bottom: 8px;
   transform: translateX(-50%);
+  box-sizing: border-box;
   display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: rgb(0 0 0 / 0.45);
+  gap: calc(4 * var(--gui-u));
+  width: calc(182 * var(--gui-u));
+  height: calc(22 * var(--gui-u));
+  padding: calc(3 * var(--gui-u));
+  background: var(--gui-widgets) 0 0 / calc(256 * var(--gui-u)) calc(256 * var(--gui-u)) no-repeat;
+  image-rendering: pixelated;
   pointer-events: none;
   z-index: 10;
 }
 .slot {
   position: relative;
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: calc(16 * var(--gui-u));
+  height: calc(16 * var(--gui-u));
+}
+.slot.selected {
+  z-index: 1;
+}
+.slot.selected::after {
+  position: absolute;
+  top: calc(-4 * var(--gui-u));
+  left: calc(-4 * var(--gui-u));
+  width: calc(24 * var(--gui-u));
+  height: calc(24 * var(--gui-u));
+  content: '';
+  background: var(--gui-widgets) 0 calc(-22 * var(--gui-u)) / calc(256 * var(--gui-u))
+    calc(256 * var(--gui-u)) no-repeat;
+  image-rendering: pixelated;
 }
 canvas {
-  width: 32px;
-  height: 32px;
+  width: 100%;
+  height: 100%;
   image-rendering: pixelated;
 }
 .number {
   position: absolute;
-  left: 0;
-  top: -2px;
+  right: 0;
+  bottom: -2px;
   color: #fff;
   font-size: var(--px-fs-s);
   line-height: 1;

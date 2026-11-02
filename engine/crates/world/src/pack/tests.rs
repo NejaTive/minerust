@@ -289,10 +289,91 @@ fn builtin_files_are_exactly_the_mapped_ones() {
     let mut on_disk: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name != "LICENSE.txt")
+        .filter(|name| name != "LICENSE.txt" && name != "gui")
         .collect();
     on_disk.sort();
     let mut built_in: Vec<String> = BUILTIN.iter().map(|(name, _)| name.to_string()).collect();
+    built_in.sort();
+    assert_eq!(on_disk, built_in);
+}
+
+const GUI_PREFIX: &str = "assets/minecraft/textures/gui/";
+
+fn gui_zip(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let mut all = vec![(block("dirt.png"), png(16, 16, [1, 2, 3, 255]))];
+    all.extend(
+        files
+            .iter()
+            .map(|(n, b)| (format!("{GUI_PREFIX}{n}"), b.clone())),
+    );
+    let refs: Vec<(&str, Vec<u8>)> = all.iter().map(|(n, b)| (n.as_str(), b.clone())).collect();
+    zip(&refs)
+}
+
+#[test]
+fn gui_sheets_come_from_the_pack() {
+    let widgets = png(64, 64, [9, 8, 7, 255]);
+    let bytes = gui_zip(&[("widgets.png", widgets.clone())]);
+    let gui = load(&bytes).unwrap().gui;
+    assert_eq!(gui.widgets, widgets);
+}
+
+#[test]
+fn gui_falls_back_to_builtin_when_missing_or_broken() {
+    let bytes = gui_zip(&[("icons.png", vec![1, 2, 3])]);
+    let gui = load(&bytes).unwrap().gui;
+    let builtin = builtin_gui();
+    assert_eq!(gui.widgets, builtin.widgets);
+    assert_eq!(gui.icons, builtin.icons);
+    assert_eq!(gui.inventory, builtin.inventory);
+}
+
+#[test]
+fn non_square_gui_sheet_is_ignored() {
+    let bytes = gui_zip(&[("widgets.png", png(64, 32, [0, 0, 0, 255]))]);
+    assert_eq!(load(&bytes).unwrap().gui.widgets, builtin_gui().widgets);
+}
+
+#[test]
+fn panel_is_three_by_three_cells_sized_by_the_sheet() {
+    let gui = builtin_gui();
+    assert_eq!(gui.panel_slice, 8);
+    let image = decode_png(&gui.panel).unwrap();
+    assert_eq!((image.width, image.height), (24, 24));
+    let small = gui_zip(&[("container/inventory.png", png(64, 64, [5, 6, 7, 255]))]);
+    let gui = load(&small).unwrap().gui;
+    assert_eq!(gui.panel_slice, 1);
+    let image = decode_png(&gui.panel).unwrap();
+    assert_eq!((image.width, image.height), (3, 3));
+    assert_eq!(&image.rgba[..4], [5, 6, 7, 255]);
+}
+
+#[test]
+fn builtin_gui_files_are_exactly_the_mapped_ones() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/textures/gui");
+    let mut on_disk = Vec::new();
+    let mut stack = vec![dir.clone()];
+    while let Some(path) = stack.pop() {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                on_disk.push(
+                    path.strip_prefix(&dir)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+        }
+    }
+    on_disk.sort();
+    let mut built_in: Vec<String> = BUILTIN_GUI
+        .iter()
+        .map(|(name, _)| name.strip_prefix("gui/").unwrap().to_string())
+        .collect();
     built_in.sort();
     assert_eq!(on_disk, built_in);
 }
