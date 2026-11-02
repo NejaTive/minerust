@@ -8,7 +8,7 @@ use glam::IVec3;
 
 use crate::mesh::POSITION_UNITS;
 use world::block::{Facing, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, WATER_SURFACE};
-use world::tile::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW};
+use world::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW};
 
 pub(crate) struct Face {
     pub(crate) normal: IVec3,
@@ -67,7 +67,7 @@ pub(crate) const TORCH_BOX: ([i32; 3], [i32; 3]) = (
     [TORCH_PIXELS.0 as i32, 0, TORCH_PIXELS.0 as i32],
     [
         TORCH_PIXELS.1 as i32,
-        (TILE_SIZE - TORCH_TOP_ROW) as i32,
+        (PIXEL_GRID - TORCH_TOP_ROW) as i32,
         TORCH_PIXELS.1 as i32,
     ],
 );
@@ -167,7 +167,7 @@ fn torch_face(face: &Face) -> Template {
             };
             [
                 TORCH_PIXELS.0 as i32 + span * side,
-                TORCH_TOP_ROW as i32 + (TILE_SIZE as i32 - TORCH_TOP_ROW as i32) * (1 - cy),
+                TORCH_TOP_ROW as i32 + (PIXEL_GRID as i32 - TORCH_TOP_ROW as i32) * (1 - cy),
             ]
         };
         Corner {
@@ -215,7 +215,8 @@ fn torch_wall(turns: u32) -> impl Iterator<Item = Template> {
         .map(move |mut t| {
             for c in &mut t.corners {
                 let [x, y, z] = c.pos.map(i32::from);
-                let slant = TORCH_WALL_SHIFT as i32 * y / (TILE_SIZE as i32 - TORCH_TOP_ROW as i32);
+                let slant =
+                    TORCH_WALL_SHIFT as i32 * y / (PIXEL_GRID as i32 - TORCH_TOP_ROW as i32);
                 let mut p = [
                     x - TORCH_PIXELS.0 as i32 + slant,
                     y + TORCH_WALL_RISE as i32,

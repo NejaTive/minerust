@@ -33,7 +33,7 @@ fn shape_table_size_matches_rust_table() {
 }
 
 #[test]
-fn animation_table_size_matches_layer_count() {
+fn animation_table_size_matches_tile_count() {
     let module = module();
     let (_, var) = module
         .global_variables
@@ -45,7 +45,9 @@ fn animation_table_size_matches_layer_count() {
     };
     assert_eq!(
         size,
-        naga::ArraySize::Constant(std::num::NonZeroU32::new(world::tile::LAYER_COUNT).unwrap())
+        naga::ArraySize::Constant(
+            std::num::NonZeroU32::new(world::tile::TILE_COUNT as u32).unwrap()
+        )
     );
 }
 

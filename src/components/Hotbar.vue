@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onMounted, useTemplateRef, watch } from 'vue'
-import { BLOCK_ICON_SIZE, paintBlockIconsIn } from '../engine/blockIcon'
+import { paintBlockIconsIn } from '../engine/blockIcon'
 import { blockLabel } from '../engine/info'
+import { texturePacks } from '../engine/useTexturePack'
 import { useSettings } from '../settings/useSettings'
 
 defineProps<{ slotIndex: number }>()
@@ -13,7 +14,7 @@ const paint = () => paintBlockIconsIn(root.value)
 
 onMounted(paint)
 watch(
-  slots,
+  [slots, () => texturePacks.state.revision],
   async () => {
     await nextTick()
     paint()
@@ -31,7 +32,7 @@ watch(
       :class="{ selected: index === slotIndex }"
       :title="name ? blockLabel(name) : undefined"
     >
-      <canvas v-if="name" :data-block="name" :width="BLOCK_ICON_SIZE" :height="BLOCK_ICON_SIZE" />
+      <canvas v-if="name" :data-block="name" />
       <span class="number">{{ index + 1 }}</span>
     </div>
   </div>

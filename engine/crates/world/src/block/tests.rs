@@ -1,5 +1,13 @@
 use super::*;
 
+fn tile_pixels(tile: Tile) -> Vec<u8> {
+    TextureSet::standard().tile_pixels(tile)
+}
+
+fn icon_pixels(block: Block) -> Option<Vec<u8>> {
+    block.icon_pixels(&TextureSet::standard())
+}
+
 const ALL: [Block; 25] = Block::ALL;
 
 #[test]
@@ -37,11 +45,11 @@ fn selectable_by_name() {
 #[test]
 fn icon_is_side_face() {
     let pixels = |tile| Some(tile_pixels(tile));
-    assert_eq!(Block::Grass.icon_pixels(), pixels(Tile::GrassSide));
-    assert_eq!(Block::Log.icon_pixels(), pixels(Tile::LogSide));
-    assert_eq!(Block::Stone.icon_pixels(), pixels(Tile::Stone));
-    assert_eq!(Block::Air.icon_pixels(), None);
-    let grass = Block::Grass.icon_pixels().unwrap();
+    assert_eq!(icon_pixels(Block::Grass), pixels(Tile::GrassSide));
+    assert_eq!(icon_pixels(Block::Log), pixels(Tile::LogSide));
+    assert_eq!(icon_pixels(Block::Stone), pixels(Tile::Stone));
+    assert_eq!(icon_pixels(Block::Air), None);
+    let grass = icon_pixels(Block::Grass).unwrap();
     let (top, bottom) = (&grass[..3], &grass[grass.len() - 4..][..3]);
     assert_ne!(top, bottom);
 }
@@ -154,7 +162,7 @@ fn new_blocks_selectable_by_name() {
         Block::Dandelion,
         Block::Torch,
     ] {
-        assert!(block.icon_pixels().is_some());
+        assert!(icon_pixels(block).is_some());
     }
 }
 
@@ -263,7 +271,7 @@ fn water_is_placed_as_source() {
 
 #[test]
 fn water_has_icon_for_the_palette() {
-    let icon = Block::Water.icon_pixels().expect("water icon");
+    let icon = icon_pixels(Block::Water).expect("water icon");
     assert_eq!(icon.len(), 16 * 16 * 4);
 }
 
@@ -293,7 +301,7 @@ fn tree_blocks_are_selectable_with_russian_labels() {
     ] {
         assert_eq!(Block::from_name(name), Some(block));
         assert_eq!(block.def().label, label);
-        assert!(block.icon_pixels().is_some(), "{name}");
+        assert!(icon_pixels(block).is_some(), "{name}");
     }
 }
 

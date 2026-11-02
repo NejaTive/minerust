@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use game::Game;
 use render::{Effects, Renderer, ShadowQuality};
 use wasm_bindgen::prelude::*;
@@ -7,6 +9,7 @@ use world::clouds::CloudMask;
 use world::pos::ColumnPos;
 use world::save::{FORMAT_VERSION, decode_column, encode_column};
 use world::terrain::WorldType;
+use world::textures::TextureSet;
 
 use crate::api::{EngineSettings, WorldStats};
 use crate::frame::frame_params;
@@ -14,6 +17,51 @@ use crate::profiler::{Profiler, SceneStats};
 use crate::streamer::Streamer;
 
 const BAD_CAMERA_STATE: &str = "camera state must be 5 or 6 finite numbers";
+
+thread_local! {
+    static ICON_TEXTURES: RefCell<TextureSet> = RefCell::new(TextureSet::standard());
+}
+
+#[wasm_bindgen]
+pub struct PackInfo {
+    description: String,
+    icon: Option<Vec<u8>>,
+    tile_size: u32,
+}
+
+impl PackInfo {
+    fn of(pack: &world::pack::TexturePack) -> PackInfo {
+        PackInfo {
+            description: pack.description.clone(),
+            icon: pack.icon.clone(),
+            tile_size: pack.textures.size(),
+        }
+    }
+}
+
+#[wasm_bindgen(js_name = parseTexturePack)]
+pub fn parse_texture_pack(zip: &[u8]) -> Result<PackInfo, JsError> {
+    let pack = world::pack::load(zip).map_err(|e| JsError::new(&e))?;
+    Ok(PackInfo::of(&pack))
+}
+
+#[wasm_bindgen]
+impl PackInfo {
+    #[wasm_bindgen(getter)]
+    pub fn description(&self) -> String {
+        self.description.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn icon(&self) -> Option<Vec<u8>> {
+        self.icon.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = tileSize)]
+    pub fn tile_size(&self) -> u32 {
+        self.tile_size
+    }
+}
 
 #[wasm_bindgen]
 pub struct Engine {
@@ -27,6 +75,22 @@ pub struct Engine {
 
 #[wasm_bindgen]
 impl Engine {
+    #[wasm_bindgen(js_name = loadTexturePack)]
+    pub fn load_texture_pack(&mut self, zip: &[u8]) -> Result<PackInfo, JsError> {
+        let pack = world::pack::load(zip).map_err(|e| JsError::new(&e))?;
+        self.renderer.set_textures(&pack.textures);
+        let info = PackInfo::of(&pack);
+        ICON_TEXTURES.with(|icons| *icons.borrow_mut() = pack.textures);
+        Ok(info)
+    }
+
+    #[wasm_bindgen(js_name = resetTexturePack)]
+    pub fn reset_texture_pack(&mut self) {
+        let standard = TextureSet::standard();
+        self.renderer.set_textures(&standard);
+        ICON_TEXTURES.with(|icons| *icons.borrow_mut() = standard);
+    }
+
     pub async fn create(
         canvas: HtmlCanvasElement,
         camera: Option<Vec<f32>>,
@@ -330,5 +394,10 @@ impl Engine {
 
 #[wasm_bindgen]
 pub fn block_icon(name: &str) -> Option<Vec<u8>> {
-    Block::from_name(name)?.icon_pixels()
+    ICON_TEXTURES.with(|icons| Block::from_name(name)?.icon_pixels(&icons.borrow()))
+}
+
+#[wasm_bindgen]
+pub fn block_icon_size() -> u32 {
+    ICON_TEXTURES.with(|icons| icons.borrow().size())
 }
