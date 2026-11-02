@@ -1,4 +1,5 @@
 use super::*;
+use crate::tile::DEFAULT_TILE_SIZE;
 
 fn tile_pixels(tile: Tile) -> Vec<u8> {
     TextureSet::standard().tile_pixels(tile)
@@ -272,7 +273,10 @@ fn water_is_placed_as_source() {
 #[test]
 fn water_has_icon_for_the_palette() {
     let icon = icon_pixels(Block::Water).expect("water icon");
-    assert_eq!(icon.len(), 16 * 16 * 4);
+    assert_eq!(
+        icon.len(),
+        (DEFAULT_TILE_SIZE * DEFAULT_TILE_SIZE * 4) as usize
+    );
 }
 
 #[test]
@@ -413,7 +417,10 @@ fn snow_tile_is_whitish_and_ice_is_light_blue() {
 #[test]
 fn snowy_side_has_white_stripe_over_dirt() {
     let pixels = tile_pixels(Tile::SnowyGrassSide);
-    let row = |y: usize| &pixels[y * 64..(y + 1) * 64];
+    let row_bytes = DEFAULT_TILE_SIZE as usize * 4;
+    let row = |y: usize| &pixels[y * row_bytes..(y + 1) * row_bytes];
     assert!(row(0).chunks(4).all(|p| p[0] > 190 && p[2] > 220));
-    assert!(row(15).chunks(4).all(|p| p[2] < p[0]));
+    let bottom = row(DEFAULT_TILE_SIZE as usize - 1);
+    let mean = |c: usize| bottom.chunks(4).map(|p| u32::from(p[c])).sum::<u32>();
+    assert!(mean(2) < mean(0));
 }

@@ -52,7 +52,7 @@ describe('менеджер текстур-пака', () => {
     await manager.attach(target)
     await manager.install('pack.zip', bytes(1))
     await manager.reset()
-    expect(manager.state).toMatchObject({ active: false, name: '', tileSize: 16 })
+    expect(manager.state).toMatchObject({ active: false, name: '', tileSize: 32 })
     expect(target.resetTexturePack).toHaveBeenCalled()
     expect(await store.load()).toBeNull()
   })
@@ -76,7 +76,7 @@ describe('менеджер текстур-пака', () => {
       tileSize: 32,
     })
     await manager.reset()
-    expect(manager.state).toMatchObject({ active: false, name: '', tileSize: 16 })
+    expect(manager.state).toMatchObject({ active: false, name: '', tileSize: 32 })
     expect(await store.load()).toBeNull()
   })
 

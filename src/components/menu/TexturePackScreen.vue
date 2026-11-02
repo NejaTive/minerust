@@ -22,7 +22,7 @@ async function onPick(e: Event) {
   <div class="pack">
     <img v-if="state.iconUrl" class="icon" :src="state.iconUrl" alt="" />
     <div class="info">
-      <p class="name">{{ state.active ? state.name : 'Стандартный' }}</p>
+      <p class="name">{{ state.active ? state.name : 'Стандартный (Faithful 32x)' }}</p>
       <p v-if="state.description" class="desc">{{ state.description }}</p>
       <p class="size">{{ state.tileSize }}×{{ state.tileSize }}</p>
     </div>

@@ -56,13 +56,13 @@ fn maps_1_12_names_and_falls_back_to_standard() {
     assert_eq!(&set.tile_pixels(Tile::LogSide)[..4], [40, 50, 60, 255]);
     assert_eq!(&set.tile_pixels(Tile::TallGrass)[..4], [70, 80, 90, 255]);
     let standard = TextureSet::standard();
-    let stone = set.tile_pixels(Tile::Stone);
-    assert_eq!(stone.len(), 32 * 32 * 4);
+    assert_eq!(standard.size(), 32);
     assert_eq!(
-        scale_nearest(&standard.tile_pixels(Tile::Stone), 16, 32),
-        stone
+        set.tile_pixels(Tile::Stone),
+        standard.tile_pixels(Tile::Stone)
     );
     assert_eq!(set.tile(Tile::Stone).tint, WHITE);
+    assert_eq!(set.tile(Tile::TallGrass).tint, GRASS);
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn tints_follow_vanilla_colors() {
     let set = load(&bytes).unwrap().textures;
     let hex = |c: [f32; 3]| c.map(|v| (v * 255.0).round() as u8);
     assert_eq!(hex(set.tile(Tile::GrassTop).tint), [0x79, 0xC0, 0x5A]);
-    assert_eq!(hex(set.tile(Tile::TallGrass).tint), WHITE.map(|_| 255));
+    assert_eq!(hex(set.tile(Tile::TallGrass).tint), [0x79, 0xC0, 0x5A]);
     assert_eq!(hex(set.tile(Tile::BirchLeaves).tint), [0x80, 0xA7, 0x55]);
     assert_eq!(hex(set.tile(Tile::Water).tint), [0x3F, 0x76, 0xE4]);
     assert_eq!(&set.tile_pixels(Tile::Water)[3..4], [WATER_MAX_ALPHA]);
@@ -136,7 +136,6 @@ fn animation_from_mcmeta() {
     assert_eq!(water.frames, 1 + 2 + 1);
     assert_eq!(water.fps, 10.0);
     assert!(water.interpolate);
-    assert_eq!(water.scroll, 0.0);
     let lava = set.tile(Tile::Lava);
     assert_eq!(lava.frames, 3);
     assert_eq!(lava.fps, 20.0);
@@ -219,4 +218,39 @@ fn rejects_too_many_layers() {
 fn non_power_of_two_size_rounds_up() {
     let bytes = zip(&[(&block("dirt.png"), png(24, 24, [1, 2, 3, 255]))]);
     assert_eq!(load(&bytes).unwrap().textures.size(), 32);
+}
+
+#[test]
+fn smaller_packs_downscale_missing_builtin_tiles() {
+    let bytes = zip(&[(&block("dirt.png"), png(16, 16, [1, 2, 3, 255]))]);
+    let set = load(&bytes).unwrap().textures;
+    assert_eq!(set.size(), 16);
+    assert_eq!(set.tile_pixels(Tile::Stone).len(), 16 * 16 * 4);
+}
+
+#[test]
+fn builtin_pack_finds_every_tile_without_fallback() {
+    let pack = builtin();
+    assert_eq!(pack.textures.size(), 32);
+    for tile in Tile::ALL {
+        let name = source(tile).0;
+        assert!(
+            builtin_file(&format!("{BLOCKS_DIR}{name}.png")).is_some(),
+            "{tile:?}: {name}.png is not built in"
+        );
+    }
+}
+
+#[test]
+fn builtin_files_are_exactly_the_mapped_ones() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/textures");
+    let mut on_disk: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name != "LICENSE.txt")
+        .collect();
+    on_disk.sort();
+    let mut built_in: Vec<String> = BUILTIN.iter().map(|(name, _)| name.to_string()).collect();
+    built_in.sort();
+    assert_eq!(on_disk, built_in);
 }

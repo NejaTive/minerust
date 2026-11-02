@@ -1,4 +1,4 @@
-use crate::tile::{DEFAULT_TILE_SIZE, EMISSIVE_FLAG, Tile};
+use crate::tile::{EMISSIVE_FLAG, Tile};
 
 pub const MAX_LAYERS: usize = 256;
 pub const WHITE: [f32; 3] = [1.0; 3];
@@ -7,7 +7,6 @@ pub struct TileTexture {
     pub layers: Vec<u8>,
     pub frames: u32,
     pub fps: f32,
-    pub scroll: f32,
     pub tint: [f32; 3],
     pub interpolate: bool,
 }
@@ -85,7 +84,6 @@ impl TileTexture {
             layers: pixels,
             frames: 1,
             fps: 0.0,
-            scroll: 0.0,
             tint: WHITE,
             interpolate: false,
         }
@@ -94,11 +92,7 @@ impl TileTexture {
 
 impl TextureSet {
     pub fn standard() -> TextureSet {
-        let tiles = Tile::ALL.iter().map(|&tile| standard_tile(tile)).collect();
-        TextureSet {
-            size: DEFAULT_TILE_SIZE,
-            tiles,
-        }
+        crate::pack::builtin().textures
     }
 
     pub fn from_tiles(size: u32, tiles: Vec<TileTexture>) -> TextureSet {
@@ -139,7 +133,7 @@ impl TextureSet {
                 let t = self.tile(tile);
                 let flags = tile.sway() + if tile.emissive() { EMISSIVE_FLAG } else { 0.0 };
                 let entry = [
-                    [t.frames as f32, t.fps, t.scroll, flags],
+                    [t.frames as f32, t.fps, 0.0, flags],
                     [first as f32, f32::from(u8::from(t.interpolate)), 0.0, 0.0],
                     [t.tint[0], t.tint[1], t.tint[2], 0.0],
                 ];
@@ -162,26 +156,6 @@ impl TextureSet {
             }
         }
         pixels
-    }
-}
-
-fn standard_tile(tile: Tile) -> TileTexture {
-    let name = tile.file_name();
-    let image = decode_png(tile.png()).unwrap_or_else(|e| panic!("{name}.png: {e}"));
-    assert!(
-        image.width == DEFAULT_TILE_SIZE && image.height == DEFAULT_TILE_SIZE * tile.frames(),
-        "{name}.png: expected {DEFAULT_TILE_SIZE}x{}, got {}x{}",
-        DEFAULT_TILE_SIZE * tile.frames(),
-        image.width,
-        image.height
-    );
-    TileTexture {
-        layers: image.rgba,
-        frames: tile.frames(),
-        fps: tile.fps(),
-        scroll: tile.scroll(),
-        tint: WHITE,
-        interpolate: false,
     }
 }
 

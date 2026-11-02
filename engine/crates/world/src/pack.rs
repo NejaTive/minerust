@@ -5,9 +5,10 @@ use serde_json::Value;
 use crate::textures::{
     DecodedImage, MAX_LAYERS, TextureSet, TileTexture, WHITE, decode_png, scale_nearest,
 };
-use crate::tile::{DEFAULT_TILE_SIZE, Tile};
+use crate::tile::Tile;
 
 const BLOCKS_DIR: &str = "assets/minecraft/textures/blocks/";
+const MIN_TILE_SIZE: u32 = 16;
 const MAX_TILE_SIZE: u32 = 512;
 const MAX_ENTRY_BYTES: u64 = 64 << 20;
 const WATER_MAX_ALPHA: u8 = 180;
@@ -91,13 +92,85 @@ pub fn load(zip_bytes: &[u8]) -> Result<TexturePack, String> {
         file.take(MAX_ENTRY_BYTES).read_to_end(&mut out).ok()?;
         Some(out)
     };
+    let textures = build(&mut read, Some(&builtin().textures))?;
+    let (description, icon) = read_meta(&mut read);
+    Ok(TexturePack {
+        textures,
+        description,
+        icon,
+    })
+}
 
+pub fn builtin() -> TexturePack {
+    let textures = build(&mut |path| builtin_file(path).map(<[u8]>::to_vec), None)
+        .expect("built-in textures are complete");
+    TexturePack {
+        textures,
+        description: "Faithful 32x".into(),
+        icon: None,
+    }
+}
+
+macro_rules! builtin_files {
+    ($($file:literal),* $(,)?) => {
+        &[$(($file, include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"), "/assets/textures/", $file
+        )))),*]
+    };
+}
+
+const BUILTIN: &[(&str, &[u8])] = builtin_files![
+    "grass_top.png",
+    "grass_side.png",
+    "grass_side_overlay.png",
+    "dirt.png",
+    "stone.png",
+    "sand.png",
+    "log_oak.png",
+    "log_oak_top.png",
+    "leaves_oak.png",
+    "water_still.png",
+    "water_still.png.mcmeta",
+    "glowstone.png",
+    "tallgrass.png",
+    "flower_rose.png",
+    "flower_dandelion.png",
+    "torch_on.png",
+    "gravel.png",
+    "lava_still.png",
+    "lava_still.png.mcmeta",
+    "obsidian.png",
+    "cobblestone.png",
+    "log_birch.png",
+    "log_birch_top.png",
+    "leaves_birch.png",
+    "log_spruce.png",
+    "log_spruce_top.png",
+    "leaves_spruce.png",
+    "bedrock.png",
+    "grass_side_snowed.png",
+    "snow.png",
+    "ice.png",
+];
+
+fn builtin_file(path: &str) -> Option<&'static [u8]> {
+    let name = path.strip_prefix(BLOCKS_DIR)?;
+    BUILTIN
+        .iter()
+        .find(|(file, _)| *file == name)
+        .map(|(_, bytes)| *bytes)
+}
+
+fn build(
+    read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    fallback: Option<&TextureSet>,
+) -> Result<TextureSet, String> {
     let mut found: Vec<Option<Found>> = Vec::new();
     for &tile in &Tile::ALL {
         let stem = source(tile).0;
         let image = read(&format!("{BLOCKS_DIR}{stem}.png")).and_then(|b| decode_png(&b).ok());
         let meta = read(&format!("{BLOCKS_DIR}{stem}.png.mcmeta"));
-        found.push(image.and_then(|image| {
+        let tile_found = image.and_then(|image| {
             if image.width == 0 || image.height < image.width {
                 return None;
             }
@@ -108,7 +181,11 @@ pub fn load(zip_bytes: &[u8]) -> Result<TexturePack, String> {
                 frames,
                 animation,
             })
-        }));
+        });
+        if tile_found.is_none() && fallback.is_none() {
+            return Err(format!("missing texture {stem}.png"));
+        }
+        found.push(tile_found);
     }
     if found.iter().all(Option::is_none) {
         return Err("the archive has no usable block textures".into());
@@ -120,7 +197,7 @@ pub fn load(zip_bytes: &[u8]) -> Result<TexturePack, String> {
         .map(|f| f.image.width)
         .max()
         .unwrap_or(0);
-    let size = widest.next_power_of_two().max(DEFAULT_TILE_SIZE);
+    let size = widest.next_power_of_two().max(MIN_TILE_SIZE);
     if size > MAX_TILE_SIZE {
         return Err(format!("textures are too large: {widest}px"));
     }
@@ -131,11 +208,11 @@ pub fn load(zip_bytes: &[u8]) -> Result<TexturePack, String> {
         .and_then(|b| decode_png(&b).ok())
         .filter(|image| image.width > 0 && image.height >= image.width);
 
-    let standard = TextureSet::standard();
     let mut tiles = Vec::new();
     for (&tile, found) in Tile::ALL.iter().zip(&found) {
         let Some(found) = found else {
-            tiles.push(scaled_standard(&standard, tile, size));
+            let fallback = fallback.expect("checked while reading");
+            tiles.push(scaled(fallback, tile, size));
             continue;
         };
         let mut texture = build_tile(found, size);
@@ -159,13 +236,7 @@ pub fn load(zip_bytes: &[u8]) -> Result<TexturePack, String> {
             "too many animation frames: {layers} (limit {MAX_LAYERS})"
         ));
     }
-
-    let (description, icon) = read_meta(&mut read);
-    Ok(TexturePack {
-        textures: TextureSet::from_tiles(size, tiles),
-        description,
-        icon,
-    })
+    Ok(TextureSet::from_tiles(size, tiles))
 }
 
 fn build_tile(found: &Found, size: u32) -> TileTexture {
@@ -198,13 +269,12 @@ fn animated(
         layers: sequence.iter().flat_map(|&i| frame(i)).collect(),
         frames: sequence.len() as u32,
         fps: 20.0 / ticks as f32,
-        scroll: 0.0,
         tint: WHITE,
         interpolate,
     }
 }
 
-fn scaled_standard(standard: &TextureSet, tile: Tile, size: u32) -> TileTexture {
+fn scaled(standard: &TextureSet, tile: Tile, size: u32) -> TileTexture {
     let src = standard.tile(tile);
     let from = standard.size();
     let bytes = standard.frame_bytes();
@@ -216,9 +286,8 @@ fn scaled_standard(standard: &TextureSet, tile: Tile, size: u32) -> TileTexture 
             .collect(),
         frames: src.frames,
         fps: src.fps,
-        scroll: src.scroll,
-        tint: WHITE,
-        interpolate: false,
+        tint: src.tint,
+        interpolate: src.interpolate,
     }
 }
 
