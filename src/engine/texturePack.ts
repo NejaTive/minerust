@@ -23,7 +23,7 @@ export interface PackState {
   revision: number
 }
 
-export const DEFAULT_TILE_SIZE = 16
+export const DEFAULT_TILE_SIZE = 32
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
