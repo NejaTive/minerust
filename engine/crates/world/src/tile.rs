@@ -1,4 +1,4 @@
-pub const DEFAULT_TILE_SIZE: u32 = 16;
+pub const DEFAULT_TILE_SIZE: u32 = 32;
 
 pub const PIXEL_GRID: u32 = 16;
 
@@ -69,29 +69,6 @@ impl Tile {
         Tile::Ice,
     ];
 
-    pub const fn frames(self) -> u32 {
-        match self {
-            Tile::Water | Tile::Lava => 16,
-            _ => 1,
-        }
-    }
-
-    pub fn fps(self) -> f32 {
-        match self {
-            Tile::Water => 10.0,
-            Tile::Lava => 5.0,
-            _ => 0.0,
-        }
-    }
-
-    pub fn scroll(self) -> f32 {
-        match self {
-            Tile::Water => 1.0,
-            Tile::Lava => 0.3,
-            _ => 0.0,
-        }
-    }
-
     pub fn sway(self) -> f32 {
         match self {
             Tile::Leaves | Tile::BirchLeaves | Tile::SpruceLeaves => 1.0,
@@ -127,44 +104,6 @@ pub const EMISSIVE_FLAG: f32 = 4.0;
 
 pub const TORCH_PIXELS: (u32, u32) = (7, 9);
 pub const TORCH_TOP_ROW: u32 = 6;
-
-impl Tile {
-    pub(crate) fn file_name(self) -> String {
-        let name = format!("{self:?}");
-        let mut out = String::new();
-        for (i, c) in name.chars().enumerate() {
-            if c.is_uppercase() && i > 0 {
-                out.push('_');
-            }
-            out.push(c.to_ascii_lowercase());
-        }
-        out
-    }
-
-    pub fn png(self) -> &'static [u8] {
-        macro_rules! files {
-            ($($tile:ident => $file:literal),* $(,)?) => {
-                match self {
-                    $(Tile::$tile => include_bytes!(concat!(
-                        env!("CARGO_MANIFEST_DIR"), "/assets/textures/", $file, ".png"
-                    )),)*
-                }
-            };
-        }
-        files! {
-            GrassTop => "grass_top", GrassSide => "grass_side", Dirt => "dirt",
-            Stone => "stone", Sand => "sand", LogSide => "log_side", LogTop => "log_top",
-            Leaves => "leaves", Water => "water", Glowstone => "glowstone",
-            TallGrass => "tall_grass", Poppy => "poppy", Dandelion => "dandelion",
-            Torch => "torch", Gravel => "gravel", Lava => "lava", Obsidian => "obsidian",
-            Cobblestone => "cobblestone", BirchLogSide => "birch_log_side",
-            BirchLogTop => "birch_log_top", BirchLeaves => "birch_leaves",
-            SpruceLogSide => "spruce_log_side", SpruceLogTop => "spruce_log_top",
-            SpruceLeaves => "spruce_leaves", Bedrock => "bedrock",
-            SnowyGrassSide => "snowy_grass_side", Snow => "snow", Ice => "ice",
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests;
