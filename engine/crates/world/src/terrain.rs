@@ -149,6 +149,20 @@ impl Terrain {
         }
     }
 
+    /// Веса биомов колонки для `Renderer::set_biome_column`: строки по z, внутри x, четыре
+    /// байта на блок в порядке `BiomeWeights`.
+    pub fn column_biome_bytes(&self, key: ColumnPos) -> Vec<u8> {
+        let origin = key.origin();
+        let mut out = Vec::with_capacity((SECTION_SIZE * SECTION_SIZE * 4) as usize);
+        for dz in 0..SECTION_SIZE {
+            for dx in 0..SECTION_SIZE {
+                let weights = self.biome_weights(origin.x + dx, origin.z + dz);
+                out.extend(crate::biome_color::weights_bytes(weights));
+            }
+        }
+        out
+    }
+
     pub fn biome_at(&self, x: i32, z: i32) -> Biome {
         self.biome_weights(x, z).dominant()
     }

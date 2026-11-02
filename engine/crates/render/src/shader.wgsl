@@ -118,8 +118,9 @@ var block_sampler: sampler;
 
 // Запись на тайл (слот квада = `Tile::layer`). timing: (кадры, кадров в секунду, прокрутка
 // боковых граней в блоках в секунду, колыхание: 0 нет, 1 листва, 2 трава и цветы; плюс 4 —
-// светящийся тайл, EMISSIVE_FLAG в tile.rs); layers.x — первый слой текстуры, layers.y — 1,
-// если кадры смешиваются; tint.rgb умножает цвет текстуры.
+// светящийся тайл, EMISSIVE_FLAG в tile.rs); layers: (первый слой текстуры, 1 если кадры
+// смешиваются, слой наложения, 1 если наложение есть); tint.rgb умножает цвет текстуры,
+// tint.w — окраска биомом: 0 нет, 1 трава, 2 листва (`BiomeTint::code`).
 // Строит `world::textures::TextureSet::animation_table`; размер — `TILE_COUNT`.
 struct TileAnim {
     timing: vec4<f32>,
@@ -128,6 +129,14 @@ struct TileAnim {
 };
 @group(0) @binding(3)
 var<uniform> animation: array<TileAnim, 28>;
+
+// Веса биомов (равнины, пустыня, лес, тайга) на блок, тор BIOME_MAP_SIZE по x и z; пишет
+// `Renderer::set_biome_column`. Палитра — `BiomePalette::to_bytes`: четыре цвета травы,
+// затем четыре цвета листвы, в том же порядке биомов.
+@group(0) @binding(11)
+var biome_map: texture_2d<f32>;
+@group(0) @binding(12)
+var<uniform> biome_palette: array<vec4<f32>, 8>;
 
 // Раскладка — `ShadowData` в shadow.rs; light = (на источник, сила), params.w — сила теней облаков.
 // Без теней блоков пишутся только light.xyz и params.w.
@@ -324,6 +333,32 @@ fn sample_block(uv: vec2<f32>, slot: u32) -> vec4<f32> {
     return vec4<f32>(texel.rgb * entry.tint.rgb, texel.a);
 }
 
+const BIOME_MAP_SIZE: i32 = 1024;
+
+fn biome_color(kind: f32, world_pos: vec3<f32>) -> vec3<f32> {
+    let cell = vec2<i32>(floor(world_pos.xz)) & vec2<i32>(BIOME_MAP_SIZE - 1);
+    let w = textureLoad(biome_map, cell, 0);
+    let base = select(0u, 4u, kind > 1.5);
+    let sum = w.x + w.y + w.z + w.w;
+    let weights = select(vec4<f32>(1.0, 0.0, 0.0, 0.0), w / max(sum, 1e-4), sum > 0.001);
+    return biome_palette[base].rgb * weights.x
+        + biome_palette[base + 1u].rgb * weights.y
+        + biome_palette[base + 2u].rgb * weights.z
+        + biome_palette[base + 3u].rgb * weights.w;
+}
+
+fn block_albedo(uv: vec2<f32>, slot: u32, world_pos: vec3<f32>) -> vec4<f32> {
+    let entry = animation[slot];
+    var texel = sample_block(uv, slot);
+    let kind = entry.tint.w;
+    texel = vec4<f32>(texel.rgb * select(vec3<f32>(1.0), biome_color(kind, world_pos), kind > 0.5), texel.a);
+    let has_overlay = entry.layers.w > 0.5;
+    let overlay_layer = u32(select(entry.layers.x, entry.layers.z, has_overlay));
+    let overlay = textureSample(block_textures, block_sampler, uv, overlay_layer);
+    let over = select(0.0, overlay.a, has_overlay);
+    return vec4<f32>(mix(texel.rgb, overlay.rgb * biome_color(1.0, world_pos), over), texel.a);
+}
+
 fn luma_normalized(tint: vec3<f32>) -> vec3<f32> {
     return tint / dot(tint, vec3<f32>(0.299, 0.587, 0.114));
 }
@@ -515,7 +550,7 @@ fn shaded_glow(in: VertexOut, texel: vec3<f32>, sun_vis: f32, glow: vec3<f32>) -
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let normal = flat_normal(in.world_pos);
-    let texel = sample_block(in.uv, in.layer);
+    let texel = block_albedo(in.uv, in.layer, in.world_pos);
     return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, false)), 1.0);
 }
 
@@ -542,7 +577,7 @@ fn foliage_glow(in: VertexOut, sun_vis: f32) -> f32 {
 @fragment
 fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
     let normal = flat_normal(in.world_pos);
-    let texel = sample_block(in.uv, in.layer);
+    let texel = block_albedo(in.uv, in.layer, in.world_pos);
     if texel.a < 0.5 {
         discard;
     }

@@ -1,3 +1,4 @@
+pub mod biome_color;
 pub mod block;
 mod caves;
 pub mod clouds;

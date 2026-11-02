@@ -1,4 +1,5 @@
 use super::*;
+use crate::biome_color::BiomePalette;
 use crate::tile::{DEFAULT_TILE_SIZE, PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW};
 
 const WATER_ALPHA: u8 = 180;
@@ -13,9 +14,9 @@ fn builtin_set_has_every_tile_without_fallback() {
         assert_eq!(set.first_layer(tile), next, "{tile:?}");
         assert_eq!(
             texture.layers.len(),
-            set.frame_bytes() * texture.frames as usize
+            set.frame_bytes() * texture.layer_span() as usize
         );
-        next += texture.frames;
+        next += texture.layer_span();
     }
     assert_eq!(set.layer_count(), next);
 }
@@ -114,7 +115,7 @@ fn icon_pixels_apply_the_tint() {
         .map(|_| TileTexture::still([200, 100, 50, 255].repeat(16 * 16)))
         .collect();
     tiles[Tile::Leaves.layer() as usize].tint = [0.5, 1.0, 0.0];
-    let set = TextureSet::from_tiles(16, tiles);
+    let set = TextureSet::from_tiles(16, tiles, BiomePalette::constants());
     assert_eq!(&set.icon_pixels(Tile::Leaves)[..4], [100, 100, 0, 255]);
     assert_eq!(&set.icon_pixels(Tile::Stone)[..4], [200, 100, 50, 255]);
 }

@@ -62,28 +62,32 @@ fn maps_1_12_names_and_falls_back_to_standard() {
         standard.tile_pixels(Tile::Stone)
     );
     assert_eq!(set.tile(Tile::Stone).tint, WHITE);
-    assert_eq!(set.tile(Tile::TallGrass).tint, GRASS);
+    assert_eq!(set.tile(Tile::TallGrass).biome, BiomeTint::Grass);
 }
 
 #[test]
 fn layer_count_matches_frames() {
     let bytes = zip(&[(&block("dirt.png"), png(16, 16, [1, 1, 1, 255]))]);
     let set = load(&bytes).unwrap().textures;
-    let total: usize = Tile::ALL.iter().map(|&t| set.tile(t).frames as usize).sum();
+    let total: usize = Tile::ALL
+        .iter()
+        .map(|&t| set.tile(t).layer_span() as usize)
+        .sum();
     assert_eq!(set.layer_count() as usize, total);
     for tile in Tile::ALL {
         let texture = set.tile(tile);
         assert_eq!(
             texture.layers.len(),
-            texture.frames as usize * set.frame_bytes()
+            texture.layer_span() as usize * set.frame_bytes()
         );
     }
 }
 
 #[test]
-fn tints_follow_vanilla_colors() {
+fn fixed_tints_and_biome_kinds() {
     let bytes = zip(&[
         (&block("grass_top.png"), png(16, 16, [200, 200, 200, 255])),
+        (&block("leaves_oak.png"), png(16, 16, [200, 200, 200, 255])),
         (
             &block("leaves_birch.png"),
             png(16, 16, [200, 200, 200, 255]),
@@ -92,23 +96,23 @@ fn tints_follow_vanilla_colors() {
     ]);
     let set = load(&bytes).unwrap().textures;
     let hex = |c: [f32; 3]| c.map(|v| (v * 255.0).round() as u8);
-    assert_eq!(hex(set.tile(Tile::GrassTop).tint), [0x79, 0xC0, 0x5A]);
-    assert_eq!(hex(set.tile(Tile::TallGrass).tint), [0x79, 0xC0, 0x5A]);
+    assert_eq!(set.tile(Tile::GrassTop).biome, BiomeTint::Grass);
+    assert_eq!(set.tile(Tile::GrassTop).tint, WHITE);
+    assert_eq!(set.tile(Tile::Leaves).biome, BiomeTint::Foliage);
+    assert_eq!(set.tile(Tile::TallGrass).biome, BiomeTint::Grass);
+    assert_eq!(set.tile(Tile::BirchLeaves).biome, BiomeTint::None);
     assert_eq!(hex(set.tile(Tile::BirchLeaves).tint), [0x80, 0xA7, 0x55]);
     assert_eq!(hex(set.tile(Tile::Water).tint), [0x3F, 0x76, 0xE4]);
     assert_eq!(&set.tile_pixels(Tile::Water)[3..4], [WATER_MAX_ALPHA]);
-    assert_eq!(
-        &set.icon_pixels(Tile::GrassTop)[..3],
-        [
-            (200.0_f32 * 0x79 as f32 / 255.0).round() as u8,
-            (200.0_f32 * 0xC0 as f32 / 255.0).round() as u8,
-            (200.0_f32 * 0x5A as f32 / 255.0).round() as u8,
-        ]
-    );
+    let plains = BiomePalette::constants().grass[0];
+    let icon = set.icon_pixels(Tile::GrassTop);
+    for c in 0..3 {
+        assert_eq!(icon[c], (200.0 * plains[c]).round() as u8);
+    }
 }
 
 #[test]
-fn grass_side_gets_a_tinted_overlay() {
+fn grass_side_overlay_is_a_separate_layer() {
     let bytes = zip(&[
         (&block("grass_side.png"), png(16, 16, [100, 100, 100, 255])),
         (
@@ -117,8 +121,46 @@ fn grass_side_gets_a_tinted_overlay() {
         ),
     ]);
     let set = load(&bytes).unwrap().textures;
-    assert_eq!(set.tile(Tile::GrassSide).tint, WHITE);
-    assert_eq!(&set.tile_pixels(Tile::GrassSide)[..3], [0x79, 0xC0, 0x5A]);
+    let side = set.tile(Tile::GrassSide);
+    assert!(side.overlay);
+    assert_eq!(side.frames, 1);
+    assert_eq!(side.layers.len(), 2 * set.frame_bytes());
+    assert_eq!(&set.tile_pixels(Tile::GrassSide)[..3], [100, 100, 100]);
+    assert_eq!(side.biome, BiomeTint::None);
+    let plains = BiomePalette::constants().grass[0];
+    let icon = set.icon_pixels(Tile::GrassSide);
+    for c in 0..3 {
+        assert_eq!(icon[c], (255.0 * plains[c]).round() as u8);
+    }
+    let table = set.animation_table();
+    let entry = table[Tile::GrassSide.layer() as usize];
+    assert_eq!(entry[1][2], entry[1][0] + 1.0);
+    assert_eq!(entry[1][3], 1.0);
+    assert_eq!(set.first_layer(Tile::Dirt), entry[1][0] as u32 + 2);
+}
+
+#[test]
+fn colormaps_override_constants_and_default_without_them() {
+    let none = zip(&[(&block("dirt.png"), png(16, 16, [1, 2, 3, 255]))]);
+    assert_eq!(
+        *load(&none).unwrap().textures.palette(),
+        BiomePalette::constants()
+    );
+    let map = |name: &str, rgba: [u8; 4]| {
+        (
+            format!("assets/minecraft/textures/colormap/{name}.png"),
+            png(256, 256, rgba),
+        )
+    };
+    let (grass_name, grass) = map("grass", [10, 20, 30, 255]);
+    let with = zip(&[
+        (&block("dirt.png"), png(16, 16, [1, 2, 3, 255])),
+        (&grass_name, grass),
+    ]);
+    let palette = *load(&with).unwrap().textures.palette();
+    let expected = [10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0];
+    assert_eq!(palette.grass, [expected; 4]);
+    assert_eq!(palette.foliage, BiomePalette::constants().foliage);
 }
 
 #[test]

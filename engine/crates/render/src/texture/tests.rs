@@ -3,7 +3,7 @@ use world::textures::{TextureSet, TileTexture};
 
 const TILE_SIZE: u32 = 32;
 const MIP_LEVELS: u32 = 6;
-const LAYER_COUNT: u32 = 96;
+const LAYER_COUNT: u32 = 97;
 
 fn standard() -> TextureSet {
     TextureSet::standard()
@@ -254,8 +254,8 @@ fn builtin_set_output_matches_golden() {
     let hash = data.iter().fold(0xcbf29ce484222325_u64, |h, &b| {
         (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
     });
-    assert_eq!(data.len(), 524160);
-    assert_eq!(format!("{hash:016x}"), "ebd0936fe05daab5");
+    assert_eq!(data.len(), 529620);
+    assert_eq!(format!("{hash:016x}"), "f7ee3183cba82a85");
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn generates_all_mips_for_32px_tiles() {
         .iter()
         .map(|_| TileTexture::still([10, 20, 30, 255].repeat(32 * 32)))
         .collect();
-    let set = TextureSet::from_tiles(32, tiles);
+    let set = TextureSet::from_tiles(32, tiles, world::biome_color::BiomePalette::constants());
     let data = generate(&set);
     let layer_bytes: usize = (0..6).map(|l| ((32 >> l) * (32 >> l) * 4) as usize).sum();
     assert_eq!(layer_bytes, 1365 * 4);
