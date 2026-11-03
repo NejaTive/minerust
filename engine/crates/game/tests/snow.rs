@@ -28,11 +28,13 @@ fn game_at(biome: Biome) -> Game {
 }
 
 #[test]
-fn snow_falls_in_taiga_instead_of_rain() {
-    let game = game_at(Biome::Taiga);
-    assert_eq!(game.weather(), Weather::Rain);
-    assert!(game.rain_drops() > 0.5);
-    assert!(game.snowing());
+fn snow_falls_in_cold_biomes_instead_of_rain() {
+    for biome in [Biome::Taiga, Biome::Tundra] {
+        let game = game_at(biome);
+        assert_eq!(game.weather(), Weather::Rain, "{biome:?}");
+        assert!(game.rain_drops() > 0.5, "{biome:?}");
+        assert!(game.snowing(), "{biome:?}");
+    }
 }
 
 #[test]
@@ -69,5 +71,6 @@ fn thunderstorm_has_no_flashes_in_taiga_but_does_elsewhere() {
         peak
     };
     assert_eq!(flashes(Biome::Taiga), 0.0);
+    assert_eq!(flashes(Biome::Tundra), 0.0);
     assert!(flashes(Biome::Plains) > 0.5);
 }

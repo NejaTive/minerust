@@ -100,8 +100,21 @@ fn weights_bytes_quantize_to_unit_range() {
         desert: 0.25,
         forest: 0.25,
         taiga: 0.0,
+        tundra: 0.0,
     };
     assert_eq!(weights_bytes(w), [128, 64, 64, 0]);
+}
+
+#[test]
+fn weights_bytes_merge_taiga_and_tundra_into_cold() {
+    let w = BiomeWeights {
+        plains: 0.0,
+        desert: 0.0,
+        forest: 0.0,
+        taiga: 0.25,
+        tundra: 0.5,
+    };
+    assert_eq!(weights_bytes(w), [0, 0, 0, 191]);
 }
 
 #[test]

@@ -297,7 +297,7 @@ impl Game {
     }
 
     pub fn flash(&self) -> f32 {
-        if self.camera_biome() == Biome::Taiga {
+        if self.camera_biome().is_snowy() {
             0.0
         } else {
             self.weather.flash()
@@ -310,7 +310,7 @@ impl Game {
     }
 
     pub fn snowing(&self) -> bool {
-        self.weather.rain() > 0.0 && self.camera_biome() == Biome::Taiga
+        self.weather.rain() > 0.0 && self.camera_biome().is_snowy()
     }
 
     pub fn rain_drops(&self) -> f32 {

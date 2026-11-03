@@ -258,14 +258,14 @@ fn plains_grow_only_oak_and_birch() {
 }
 
 #[test]
-fn spruce_grows_only_in_taiga() {
+fn spruce_grows_only_in_snowy_biomes() {
     let terrain = Terrain::new(1337);
     let spruces: Vec<&Tree> = of_kind(TreeKind::Spruce).collect();
     assert!(spruces.len() > 100, "{} spruces", spruces.len());
     assert!(
         spruces
             .iter()
-            .all(|t| terrain.biome_at(t.base.x, t.base.z) == Biome::Taiga)
+            .all(|t| terrain.biome_at(t.base.x, t.base.z).is_snowy())
     );
 }
 
@@ -277,11 +277,31 @@ fn taiga_grows_only_spruce() {
 }
 
 #[test]
+fn tundra_trees_are_rare_spruces() {
+    let terrain = Terrain::new(1337);
+    let cells = |biome| {
+        (-1024..1024)
+            .flat_map(|z| (-1024..1024).map(move |x| (x, z)))
+            .filter(|&(x, z)| terrain.biome_at(x, z) == biome)
+            .count() as f32
+    };
+    let tundra = trees_in(Biome::Tundra);
+    assert!(tundra.len() > 20, "{} tundra trees", tundra.len());
+    assert!(tundra.iter().all(|t| t.kind == TreeKind::Spruce));
+    let tundra_density = tundra.len() as f32 / cells(Biome::Tundra);
+    let taiga_density = trees_in(Biome::Taiga).len() as f32 / cells(Biome::Taiga);
+    assert!(
+        tundra_density * 10.0 < taiga_density,
+        "tundra {tundra_density}, taiga {taiga_density}"
+    );
+}
+
+#[test]
 fn high_ground_outside_taiga_has_no_spruce() {
     let terrain = Terrain::new(1337);
     let high: Vec<&Tree> = forest_trees()
         .iter()
-        .filter(|t| t.base.y > 78 && terrain.biome_at(t.base.x, t.base.z) != Biome::Taiga)
+        .filter(|t| t.base.y > 78 && !terrain.biome_at(t.base.x, t.base.z).is_snowy())
         .collect();
     assert!(high.len() > 10, "{} high trees", high.len());
     assert!(high.iter().all(|t| t.kind != TreeKind::Spruce));
@@ -305,8 +325,8 @@ fn no_trees_in_water_or_on_beaches() {
 #[test]
 fn forest_is_denser_than_plains_and_desert_is_empty() {
     let terrain = Terrain::new(1337);
-    let mut area = [0; 4];
-    let mut trees = [0; 4];
+    let mut area = [0; 5];
+    let mut trees = [0; 5];
     for z in -1024..1024 {
         for x in -1024..1024 {
             if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {

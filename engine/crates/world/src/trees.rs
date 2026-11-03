@@ -9,6 +9,7 @@ use crate::terrain::{Biome, Terrain, WATER_LEVEL, WorldType};
 pub const MAX_REACH: i32 = 6;
 const FOREST_DENSITY: f32 = 0.04;
 const PLAINS_DENSITY: f32 = 0.002;
+const TUNDRA_DENSITY: f32 = 0.0004;
 
 const SALT_SPOT: u64 = 1;
 const SALT_TRUNK: u64 = 2;
@@ -284,7 +285,9 @@ fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<Candidate> {
         return None;
     }
     let w = terrain.biome_weights(x, z);
-    let density = (w.forest + w.taiga) * FOREST_DENSITY + w.plains * PLAINS_DENSITY;
+    let density = (w.forest + w.taiga) * FOREST_DENSITY
+        + w.plains * PLAINS_DENSITY
+        + w.tundra * TUNDRA_DENSITY;
     let biome = w.dominant();
     if biome == Biome::Desert || roll >= density {
         return None;
@@ -305,7 +308,7 @@ fn pick_kind(biome: Biome, bits: u32) -> TreeKind {
             55..88 => TreeKind::Birch,
             _ => TreeKind::BigOak,
         },
-        Biome::Taiga => TreeKind::Spruce,
+        Biome::Taiga | Biome::Tundra => TreeKind::Spruce,
         _ => {
             if second < 50 {
                 TreeKind::Oak
@@ -340,7 +343,7 @@ pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
         }
     }
     for tree in &trees {
-        if terrain.biome_at(tree.base.x, tree.base.z) != Biome::Taiga {
+        if !terrain.biome_at(tree.base.x, tree.base.z).is_snowy() {
             continue;
         }
         for leaf in tree.leaves() {
