@@ -8,6 +8,22 @@ use crate::physics::{Collision, Input, Mode, Player};
 use crate::rng::Rng;
 
 pub const PIG_SIZE: f32 = 0.9;
+
+pub struct MobSpec {
+    pub size: f32,
+    pub shadow_radius: f32,
+}
+
+pub const PIG: MobSpec = MobSpec {
+    size: PIG_SIZE,
+    shadow_radius: 0.7,
+};
+
+pub fn spec(kind: MobKind) -> &'static MobSpec {
+    match kind {
+        MobKind::Pig => &PIG,
+    }
+}
 const PIG_EYE: f32 = 0.6;
 
 const WALK_INPUT: f32 = 0.5;
@@ -22,6 +38,9 @@ const STUCK_CHECK_TICKS: u32 = 60;
 const STUCK_DISTANCE: f32 = 0.3;
 const SAFE_DROP: i32 = 3;
 const CLIFF_PROBE: f32 = 0.7;
+const HOP_PROBE: f32 = 0.15;
+const HOP_HEIGHT: f32 = 1.0;
+const HOP_EPS: f32 = 1e-3;
 const WATCH_RANGE: f32 = 6.0;
 const WATCH_ONE_IN: u32 = 90;
 const WATCH_TICKS: (f32, f32) = (120.0, 240.0);
@@ -91,7 +110,8 @@ pub struct Surroundings<'a, C, F> {
 
 impl Mob {
     pub fn new(kind: MobKind, feet: Vec3, yaw: f32, seed: u32) -> Mob {
-        let body = Player::sized(feet, Mode::Walking, PIG_SIZE, PIG_SIZE);
+        let mut body = Player::sized(feet, Mode::Walking, spec(kind).size, spec(kind).size);
+        body.auto_step = false;
         let mut mob = Mob {
             kind,
             body,
@@ -172,7 +192,7 @@ impl Mob {
         let input = Input {
             forward,
             strafe: 0.0,
-            jump: swimming,
+            jump: swimming || forward > 0.0 && self.body.on_ground && self.can_hop(around),
             descend: false,
         };
         self.body
@@ -226,6 +246,34 @@ impl Mob {
                 Some(to_target.y.atan2(to_target.x))
             }
         }
+    }
+
+    fn can_hop<C, F>(&self, around: &Surroundings<C, F>) -> bool
+    where
+        C: Fn(IVec3) -> Collision,
+        F: Fn(IVec3) -> Option<(FluidKind, f32)>,
+    {
+        let feet = self.body.feet;
+        let reach = PIG_SIZE / 2.0 + HOP_PROBE;
+        let ahead = (feet + Vec3::new(self.yaw.cos(), 0.0, self.yaw.sin()) * reach)
+            .floor()
+            .as_ivec3();
+        let here = feet.floor().as_ivec3();
+        let base = (feet.y + HOP_EPS).floor() as i32;
+        let wall = (around.collision)(IVec3::new(ahead.x, base, ahead.z)).height;
+        let top = base as f32 + wall;
+        if wall <= 0.0 || top - feet.y > HOP_HEIGHT + HOP_EPS {
+            return false;
+        }
+        let free = |column: IVec3, from: f32, to: f32| {
+            let (lo, hi) = (
+                (from + HOP_EPS).floor() as i32,
+                (to - HOP_EPS).floor() as i32,
+            );
+            (lo..=hi).all(|y| (around.collision)(IVec3::new(column.x, y, column.z)).height <= 0.0)
+        };
+        free(ahead, top, top + PIG_SIZE)
+            && free(here, feet.y + PIG_SIZE, feet.y + HOP_HEIGHT + PIG_SIZE)
     }
 
     fn ground_ahead<C, F>(&self, around: &Surroundings<C, F>) -> bool

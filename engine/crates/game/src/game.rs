@@ -19,7 +19,8 @@ use crate::collide::{center_xz, overlap_depth, push_away};
 use crate::daytime::{self, DayTime, SkyState};
 use crate::double_tap::DoubleTap;
 use crate::loader::DEFAULT_RADIUS;
-use crate::mob::{Mob, Pose, Surroundings};
+use crate::mob::{Mob, Pose, Surroundings, spec};
+use crate::mob_shadow::{Ground, ShadowPatch, shadow_patches};
 use crate::physics::{Clock, Collision, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
 use crate::rain_cover::RainCover;
 use crate::raycast::{Hit, raycast};
@@ -49,6 +50,8 @@ pub struct MobView {
     pub pose: Pose,
     pub sky_level: u8,
     pub block_level: u8,
+    pub shadow_radius: f32,
+    pub shadow: Vec<ShadowPatch>,
 }
 
 #[derive(Default)]
@@ -598,6 +601,18 @@ impl Game {
                     pose,
                     sky_level: self.light.sky(cell),
                     block_level: self.light.block(cell),
+                    shadow_radius: spec(mob.kind).shadow_radius,
+                    shadow: shadow_patches(pose.feet, spec(mob.kind).shadow_radius, |pos| {
+                        let block = self.world.block(pos);
+                        let height = block.collision_height();
+                        if block == Block::Air {
+                            Ground::Air
+                        } else if height > 0.0 && block.fluid().is_none() {
+                            Ground::Solid(height)
+                        } else {
+                            Ground::Blocked
+                        }
+                    }),
                 }
             })
             .collect()

@@ -20,6 +20,7 @@ pub(crate) struct ScenePipelines {
     pub ice: wgpu::RenderPipeline,
     pub ice_depth: wgpu::RenderPipeline,
     pub entity: wgpu::RenderPipeline,
+    pub blob: wgpu::RenderPipeline,
     pub outline: wgpu::RenderPipeline,
     pub sky: wgpu::RenderPipeline,
     pub cloud: wgpu::RenderPipeline,
@@ -48,6 +49,7 @@ impl ScenePipelines {
             ice: block(BlockPass::Ice),
             ice_depth: block(BlockPass::IceDepth),
             entity: create_entity_pipeline(device, &layouts.entity, shader, format),
+            blob: create_blob_pipeline(device, &layouts.plain, shader, format),
             outline: create_outline_pipeline(device, &layouts.plain, format),
             sky: create_sky_pipeline(device, &layouts.plain, format),
             cloud: create_cloud_pipeline(device, &layouts.plain, format),
@@ -125,6 +127,48 @@ pub(crate) fn create_block_pipeline(
             } else {
                 wgpu::CompareFunction::Less
             }),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+fn create_blob_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("mob shadow"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_blob"),
+            buffers: &[Some(entity::blob_layout())],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_blob"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),

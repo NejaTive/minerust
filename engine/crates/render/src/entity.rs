@@ -6,10 +6,13 @@ use world::pack::EntityImages;
 
 pub const VERTEX_FLOATS: usize = 8;
 pub const VERTEX_BYTES: usize = VERTEX_FLOATS * 4;
+pub const BLOB_FLOATS: usize = 6;
+pub const BLOB_BYTES: usize = BLOB_FLOATS * 4;
 const SHEET_UNITS: Vec2 = Vec2::new(64.0, 32.0);
 const PIXELS_PER_BLOCK: f32 = 16.0;
 const MODEL_FEET: f32 = 24.0;
 const CULL_RADIUS: f32 = 1.2;
+const SHADOW_DROP: f32 = 2.0;
 const CULL_HEIGHT: f32 = 1.4;
 const LEG_SWING: f32 = 1.4;
 const LEG_FREQUENCY: f32 = 0.6662;
@@ -31,6 +34,14 @@ pub enum ModelKind {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct ShadowPatch {
+    pub min: Vec2,
+    pub max: Vec2,
+    pub y: f32,
+    pub opacity: f32,
+}
+
+#[derive(Clone, Debug)]
 pub struct MobInstance {
     pub kind: ModelKind,
     pub feet: Vec3,
@@ -41,12 +52,14 @@ pub struct MobInstance {
     pub limb_swing: f32,
     pub sky_level: f32,
     pub block_level: f32,
+    pub shadow_radius: f32,
+    pub shadow: Vec<ShadowPatch>,
 }
 
 impl MobInstance {
     pub fn bounds(&self) -> (Vec3, Vec3) {
         (
-            self.feet - Vec3::new(CULL_RADIUS, 0.0, CULL_RADIUS),
+            self.feet - Vec3::new(CULL_RADIUS, SHADOW_DROP, CULL_RADIUS),
             self.feet + Vec3::new(CULL_RADIUS, CULL_HEIGHT, CULL_RADIUS),
         )
     }
@@ -226,6 +239,47 @@ fn push_box(part: &BoxPart, instance: &MobInstance, out: &mut Vec<f32>) {
             ]);
         }
     }
+}
+
+const BLOB_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32];
+
+pub fn blob_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: BLOB_BYTES as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &BLOB_ATTRIBUTES,
+    }
+}
+
+pub fn push_blobs(instance: &MobInstance, out: &mut Vec<f32>) {
+    let center = Vec2::new(instance.feet.x, instance.feet.z);
+    for patch in &instance.shadow {
+        let corner = |x: f32, z: f32| {
+            let local = (Vec2::new(x, z) - center) / instance.shadow_radius;
+            [x, patch.y, z, local.x, local.y, patch.opacity]
+        };
+        let quad = [
+            corner(patch.min.x, patch.min.y),
+            corner(patch.min.x, patch.max.y),
+            corner(patch.max.x, patch.max.y),
+            corner(patch.max.x, patch.min.y),
+        ];
+        for index in [0, 1, 2, 0, 2, 3] {
+            out.extend_from_slice(&quad[index]);
+        }
+    }
+}
+
+pub fn visible_blobs(instances: &[MobInstance], visible: impl Fn(Vec3, Vec3) -> bool) -> Vec<f32> {
+    let mut out = Vec::new();
+    for instance in instances {
+        let (min, max) = instance.bounds();
+        if visible(min, max) {
+            push_blobs(instance, &mut out);
+        }
+    }
+    out
 }
 
 pub fn visible_vertices(
