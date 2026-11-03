@@ -9,6 +9,7 @@ use crate::biome_map::BiomeMap;
 use crate::block::Block;
 use crate::caves::Caves;
 use crate::column::{Column, WORLD_HEIGHT};
+use crate::mesa::{LAYER_SPAN, Mesa};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
 use crate::trees::hash;
@@ -33,6 +34,9 @@ const MOUNTAIN_GRAVEL_Y: i32 = 80;
 const BEDROCK_SCATTER: i32 = 3;
 const SALT_BEDROCK: u64 = 30;
 const SALT_SCREE: u64 = 31;
+const SALT_SANDSTONE: u64 = 32;
+const SANDSTONE_JITTER: u32 = 4;
+const SANDSTONE_BASE_Y: i32 = 63;
 pub const FLAT_SURFACE: i32 = 4;
 pub const DEBUG_GRID_Y: i32 = 70;
 pub const DEBUG_FLOOR_Y: i32 = 60;
@@ -74,6 +78,7 @@ pub struct Terrain {
     world_type: WorldType,
     height: FastNoiseLite,
     map: BiomeMap,
+    mesa: Mesa,
     climate: Mutex<HashMap<(i32, i32), Arc<ColumnClimate>>>,
     pub(crate) caves: Caves,
 }
@@ -95,6 +100,7 @@ impl Terrain {
             world_type,
             height,
             map: BiomeMap::new(seed),
+            mesa: Mesa::new(seed),
             climate: Mutex::new(HashMap::new()),
             caves: Caves::new(seed),
         }
@@ -199,7 +205,11 @@ impl Terrain {
                     + SPREAD_AMPLITUDE * lerp(&spread) * noise;
                 let index = z * 16 + x;
                 biomes[index] = blocks[index];
-                surface[index] = (y.floor() as i32).clamp(1, WORLD_HEIGHT - 2);
+                let mut height = (y.floor() as i32).clamp(1, WORLD_HEIGHT - 2);
+                if blocks[index] == Biome::MesaBryce {
+                    height = height.max(self.mesa.pillar_top(x0 + x as i32, z0 + z as i32));
+                }
+                surface[index] = height;
             }
         }
         ColumnClimate { biomes, surface }
@@ -211,6 +221,7 @@ impl Terrain {
         }
         let mut column = self.generate_trees(key);
         plants::plant(self, key, &mut column);
+        self.decorate(key, &mut column);
         column
     }
 
@@ -255,14 +266,31 @@ impl Terrain {
                 let biome = climate.biomes[index];
                 let snowy = biome.is_snowy();
                 let (top, filler) = self.surface_blocks(biome, surface, wx, wz);
+                let mut mesa_layers = [Block::Stone; LAYER_SPAN];
+                let mesa = biome.is_mesa() && surface >= WATER_LEVEL - 1;
+                if mesa {
+                    self.mesa.layers(biome, surface, wx, wz, &mut mesa_layers);
+                }
+                let sandstone = if filler == Block::Sand {
+                    (hash(self.seed, wx, wz, SALT_SANDSTONE) % SANDSTONE_JITTER) as i32
+                        + (surface - SANDSTONE_BASE_Y).max(0)
+                } else {
+                    0
+                };
                 for y in 0..=surface {
                     if self.is_bedrock(wx, y, wz) {
                         column.set(IVec3::new(x, y, z), Block::Bedrock);
                         continue;
                     }
-                    let block = match surface - y {
+                    let depth = surface - y;
+                    let block = match depth {
+                        _ if mesa => mesa_layers
+                            .get(depth as usize)
+                            .copied()
+                            .unwrap_or(Block::Stone),
                         0 => top,
                         d if d <= DIRT_DEPTH => filler,
+                        d if d <= DIRT_DEPTH + sandstone => Block::Sandstone,
                         _ => Block::Stone,
                     };
                     column.set(IVec3::new(x, y, z), block);
@@ -420,6 +448,8 @@ pub fn lake_key(terrain: &Terrain) -> ColumnPos {
         .map(|(x, z)| ColumnPos::new(x / SECTION_SIZE, z.div_euclid(SECTION_SIZE)))
         .expect("no lake on a column border")
 }
+
+mod decor;
 
 #[cfg(test)]
 mod bench;

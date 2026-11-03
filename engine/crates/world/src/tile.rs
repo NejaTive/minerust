@@ -35,10 +35,29 @@ pub enum Tile {
     SnowyGrassSide,
     Snow,
     Ice,
+    CactusTop,
+    CactusSide,
+    CactusBottom,
+    DeadBush,
+    RedSand,
+    Terracotta,
+    TerracottaWhite,
+    TerracottaOrange,
+    TerracottaYellow,
+    TerracottaBrown,
+    TerracottaRed,
+    TerracottaSilver,
+    Reeds,
+    SandstoneTop,
+    SandstoneSide,
+    SandstoneBottom,
+    RedSandstoneTop,
+    RedSandstoneSide,
+    RedSandstoneBottom,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 28] = [
+    pub const ALL: [Tile; 47] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -67,12 +86,31 @@ impl Tile {
         Tile::SnowyGrassSide,
         Tile::Snow,
         Tile::Ice,
+        Tile::CactusTop,
+        Tile::CactusSide,
+        Tile::CactusBottom,
+        Tile::DeadBush,
+        Tile::RedSand,
+        Tile::Terracotta,
+        Tile::TerracottaWhite,
+        Tile::TerracottaOrange,
+        Tile::TerracottaYellow,
+        Tile::TerracottaBrown,
+        Tile::TerracottaRed,
+        Tile::TerracottaSilver,
+        Tile::Reeds,
+        Tile::SandstoneTop,
+        Tile::SandstoneSide,
+        Tile::SandstoneBottom,
+        Tile::RedSandstoneTop,
+        Tile::RedSandstoneSide,
+        Tile::RedSandstoneBottom,
     ];
 
     pub fn sway(self) -> f32 {
         match self {
             Tile::Leaves | Tile::BirchLeaves | Tile::SpruceLeaves => 1.0,
-            Tile::TallGrass | Tile::Poppy | Tile::Dandelion => 2.0,
+            Tile::TallGrass | Tile::Poppy | Tile::Dandelion | Tile::DeadBush | Tile::Reeds => 2.0,
             _ => 0.0,
         }
     }
@@ -95,6 +133,11 @@ impl Tile {
                 | Tile::Poppy
                 | Tile::Dandelion
                 | Tile::Torch
+                | Tile::CactusTop
+                | Tile::CactusSide
+                | Tile::CactusBottom
+                | Tile::DeadBush
+                | Tile::Reeds
         )
     }
 }

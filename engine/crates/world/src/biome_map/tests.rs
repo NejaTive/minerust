@@ -125,3 +125,29 @@ fn coast_is_a_beach_or_a_stone_or_cold_shore() {
         }
     }
 }
+
+#[test]
+fn mesa_jungle_and_mega_taiga_are_found_across_seeds() {
+    let (mut mesa, mut jungle, mut mega, mut total) = (0, 0, 0, 0);
+    for seed in [1337, 42, 7, 5, 99, 2024, 11, 12] {
+        let map = BiomeMap::new(seed);
+        for gz in 0..128 {
+            let row = map.blocks(-8192, gz * 128 - 8192, 16_384, 1);
+            for biome in row.into_iter().step_by(128) {
+                total += 1;
+                mesa += i32::from(biome.is_mesa());
+                jungle += i32::from(biome.is_jungle());
+                mega += i32::from(matches!(
+                    biome,
+                    Biome::MegaTaiga
+                        | Biome::MegaTaigaHills
+                        | Biome::MegaSpruceTaiga
+                        | Biome::MegaSpruceTaigaHills
+                ));
+            }
+        }
+    }
+    for (name, count) in [("mesa", mesa), ("jungle", jungle), ("mega taiga", mega)] {
+        assert!(count * 300 > total, "{name} {count} of {total}");
+    }
+}

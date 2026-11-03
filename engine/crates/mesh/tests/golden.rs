@@ -174,7 +174,7 @@ fn oriented_scene_matches_golden() {
 
 const GOLDEN_ORIENTED: u64 = 0xdf81dc4645d46957;
 const GOLDEN_BLOCKS: [u64; 5] = [
-    0x614935aaae0ac814,
+    0x82a89639ebe0596e,
     0x8feb2848b215374,
     0xd3aa8223dfa4c9ab,
     0x36fd2994779b24c8,

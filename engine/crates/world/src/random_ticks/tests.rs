@@ -253,3 +253,45 @@ fn dirt_next_to_snowy_grass_becomes_snowy_grass() {
     assert_eq!(world.block(at(9, 8)), Block::SnowyGrass);
     assert_eq!(count(&world, Block::Grass), 0);
 }
+
+#[test]
+fn cactus_grows_up_to_three_blocks() {
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::Sand);
+    let base = at(8, 8) + IVec3::Y;
+    world.set_block(base, Block::Cactus);
+    let mut ticks = RandomTicks::new(5);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        w.block(base + 2 * IVec3::Y) == Block::Cactus
+    });
+    for d in 0..3 {
+        assert_eq!(world.block(base + d * IVec3::Y), Block::Cactus, "{d}");
+    }
+    run(&mut ticks, &mut world, &light, 60_000, |_| false);
+    assert_eq!(world.block(base + 3 * IVec3::Y), Block::Air);
+}
+
+#[test]
+fn reeds_grow_to_three_blocks() {
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::Sand);
+    let base = at(8, 8) + IVec3::Y;
+    world.set_block(base, Block::Reeds);
+    let mut ticks = RandomTicks::new(5);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        w.block(base + 2 * IVec3::Y) == Block::Reeds
+    });
+    assert_eq!(world.block(base + IVec3::Y), Block::Reeds);
+    let top = base + 2 * IVec3::Y;
+    assert_eq!(world.block(top), Block::Reeds);
+    assert_eq!(world.block(base + 3 * IVec3::Y), Block::Air);
+}
+
+#[test]
+fn cactus_does_not_grow_into_a_solid_side() {
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::Sand);
+    let base = at(8, 8) + IVec3::Y;
+    world.set_block(base, Block::Cactus);
+    world.set_block(base + IVec3::Y + IVec3::X, Block::Stone);
+    let mut ticks = RandomTicks::new(5);
+    run(&mut ticks, &mut world, &light, 60_000, |_| false);
+    assert_eq!(world.block(base + IVec3::Y), Block::Air);
+}

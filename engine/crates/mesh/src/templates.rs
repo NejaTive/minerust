@@ -7,7 +7,9 @@ use std::sync::LazyLock;
 use glam::IVec3;
 
 use crate::mesh::POSITION_UNITS;
-use world::block::{Facing, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, WATER_SURFACE};
+use world::block::{
+    CACTUS_INSET_UNITS, Facing, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, WATER_SURFACE,
+};
 use world::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW};
 
 pub(crate) struct Face {
@@ -91,7 +93,8 @@ pub const WATER_TOP_SLOPED: u8 = 53;
 pub const WATER_SIDE_SLOPED: u8 = 54;
 pub const SNOW_TOP: u8 = 58;
 pub const SNOW_SIDE: u8 = 59;
-pub const TEMPLATE_COUNT: usize = 63;
+pub const CACTUS: u8 = 63;
+pub const TEMPLATE_COUNT: usize = 69;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -231,6 +234,30 @@ fn torch_wall(turns: u32) -> impl Iterator<Item = Template> {
         })
 }
 
+fn cactus_face(face: &Face) -> Template {
+    let mut template = cube_face(face, POSITION_UNITS);
+    let inset = i32::from(CACTUS_INSET_UNITS);
+    let pull = |at_far: bool| {
+        if at_far {
+            (POSITION_UNITS - inset) as u8
+        } else {
+            inset as u8
+        }
+    };
+    for (corner, cell) in template.corners.iter_mut().zip(face.corners) {
+        if face.facing == Facing::Side {
+            let axis = face.normal.abs().max_position();
+            corner.pos[axis] = pull(cell[axis] == 1);
+        } else {
+            for axis in [0, 2] {
+                corner.pos[axis] = pull(cell[axis] == 1);
+            }
+            corner.uv = corner.uv.map(|v| pull(v != 0));
+        }
+    }
+    template
+}
+
 fn build() -> [Template; TEMPLATE_COUNT] {
     let mut out = Vec::with_capacity(TEMPLATE_COUNT);
     let sides = &FACES[2..];
@@ -271,6 +298,7 @@ fn build() -> [Template; TEMPLATE_COUNT] {
     out.extend(sides.iter().map(|f| sloped_water(f, SIDE_TOP_CORNER)));
     out.push(cube_face(&FACES[0], i32::from(SNOW_UNITS)));
     out.extend(sides.iter().map(|f| cube_face(f, i32::from(SNOW_UNITS))));
+    out.extend(FACES.iter().map(cactus_face));
     out.try_into().expect("template count")
 }
 

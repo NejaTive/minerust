@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard())
 }
 
-const ALL: [Block; 26] = Block::ALL;
+const ALL: [Block; 39] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -17,7 +17,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(26), Err(26));
+    assert_eq!(Block::try_from(39), Err(39));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -61,7 +61,12 @@ fn solid_and_opaque() {
     for block in ALL {
         let plant = matches!(
             block,
-            Block::TallGrass | Block::Poppy | Block::Dandelion | Block::Torch
+            Block::TallGrass
+                | Block::Poppy
+                | Block::Dandelion
+                | Block::Torch
+                | Block::DeadBush
+                | Block::Reeds
         );
         let solid =
             !matches!(block, Block::Air | Block::Water | Block::Lava | Block::Snow) && !plant;
@@ -77,6 +82,7 @@ fn solid_and_opaque() {
                 | Block::Snow
                 | Block::Ice
                 | Block::Barrier
+                | Block::Cactus
         ) && !plant;
         assert_eq!(
             block.is_targetable(),
@@ -85,7 +91,7 @@ fn solid_and_opaque() {
         );
         assert_eq!(
             block.needs_support(),
-            plant || block == Block::Snow,
+            plant || matches!(block, Block::Snow | Block::Cactus),
             "{block:?}"
         );
         assert_eq!(block.is_opaque(), opaque, "{block:?}");
@@ -103,7 +109,10 @@ fn render_layers() {
             | Block::TallGrass
             | Block::Poppy
             | Block::Dandelion
-            | Block::Torch => RenderLayer::Cutout,
+            | Block::Torch
+            | Block::Cactus
+            | Block::DeadBush
+            | Block::Reeds => RenderLayer::Cutout,
             Block::Water | Block::Ice => RenderLayer::Translucent,
             _ => RenderLayer::Opaque,
         };
@@ -208,7 +217,11 @@ fn air_has_no_tiles_and_others_have_all() {
 #[test]
 fn support_is_for_non_solid_blocks() {
     for def in &BLOCKS {
-        assert!(!(def.needs_support && def.solid), "{}", def.name);
+        assert!(
+            !(def.needs_support && def.solid) || def.shape == Shape::Cactus,
+            "{}",
+            def.name
+        );
         assert!(
             !def.opaque || def.solid && def.shape == Shape::Cube,
             "{}",
@@ -377,6 +390,7 @@ fn collision_height_is_full_for_solids_only() {
     for block in ALL {
         let expected = match block {
             Block::Snow => 2.0 / 16.0,
+            Block::Cactus => 15.0 / 16.0,
             block if block.is_solid() => 1.0,
             _ => 0.0,
         };
@@ -459,4 +473,74 @@ fn states_cover_every_data_kind() {
         assert_eq!(unique.len(), states.len());
     }
     assert!(Block::Water.states().any(|d| d & FLUID_FALLING != 0));
+}
+
+#[test]
+fn desert_blocks_are_appended_after_the_barrier() {
+    let names = [
+        "cactus",
+        "dead_bush",
+        "red_sand",
+        "terracotta",
+        "white_terracotta",
+        "orange_terracotta",
+        "yellow_terracotta",
+        "brown_terracotta",
+        "red_terracotta",
+        "silver_terracotta",
+        "reeds",
+        "sandstone",
+        "red_sandstone",
+    ];
+    for (i, name) in names.into_iter().enumerate() {
+        assert_eq!(
+            Block::from_name(name),
+            Some(ALL[Block::Barrier as usize + 1 + i])
+        );
+    }
+}
+
+#[test]
+fn red_sand_falls_like_sand_and_sandstone_does_not() {
+    assert!(Block::RedSand.falls() && Block::Sand.falls());
+    assert!(!Block::Sandstone.falls() && !Block::RedSandstone.falls());
+    assert!(!Block::Terracotta.falls());
+}
+
+#[test]
+fn cactus_box_is_narrower_and_lower_than_a_cube() {
+    let (lo, hi) = Block::Cactus.bounds(0);
+    let u = 1.0 / 16.0;
+    assert_eq!((lo.x, lo.z, hi.x, hi.z), (u, u, 15.0 * u, 15.0 * u));
+    assert_eq!((lo.y, hi.y), (0.0, 15.0 * u));
+    assert!(Block::Cactus.is_solid() && Block::Cactus.is_targetable());
+    assert!(!Block::Cactus.is_opaque());
+}
+
+#[test]
+fn sandstone_has_distinct_top_side_bottom() {
+    assert_eq!(Block::Sandstone.tile(Facing::Top), Some(Tile::SandstoneTop));
+    assert_eq!(
+        Block::Sandstone.tile(Facing::Side),
+        Some(Tile::SandstoneSide)
+    );
+    assert_eq!(
+        Block::RedSandstone.tile(Facing::Bottom),
+        Some(Tile::RedSandstoneBottom)
+    );
+    assert_eq!(Block::Cactus.tile(Facing::Top), Some(Tile::CactusTop));
+}
+
+#[test]
+fn only_dead_bush_and_reeds_are_new_crosses() {
+    for block in ALL {
+        assert_eq!(
+            block.shape() == Shape::Cross,
+            matches!(
+                block,
+                Block::TallGrass | Block::Poppy | Block::Dandelion | Block::DeadBush | Block::Reeds
+            ),
+            "{block:?}"
+        );
+    }
 }

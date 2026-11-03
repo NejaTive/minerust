@@ -391,7 +391,7 @@ pub(crate) fn hash(seed: i32, x: i32, z: i32, salt: u64) -> u32 {
     (splitmix64(point ^ stream) >> 32) as u32
 }
 
-fn splitmix64(mut v: u64) -> u64 {
+pub(crate) fn splitmix64(mut v: u64) -> u64 {
     v = v.wrapping_add(0x9e37_79b9_7f4a_7c15);
     v = (v ^ (v >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     v = (v ^ (v >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
