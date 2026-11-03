@@ -573,3 +573,52 @@ fn dead_bush_stands_on_sand_clay_and_dirt() {
         );
     }
 }
+
+#[test]
+fn vine_needs_an_opaque_wall_leaves_or_a_vine_above() {
+    use crate::block::{VINE_POS_X, VINE_TOP};
+    let mut world = floor_world();
+    let vine = IVec3::new(3, 10, 3);
+    assert!(!world.can_place_with_data(vine, Block::Vine, VINE_POS_X));
+    world.set_block(vine + IVec3::X, Block::Stone);
+    assert!(world.can_place_with_data(vine, Block::Vine, VINE_POS_X));
+    assert!(!world.can_place_with_data(vine, Block::Vine, VINE_TOP));
+    world.set_block(vine + IVec3::X, Block::JungleLeaves);
+    assert!(world.can_place_with_data(vine, Block::Vine, VINE_POS_X));
+    world.set_block(vine + IVec3::X, Block::Water);
+    assert!(!world.can_place_with_data(vine, Block::Vine, VINE_POS_X));
+    world.set_block(vine + IVec3::Y, Block::Stone);
+    assert!(world.can_place_with_data(vine, Block::Vine, VINE_TOP));
+}
+
+#[test]
+fn breaking_the_wall_breaks_the_vine_and_the_one_hanging_from_it() {
+    use crate::block::VINE_POS_X;
+    let mut world = floor_world();
+    let top = IVec3::new(3, 12, 3);
+    world.set_block(top + IVec3::X, Block::Stone);
+    world.set_block_supported_with_data(top, Block::Vine, VINE_POS_X);
+    let below = top - IVec3::Y;
+    assert!(world.can_place_with_data(below, Block::Vine, VINE_POS_X));
+    world.set_block_supported_with_data(below, Block::Vine, VINE_POS_X);
+    assert_eq!(world.block(below), Block::Vine);
+    let changed = world.set_block_supported(top + IVec3::X, Block::Air);
+    assert_eq!(world.block(top), Block::Air);
+    assert_eq!(world.block(below), Block::Air);
+    assert!(changed.contains(&top) && changed.contains(&below));
+}
+
+#[test]
+fn losing_one_side_keeps_the_vine_on_the_other() {
+    use crate::block::{VINE_POS_X, VINE_POS_Z};
+    let mut world = floor_world();
+    let vine = IVec3::new(3, 10, 3);
+    world.set_block(vine + IVec3::X, Block::Stone);
+    world.set_block(vine + IVec3::Z, Block::Stone);
+    world.set_block_supported_with_data(vine, Block::Vine, VINE_POS_X | VINE_POS_Z);
+    world.set_block_supported(vine + IVec3::X, Block::Air);
+    assert_eq!(world.block(vine), Block::Vine);
+    assert_eq!(world.block_data(vine), VINE_POS_Z);
+    world.set_block_supported(vine + IVec3::Z, Block::Air);
+    assert_eq!(world.block(vine), Block::Air);
+}

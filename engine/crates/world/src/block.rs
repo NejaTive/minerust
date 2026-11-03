@@ -46,6 +46,17 @@ pub enum Block {
     Reeds,
     Sandstone,
     RedSandstone,
+    JungleLog,
+    JungleLeaves,
+    AcaciaLog,
+    AcaciaLeaves,
+    DarkOakLog,
+    DarkOakLeaves,
+    Vine,
+    Melon,
+    BrownMushroomBlock,
+    RedMushroomBlock,
+    MushroomStem,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -84,6 +95,7 @@ pub enum Shape {
     Torch,
     Layer,
     Cactus,
+    Vine,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -92,6 +104,7 @@ pub enum DataKind {
     Axis,
     Attachment,
     Fluid,
+    Sides,
 }
 
 pub const AXIS_Y: u8 = 0;
@@ -103,6 +116,21 @@ pub const ATTACH_POS_X: u8 = 1;
 pub const ATTACH_NEG_X: u8 = 2;
 pub const ATTACH_POS_Z: u8 = 3;
 pub const ATTACH_NEG_Z: u8 = 4;
+
+pub const VINE_POS_X: u8 = 1;
+pub const VINE_NEG_X: u8 = 2;
+pub const VINE_POS_Z: u8 = 4;
+pub const VINE_NEG_Z: u8 = 8;
+pub const VINE_TOP: u8 = 16;
+pub const VINE_SIDES: [(u8, IVec3); 5] = [
+    (VINE_POS_X, IVec3::X),
+    (VINE_NEG_X, IVec3::NEG_X),
+    (VINE_POS_Z, IVec3::Z),
+    (VINE_NEG_Z, IVec3::NEG_Z),
+    (VINE_TOP, IVec3::Y),
+];
+pub const VINE_INSET_UNITS: u8 = 1;
+pub const VINE_INSET: f32 = VINE_INSET_UNITS as f32 / 16.0;
 
 pub const FLUID_SOURCE: u8 = 0;
 pub const FLUID_MAX_LEVEL: u8 = 7;
@@ -224,7 +252,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 39] = [
+pub const BLOCKS: [BlockDef; 50] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -395,10 +423,72 @@ pub const BLOCKS: [BlockDef; 39] = [
         bottom: Some(Tile::RedSandstoneBottom),
         ..BlockDef::uniform("red_sandstone", "красный песчаник", Tile::RedSandstoneSide)
     },
+    BlockDef::log(
+        "jungle_log",
+        "тропическое бревно",
+        Tile::JungleLogSide,
+        Tile::JungleLogTop,
+    ),
+    BlockDef::leaves("jungle_leaves", "тропическая листва", Tile::JungleLeaves),
+    BlockDef::log(
+        "acacia_log",
+        "бревно акации",
+        Tile::AcaciaLogSide,
+        Tile::AcaciaLogTop,
+    ),
+    BlockDef::leaves("acacia_leaves", "листва акации", Tile::AcaciaLeaves),
+    BlockDef::log(
+        "dark_oak_log",
+        "бревно тёмного дуба",
+        Tile::DarkOakLogSide,
+        Tile::DarkOakLogTop,
+    ),
+    BlockDef::leaves(
+        "dark_oak_leaves",
+        "листва тёмного дуба",
+        Tile::DarkOakLeaves,
+    ),
+    BlockDef {
+        solid: false,
+        opaque: false,
+        random_ticks: true,
+        data: DataKind::Sides,
+        layer: RenderLayer::Cutout,
+        shape: Shape::Vine,
+        ..BlockDef::uniform("vine", "лианы", Tile::Vine)
+    },
+    BlockDef {
+        top: Some(Tile::MelonTop),
+        bottom: Some(Tile::MelonTop),
+        ..BlockDef::uniform("melon", "арбуз", Tile::MelonSide)
+    },
+    BlockDef {
+        top: Some(Tile::MushroomSkinBrown),
+        bottom: Some(Tile::MushroomInside),
+        ..BlockDef::uniform(
+            "brown_mushroom_block",
+            "коричневый грибной блок",
+            Tile::MushroomSkinBrown,
+        )
+    },
+    BlockDef {
+        top: Some(Tile::MushroomSkinRed),
+        bottom: Some(Tile::MushroomInside),
+        ..BlockDef::uniform(
+            "red_mushroom_block",
+            "красный грибной блок",
+            Tile::MushroomSkinRed,
+        )
+    },
+    BlockDef {
+        top: Some(Tile::MushroomInside),
+        bottom: Some(Tile::MushroomInside),
+        ..BlockDef::uniform("mushroom_stem", "ножка гриба", Tile::MushroomStem)
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 39] = [
+    pub const ALL: [Block; 50] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -438,6 +528,17 @@ impl Block {
         Block::Reeds,
         Block::Sandstone,
         Block::RedSandstone,
+        Block::JungleLog,
+        Block::JungleLeaves,
+        Block::AcaciaLog,
+        Block::AcaciaLeaves,
+        Block::DarkOakLog,
+        Block::DarkOakLeaves,
+        Block::Vine,
+        Block::Melon,
+        Block::BrownMushroomBlock,
+        Block::RedMushroomBlock,
+        Block::MushroomStem,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -511,6 +612,24 @@ impl Block {
                 Vec3::new(CACTUS_INSET, 0.0, CACTUS_INSET),
                 Vec3::new(1.0 - CACTUS_INSET, CACTUS_HEIGHT, 1.0 - CACTUS_INSET),
             ),
+            Shape::Vine => {
+                let (mut min, mut max) = (Vec3::ONE, Vec3::ZERO);
+                for (bit, dir) in VINE_SIDES {
+                    if data & bit == 0 {
+                        continue;
+                    }
+                    let axis = dir.abs().max_position();
+                    let (mut lo, mut hi) = (Vec3::ZERO, Vec3::ONE);
+                    if dir[axis] > 0 {
+                        lo[axis] = 1.0 - VINE_INSET;
+                    } else {
+                        hi[axis] = VINE_INSET;
+                    }
+                    min = min.min(lo);
+                    max = max.max(hi);
+                }
+                (min.min(max), max)
+            }
             _ => (Vec3::ZERO, Vec3::ONE),
         }
     }
@@ -538,6 +657,14 @@ impl Block {
     pub fn placement_data(self, normal: IVec3) -> Option<u8> {
         match self.data_kind() {
             DataKind::None | DataKind::Fluid => Some(0),
+            DataKind::Sides => match normal {
+                IVec3::X => Some(VINE_NEG_X),
+                IVec3::NEG_X => Some(VINE_POS_X),
+                IVec3::Z => Some(VINE_NEG_Z),
+                IVec3::NEG_Z => Some(VINE_POS_Z),
+                IVec3::NEG_Y => Some(VINE_TOP),
+                _ => None,
+            },
             DataKind::Axis => Some(match normal.abs().max_position() {
                 0 => AXIS_X,
                 1 => AXIS_Y,
@@ -566,6 +693,7 @@ impl Block {
                 ATTACH_POS_Z,
                 ATTACH_NEG_Z,
             ],
+            DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
                 FLUID_SOURCE,
                 1,
@@ -608,6 +736,22 @@ impl Block {
                 | Block::RedTerracotta
                 | Block::SilverTerracotta
         )
+    }
+
+    pub fn is_leaves(self) -> bool {
+        matches!(
+            self,
+            Block::Leaves
+                | Block::BirchLeaves
+                | Block::SpruceLeaves
+                | Block::JungleLeaves
+                | Block::AcaciaLeaves
+                | Block::DarkOakLeaves
+        )
+    }
+
+    pub fn holds_vine(self) -> bool {
+        self.is_solid() && (self.is_opaque() || self.is_leaves())
     }
 
     pub fn is_stackable_plant(self) -> bool {

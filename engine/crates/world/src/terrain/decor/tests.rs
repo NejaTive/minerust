@@ -229,3 +229,68 @@ fn forest_plateau_has_oaks() {
         .sum();
     assert!(logs > 0);
 }
+
+const JUNGLE_SEED: i32 = 4;
+
+#[test]
+fn jungle_wall_vines_hang_on_solid_blocks_or_wood() {
+    let terrain = Terrain::new(JUNGLE_SEED);
+    let mut total = 0;
+    for key in columns_of(&terrain, Biome::Jungle, 40) {
+        let column = terrain.generate(key);
+        for pos in find(&column, Block::Vine) {
+            total += 1;
+            let side = column.get_data(pos);
+            let held = crate::block::VINE_SIDES.iter().any(|&(bit, dir)| {
+                side & bit != 0
+                    && (!Column::contains(pos + dir) || column.get(pos + dir).holds_vine())
+            }) || column.get(pos + IVec3::Y) == Block::Vine;
+            assert!(held, "{key} {pos} {side}");
+        }
+    }
+    assert!(total > 200, "{total} vines");
+}
+
+#[test]
+fn jungle_wall_vines_grow_on_bare_stone_walls() {
+    let terrain = Terrain::new(JUNGLE_SEED);
+    let mut on_ground_walls = 0;
+    for key in columns_of(&terrain, Biome::Jungle, 80) {
+        let column = terrain.generate(key);
+        for pos in find(&column, Block::Vine) {
+            on_ground_walls += crate::block::VINE_SIDES[..4]
+                .iter()
+                .filter(|&&(bit, dir)| {
+                    column.get_data(pos) & bit != 0
+                        && Column::contains(pos + dir)
+                        && matches!(
+                            column.get(pos + dir),
+                            Block::Stone | Block::Dirt | Block::Grass
+                        )
+                })
+                .count();
+        }
+    }
+    assert!(on_ground_walls > 0);
+}
+
+#[test]
+fn melons_lie_on_grass_in_the_jungle_only() {
+    let jungle = Terrain::new(JUNGLE_SEED);
+    let mut total = 0;
+    for key in columns_of(&jungle, Biome::Jungle, 120) {
+        let column = jungle.generate(key);
+        for pos in find(&column, Block::Melon) {
+            total += 1;
+            assert_eq!(column.get(pos - IVec3::Y), Block::Grass, "{key} {pos}");
+        }
+    }
+    assert!(total > 0, "no melons in 120 jungle columns");
+
+    let plains = Terrain::new(SEED);
+    for key in columns_of(&plains, Biome::Forest, 20) {
+        let column = plains.generate(key);
+        assert!(find(&column, Block::Melon).is_empty());
+        assert!(find(&column, Block::Vine).is_empty());
+    }
+}

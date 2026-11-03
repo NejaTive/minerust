@@ -3,11 +3,12 @@ use glam::IVec3;
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
     AO_BRIGHTNESS, CACTUS, CROSS, CUBE_FACE, FACES, Face, LOG_BARK_X, LOG_BARK_Z, SNOW_SIDE,
-    SNOW_TOP, TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, WATER_BOTTOM, WATER_SIDE,
+    SNOW_TOP, TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, VINE, WATER_BOTTOM, WATER_SIDE,
     WATER_SIDE_LOW, WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
 use world::block::{
-    ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, FluidKind, RenderLayer, Shape, fluid_height_units,
+    ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, FluidKind, RenderLayer, Shape, VINE_SIDES,
+    fluid_height_units,
 };
 use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
@@ -583,6 +584,16 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
     };
     match block.shape() {
         Shape::Cube | Shape::Layer | Shape::Cactus => {}
+        Shape::Vine => {
+            let layer = Tile::Vine.layer() as u8;
+            for (side, &(bit, _)) in VINE_SIDES.iter().enumerate() {
+                if data & bit != 0 {
+                    let first = VINE + 2 * side as u8;
+                    mesh.quads.push(quad(first, layer));
+                    mesh.quads.push(quad(first + 1, layer));
+                }
+            }
+        }
         Shape::Cross => {
             let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
             for t in CROSS..CROSS + 4 {
@@ -698,3 +709,5 @@ mod oriented;
 mod snow;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod vine;

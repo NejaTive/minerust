@@ -295,3 +295,36 @@ fn cactus_does_not_grow_into_a_solid_side() {
     run(&mut ticks, &mut world, &light, 60_000, |_| false);
     assert_eq!(world.block(base + IVec3::Y), Block::Air);
 }
+
+#[test]
+fn vines_grow_down_while_attached_and_stop_at_the_ground() {
+    use crate::block::VINE_POS_X;
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::Grass);
+    let top = at(4, 4) + IVec3::Y * 6;
+    for y in 0..=6 {
+        world.set_block(at(4, 4) + IVec3::X + IVec3::Y * y, Block::Stone);
+    }
+    world.set_block_with_data(top, Block::Vine, VINE_POS_X);
+    let mut ticks = RandomTicks::new(5);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        w.block(at(4, 4) + IVec3::Y) == Block::Vine
+    });
+    for y in 1..=6 {
+        let pos = at(4, 4) + IVec3::Y * y;
+        assert_eq!(world.block(pos), Block::Vine, "{pos}");
+        assert_eq!(world.block_data(pos), VINE_POS_X);
+    }
+    assert_eq!(world.block(at(4, 4)), Block::Grass);
+}
+
+#[test]
+fn a_ceiling_vine_does_not_grow_down() {
+    use crate::block::VINE_TOP;
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::Grass);
+    let top = at(4, 4) + IVec3::Y * 4;
+    world.set_block(top + IVec3::Y, Block::Stone);
+    world.set_block_with_data(top, Block::Vine, VINE_TOP);
+    let mut ticks = RandomTicks::new(5);
+    run(&mut ticks, &mut world, &light, 60_000, |_| false);
+    assert_eq!(world.block(top - IVec3::Y), Block::Air);
+}

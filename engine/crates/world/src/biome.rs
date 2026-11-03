@@ -171,6 +171,10 @@ impl Biome {
         )
     }
 
+    pub fn is_roofed(self) -> bool {
+        matches!(self, Biome::RoofedForest | Biome::RoofedForestM)
+    }
+
     pub fn is_jungle(self) -> bool {
         matches!(
             self,

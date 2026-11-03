@@ -6,21 +6,35 @@ use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
 use crate::terrain::{Biome, Terrain, WATER_LEVEL, WorldType};
 
-pub const MAX_REACH: i32 = 6;
-const MAX_TREES_PER_CHUNK: f32 = 25.0;
+pub const MAX_REACH: i32 = 9;
+const MAX_TREES_PER_CHUNK: f32 = 50.0;
 const BLOCKS_PER_CHUNK: f32 = 256.0;
 
 const SALT_SPOT: u64 = 1;
 const SALT_TRUNK: u64 = 2;
 const SALT_CORNERS: u64 = 3;
 const SALT_KIND: u64 = 4;
+const SALT_GRID: u64 = 5;
+const SALT_GRID_KIND: u64 = 6;
+const GRID_CELL: i32 = 4;
+const GRID_OFFSET: i32 = 1;
+const GRID_MUSHROOM_ONE_IN: u32 = 20;
+const MUSHROOM_TALL_ONE_IN: u32 = 12;
+const JUNGLE_BIG_OAK_FOOTPRINT: i32 = 3;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum TreeKind {
     Oak,
     Birch,
     Spruce,
     BigOak,
+    JungleTree,
+    MegaJungle,
+    Shrub,
+    Acacia,
+    DarkOak,
+    BrownMushroom,
+    RedMushroom,
 }
 
 impl TreeKind {
@@ -29,15 +43,28 @@ impl TreeKind {
             TreeKind::Oak | TreeKind::BigOak => Block::Log,
             TreeKind::Birch => Block::BirchLog,
             TreeKind::Spruce => Block::SpruceLog,
+            TreeKind::JungleTree | TreeKind::MegaJungle | TreeKind::Shrub => Block::JungleLog,
+            TreeKind::Acacia => Block::AcaciaLog,
+            TreeKind::DarkOak => Block::DarkOakLog,
+            TreeKind::BrownMushroom | TreeKind::RedMushroom => Block::MushroomStem,
         }
     }
 
     pub fn leaves(self) -> Block {
         match self {
-            TreeKind::Oak | TreeKind::BigOak => Block::Leaves,
+            TreeKind::Oak | TreeKind::BigOak | TreeKind::Shrub => Block::Leaves,
             TreeKind::Birch => Block::BirchLeaves,
             TreeKind::Spruce => Block::SpruceLeaves,
+            TreeKind::JungleTree | TreeKind::MegaJungle => Block::JungleLeaves,
+            TreeKind::Acacia => Block::AcaciaLeaves,
+            TreeKind::DarkOak => Block::DarkOakLeaves,
+            TreeKind::BrownMushroom => Block::BrownMushroomBlock,
+            TreeKind::RedMushroom => Block::RedMushroomBlock,
         }
+    }
+
+    fn wide_trunk(self) -> bool {
+        matches!(self, TreeKind::MegaJungle | TreeKind::DarkOak)
     }
 
     fn trunk_range(self) -> (i32, i32) {
@@ -46,19 +73,30 @@ impl TreeKind {
             TreeKind::Birch => (5, 7),
             TreeKind::Spruce => (7, 10),
             TreeKind::BigOak => (6, 9),
+            TreeKind::JungleTree => (4, 10),
+            TreeKind::MegaJungle => (10, 31),
+            TreeKind::Shrub => (1, 1),
+            TreeKind::Acacia => (5, 9),
+            TreeKind::DarkOak => (6, 9),
+            TreeKind::BrownMushroom | TreeKind::RedMushroom => (4, 6),
         }
     }
 
     fn footprint(self) -> i32 {
         match self {
             TreeKind::BigOak => 5,
+            TreeKind::Acacia | TreeKind::MegaJungle => 3,
+            TreeKind::DarkOak
+            | TreeKind::BrownMushroom
+            | TreeKind::RedMushroom
+            | TreeKind::Shrub => 1,
             _ => 2,
         }
     }
 }
 
-fn spacing(a: TreeKind, b: TreeKind) -> i32 {
-    a.footprint() + b.footprint() - 1
+fn spacing(a: &Candidate, b: &Candidate) -> i32 {
+    a.footprint + b.footprint - 1
 }
 
 const MAX_SPACING: i32 = 9;
@@ -99,7 +137,25 @@ impl Tree {
         }
     }
 
+    fn parts(&self) -> Option<shapes::Parts> {
+        Some(match self.kind {
+            TreeKind::JungleTree => {
+                shapes::jungle_tree(self.base, self.height, self.shape, self.round_crown())
+            }
+            TreeKind::MegaJungle => shapes::mega_jungle(self.base, self.height, self.shape),
+            TreeKind::Shrub => shapes::shrub(self.base, self.shape),
+            TreeKind::Acacia => shapes::acacia(self.base, self.height, self.shape),
+            TreeKind::DarkOak => shapes::dark_oak(self.base, self.height, self.shape),
+            TreeKind::BrownMushroom => shapes::mushroom(self.base, self.height, false),
+            TreeKind::RedMushroom => shapes::mushroom(self.base, self.height, true),
+            _ => return None,
+        })
+    }
+
     pub fn logs(&self) -> Vec<(IVec3, u8)> {
+        if let Some(parts) = self.parts() {
+            return parts.logs;
+        }
         let mut logs: Vec<(IVec3, u8)> = (0..self.height)
             .map(|dy| (self.base + IVec3::Y * dy, AXIS_Y))
             .collect();
@@ -110,11 +166,25 @@ impl Tree {
     }
 
     pub fn leaves(&self) -> Vec<IVec3> {
+        if let Some(parts) = self.parts() {
+            return parts.leaves;
+        }
         match self.kind {
             TreeKind::Oak | TreeKind::Birch => self.round_crown(),
             TreeKind::Spruce => self.cone_crown(),
-            TreeKind::BigOak => self.big_crown(),
+            _ => self.big_crown(),
         }
+    }
+
+    pub fn vines(&self) -> Vec<(IVec3, u8, i32)> {
+        let Some(parts) = self.parts() else {
+            return Vec::new();
+        };
+        parts
+            .vines
+            .into_iter()
+            .map(|v| (v.cell, v.side, v.drop))
+            .collect()
     }
 
     pub fn branches(&self) -> Vec<Branch> {
@@ -237,11 +307,24 @@ impl Branch {
 struct Candidate {
     roll: u32,
     kind: TreeKind,
+    footprint: i32,
 }
 
 impl Candidate {
-    fn priority(&self) -> (bool, u32) {
-        (self.kind != TreeKind::BigOak, self.roll)
+    fn new(roll: u32, kind: TreeKind, biome: Biome) -> Self {
+        let footprint = match kind {
+            TreeKind::BigOak if biome.is_jungle() => JUNGLE_BIG_OAK_FOOTPRINT,
+            _ => kind.footprint(),
+        };
+        Self {
+            roll,
+            kind,
+            footprint,
+        }
+    }
+
+    fn priority(&self) -> (i32, u32) {
+        (-self.footprint, self.roll)
     }
 }
 
@@ -260,7 +343,7 @@ pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
             let Some(other) = candidate(terrain, nx, nz) else {
                 continue;
             };
-            let near = dx.abs().max(dz.abs()) < spacing(own.kind, other.kind);
+            let near = dx.abs().max(dz.abs()) < spacing(&own, &other);
             if near && (other.priority(), nx, nz) < (own.priority(), x, z) {
                 return None;
             }
@@ -269,43 +352,96 @@ pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
     let seed = terrain.seed();
     let (min, max) = own.kind.trunk_range();
     let trunk = hash(seed, x, z, SALT_TRUNK) % (max - min + 1) as u32;
+    let shape = hash(seed, x, z, SALT_CORNERS);
+    let mut height = min + trunk as i32;
+    if matches!(own.kind, TreeKind::BrownMushroom | TreeKind::RedMushroom)
+        && shape.is_multiple_of(MUSHROOM_TALL_ONE_IN)
+    {
+        height *= 2;
+    }
     Some(Tree {
         base: IVec3::new(x, terrain.surface_height(x, z) + 1, z),
-        height: min + trunk as i32,
+        height,
         kind: own.kind,
-        shape: hash(seed, x, z, SALT_CORNERS),
+        shape,
     })
 }
 
+fn grid_spot(seed: i32, cell_x: i32, cell_z: i32) -> (i32, i32, u32) {
+    let h = hash(seed, cell_x, cell_z, SALT_GRID);
+    let x = cell_x * GRID_CELL + GRID_OFFSET + (h % 3) as i32;
+    let z = cell_z * GRID_CELL + GRID_OFFSET + (h / 3 % 3) as i32;
+    (x, z, h)
+}
+
+fn roofed_candidate(terrain: &Terrain, x: i32, z: i32) -> Option<Candidate> {
+    let (cell_x, cell_z) = (
+        (x - GRID_OFFSET).div_euclid(GRID_CELL),
+        (z - GRID_OFFSET).div_euclid(GRID_CELL),
+    );
+    let (spot_x, spot_z, h) = grid_spot(terrain.seed(), cell_x, cell_z);
+    if (spot_x, spot_z) != (x, z) || !terrain.biome_at(x, z).is_roofed() {
+        return None;
+    }
+    if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
+        return None;
+    }
+    let bits = hash(terrain.seed(), cell_x, cell_z, SALT_GRID_KIND);
+    let kind = if (h >> 8) % GRID_MUSHROOM_ONE_IN == 0 {
+        if bits & 1 == 0 {
+            TreeKind::BrownMushroom
+        } else {
+            TreeKind::RedMushroom
+        }
+    } else {
+        pick_kind(terrain.biome_at(x, z), bits)
+    };
+    flat_footprint(terrain, x, z, kind).then(|| Candidate::new(h, kind, terrain.biome_at(x, z)))
+}
+
+fn flat_footprint(terrain: &Terrain, x: i32, z: i32, kind: TreeKind) -> bool {
+    if !kind.wide_trunk() {
+        return true;
+    }
+    let ground = terrain.surface_height(x, z);
+    [(1, 0), (0, 1), (1, 1)]
+        .into_iter()
+        .all(|(dx, dz)| terrain.surface_height(x + dx, z + dz) == ground)
+}
+
 fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<Candidate> {
+    if let Some(grid) = roofed_candidate(terrain, x, z) {
+        return Some(grid);
+    }
     let h = hash(terrain.seed(), x, z, SALT_SPOT);
     let roll = (h >> 8) as f32 / (1 << 24) as f32;
     if roll >= MAX_TREES_PER_CHUNK / BLOCKS_PER_CHUNK {
         return None;
     }
     let biome = terrain.biome_at(x, z);
-    if roll >= trees_per_chunk(biome) / BLOCKS_PER_CHUNK {
+    if roll >= trees_per_chunk(biome) / BLOCKS_PER_CHUNK || biome.is_roofed() {
         return None;
     }
     if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
         return None;
     }
     let kind = pick_kind(biome, hash(terrain.seed(), x, z, SALT_KIND));
-    Some(Candidate { roll: h, kind })
+    flat_footprint(terrain, x, z, kind).then(|| Candidate::new(h, kind, biome))
 }
 
-// `treesPerChunk` из `BiomeDecorator` 1.12; у джунглей вместо 50 — 25, пока нет их деревьев.
+// `treesPerChunk` из `BiomeDecorator` 1.12; у тёмного леса деревья ставит сетка 4×4 (`roofed_candidate`).
 fn trees_per_chunk(biome: Biome) -> f32 {
     use Biome::*;
     match biome {
         Forest | ForestHills | BirchForest | BirchForestHills | BirchForestM
-        | BirchForestHillsM | RoofedForest | RoofedForestM | Taiga | TaigaHills | TaigaM
-        | ColdTaiga | ColdTaigaHills | ColdTaigaM | MegaTaiga | MegaTaigaHills
-        | MegaSpruceTaiga | MegaSpruceTaigaHills => 10.0,
+        | BirchForestHillsM | Taiga | TaigaHills | TaigaM | ColdTaiga | ColdTaigaHills
+        | ColdTaigaM | MegaTaiga | MegaTaigaHills | MegaSpruceTaiga | MegaSpruceTaigaHills => 10.0,
         FlowerForest => 6.0,
+        RoofedForest | RoofedForestM => 16.0,
         Jungle | JungleHills | JungleM => MAX_TREES_PER_CHUNK,
         JungleEdge | JungleEdgeM | Swampland | SwamplandM => 2.0,
-        Savanna | SavannaM | SavannaPlateau | SavannaPlateauM => 1.0,
+        Savanna | SavannaPlateau => 1.0,
+        SavannaM | SavannaPlateauM => 2.0,
         ExtremeHillsPlus | ExtremeHillsPlusM => 3.0,
         MesaPlateauF | MesaPlateauFM => 5.0,
         Plains | SunflowerPlains => 0.5,
@@ -324,18 +460,27 @@ fn pick_kind(biome: Biome, bits: u32) -> TreeKind {
             _ => TreeKind::BigOak,
         },
         BirchForest | BirchForestHills | BirchForestM | BirchForestHillsM => TreeKind::Birch,
-        RoofedForest | RoofedForestM => {
-            if second < 60 {
-                TreeKind::Oak
+        RoofedForest | RoofedForestM => match second {
+            0..80 => TreeKind::DarkOak,
+            80..90 => TreeKind::Birch,
+            _ => TreeKind::Oak,
+        },
+        Jungle | JungleHills | JungleM => match second {
+            0..10 => TreeKind::BigOak,
+            10..55 => TreeKind::Shrub,
+            55..70 => TreeKind::MegaJungle,
+            _ => TreeKind::JungleTree,
+        },
+        JungleEdge | JungleEdgeM => match second {
+            0..10 => TreeKind::BigOak,
+            10..55 => TreeKind::Shrub,
+            _ => TreeKind::JungleTree,
+        },
+        Savanna | SavannaM | SavannaPlateau | SavannaPlateauM => {
+            if second < 80 {
+                TreeKind::Acacia
             } else {
-                TreeKind::BigOak
-            }
-        }
-        Jungle | JungleHills | JungleM | JungleEdge | JungleEdgeM => {
-            if second < 70 {
                 TreeKind::Oak
-            } else {
-                TreeKind::BigOak
             }
         }
         Taiga | TaigaHills | TaigaM | ColdTaiga | ColdTaigaHills | ColdTaigaM | MegaTaiga
@@ -352,27 +497,48 @@ pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
         .flat_map(|z| range(origin.x).map(move |x| (x, z)))
         .filter_map(|(x, z)| tree_at(terrain, x, z))
         .collect();
-    for tree in &trees {
-        for (log, axis) in tree.logs() {
+    let built: Vec<shapes::Parts> = trees
+        .iter()
+        .map(|tree| {
+            tree.parts().unwrap_or_else(|| shapes::Parts {
+                logs: tree.logs(),
+                leaves: tree.leaves(),
+                vines: Vec::new(),
+            })
+        })
+        .collect();
+    for (tree, parts) in trees.iter().zip(&built) {
+        for &(log, axis) in &parts.logs {
             let local = log - origin;
             if Column::contains(local) {
                 column.set_with_data(local, tree.kind.log(), axis);
             }
         }
     }
-    for tree in &trees {
-        for leaf in tree.leaves() {
+    for (tree, parts) in trees.iter().zip(&built) {
+        for &leaf in &parts.leaves {
             let local = leaf - origin;
             if Column::contains(local) && column.get(local) == Block::Air {
                 column.set(local, tree.kind.leaves());
             }
         }
     }
-    for tree in &trees {
+    for parts in &built {
+        for vine in &parts.vines {
+            for drop in 0..=vine.drop {
+                let local = vine.cell - IVec3::Y * drop - origin;
+                if !Column::contains(local) || column.get(local) != Block::Air {
+                    break;
+                }
+                column.set_with_data(local, Block::Vine, vine.side);
+            }
+        }
+    }
+    for (tree, parts) in trees.iter().zip(&built) {
         if !terrain.biome_at(tree.base.x, tree.base.z).is_snowy() {
             continue;
         }
-        for leaf in tree.leaves() {
+        for &leaf in &parts.leaves {
             let local = leaf - origin;
             let above = local + IVec3::Y;
             if Column::contains(above)
@@ -406,6 +572,8 @@ pub fn border_tree(terrain: &Terrain, kind: TreeKind) -> Tree {
         .find(|tree| tree.kind == kind)
         .expect("no tree on a column border")
 }
+
+mod shapes;
 
 #[cfg(test)]
 mod tests;

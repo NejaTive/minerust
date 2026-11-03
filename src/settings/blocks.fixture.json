@@ -37,5 +37,16 @@
   { "name": "silver_terracotta", "label": "светло-серая терракота", "placeable": true },
   { "name": "reeds", "label": "сахарный тростник", "placeable": true },
   { "name": "sandstone", "label": "песчаник", "placeable": true },
-  { "name": "red_sandstone", "label": "красный песчаник", "placeable": true }
+  { "name": "red_sandstone", "label": "красный песчаник", "placeable": true },
+  { "name": "jungle_log", "label": "тропическое бревно", "placeable": true },
+  { "name": "jungle_leaves", "label": "тропическая листва", "placeable": true },
+  { "name": "acacia_log", "label": "бревно акации", "placeable": true },
+  { "name": "acacia_leaves", "label": "листва акации", "placeable": true },
+  { "name": "dark_oak_log", "label": "бревно тёмного дуба", "placeable": true },
+  { "name": "dark_oak_leaves", "label": "листва тёмного дуба", "placeable": true },
+  { "name": "vine", "label": "лианы", "placeable": true },
+  { "name": "melon", "label": "арбуз", "placeable": true },
+  { "name": "brown_mushroom_block", "label": "коричневый грибной блок", "placeable": true },
+  { "name": "red_mushroom_block", "label": "красный грибной блок", "placeable": true },
+  { "name": "mushroom_stem", "label": "ножка гриба", "placeable": true }
 ]
