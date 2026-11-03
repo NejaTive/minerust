@@ -112,6 +112,7 @@ pub struct Game {
     mobs: Vec<Mob>,
     adopted: HashSet<ColumnPos>,
     mob_rng: Rng,
+    spawn_ticks: u32,
 }
 
 impl Game {
@@ -183,6 +184,7 @@ impl Game {
             mobs: Vec::new(),
             adopted: HashSet::new(),
             mob_rng: Rng::new(seed as u32 ^ 0x9E37_79B9),
+            spawn_ticks: 0,
         })
     }
 
@@ -569,18 +571,7 @@ impl Game {
         let yaw = self.mob_rng.range(0.0, std::f32::consts::TAU);
         let seed = self.mob_rng.next_u32();
         let mob = Mob::new(item.def().spawns, feet, yaw, seed);
-        let (min, max) = mob.body.aabb();
-        let (lo, hi) = (
-            (min + 1e-3).floor().as_ivec3(),
-            (max - 1e-3).floor().as_ivec3(),
-        );
-        let clear = (lo.x..=hi.x).all(|x| {
-            (lo.y..=hi.y).all(|y| {
-                (lo.z..=hi.z)
-                    .all(|z| self.world.block(IVec3::new(x, y, z)).collision_height() == 0.0)
-            })
-        });
-        if clear && self.world.is_loaded(cell) {
+        if self.mob_fits(&mob) && self.world.is_loaded(cell) {
             self.mobs.push(mob);
         }
     }
@@ -636,7 +627,12 @@ impl Game {
             let Some(column) = self.world.column(key) else {
                 continue;
             };
-            for record in column.mobs.clone() {
+            let populated = column.populated;
+            let mut records = column.mobs.clone();
+            if !populated {
+                records = self.populate_column(key);
+            }
+            for record in records {
                 let seed = self.mob_rng.next_u32();
                 self.mobs.push(Mob::from_record(&record, seed));
             }
@@ -763,6 +759,7 @@ impl Game {
             self.advance_random_ticks(ticks * factor);
         }
         self.adopt_mobs();
+        self.advance_spawning(ticks);
         for _ in 0..ticks {
             if !self.body_loaded() {
                 self.clock.reset();
@@ -903,6 +900,7 @@ fn restore_player(state: &[f32]) -> Option<(Camera, Player)> {
 }
 
 mod command;
+mod spawn;
 
 #[cfg(test)]
 mod tests;

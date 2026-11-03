@@ -8,11 +8,11 @@ use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::mob::{MobKind, MobRecord};
 use crate::section::{SECTION_SIZE, SECTION_VOLUME};
 
-pub const FORMAT_VERSION: u8 = 3;
+pub const FORMAT_VERSION: u8 = 4;
 
 type Migration = fn(&[u8]) -> Result<Vec<u8>, SaveError>;
 
-const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3];
+const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3, v3_to_v4];
 
 fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut out = Vec::with_capacity(body.len() + 1);
@@ -26,6 +26,14 @@ fn v2_to_v3(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut out = Vec::with_capacity(body.len() + 2);
     out.push(flags);
     out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(rest);
+    Ok(out)
+}
+
+fn v3_to_v4(body: &[u8]) -> Result<Vec<u8>, SaveError> {
+    let (&flags, rest) = body.split_first().ok_or(SaveError::Truncated)?;
+    let mut out = Vec::with_capacity(body.len() + 1);
+    out.extend_from_slice(&[flags, 1]);
     out.extend_from_slice(rest);
     Ok(out)
 }
@@ -77,6 +85,7 @@ pub fn encode_column(column: &Column) -> Vec<u8> {
         })
         .collect();
     bytes.push(with_data.iter().fold(0, |flags, &(sy, _)| flags | 1 << sy));
+    bytes.push(u8::from(column.populated));
     bytes.extend_from_slice(&(column.mobs.len() as u16).to_le_bytes());
     for mob in &column.mobs {
         bytes.push(mob.kind as u8);
@@ -108,8 +117,10 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     let body = bytes.strip_prefix(MAGIC).ok_or(SaveError::BadMagic)?;
     let (&version, body) = body.split_first().ok_or(SaveError::Truncated)?;
     let body = upgrade(version, body, MIGRATIONS)?;
-    let (&flags, mut body) = body.split_first().ok_or(SaveError::Truncated)?;
+    let (&flags, body) = body.split_first().ok_or(SaveError::Truncated)?;
+    let (&populated, mut body) = body.split_first().ok_or(SaveError::Truncated)?;
     let mut column = Column::new();
+    column.populated = populated != 0;
     let (count, rest) = body.split_at_checked(2).ok_or(SaveError::Truncated)?;
     let count = usize::from(u16::from_le_bytes([count[0], count[1]]));
     let (mobs, rest) = rest

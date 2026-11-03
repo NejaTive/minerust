@@ -23,6 +23,10 @@ impl Rng {
         lo + (hi - lo) * self.unit()
     }
 
+    pub fn below(&mut self, bound: u32) -> u32 {
+        self.next_u32() % bound
+    }
+
     pub fn chance(&mut self, one_in: u32) -> bool {
         self.next_u32().is_multiple_of(one_in)
     }

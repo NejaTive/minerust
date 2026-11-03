@@ -178,6 +178,19 @@ impl World {
         self.dirty.insert(key);
     }
 
+    pub fn populate(&mut self, key: ColumnPos, mobs: Vec<MobRecord>) {
+        let Some(column) = self.columns.get_mut(&key) else {
+            return;
+        };
+        column.populated = true;
+        if mobs.is_empty() {
+            return;
+        }
+        column.mobs = mobs;
+        self.edited.insert(key);
+        self.dirty.insert(key);
+    }
+
     pub fn drain_dirty(&mut self) -> Vec<ColumnPos> {
         self.dirty.drain().collect()
     }
