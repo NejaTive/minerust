@@ -72,9 +72,10 @@ fn every_kind_grows() {
 fn trees_stand_on_the_surface_with_a_vertical_trunk() {
     let terrain = Terrain::new(1337);
     for tree in forest_trees() {
+        let puddle = i32::from(terrain.is_puddle(tree.base.x, tree.base.z));
         assert_eq!(
             tree.base.y,
-            terrain.surface_height(tree.base.x, tree.base.z) + 1
+            terrain.surface_height(tree.base.x, tree.base.z) + 1 - puddle
         );
         if tree.kind.wide_trunk() || matches!(tree.kind, TreeKind::MegaJungle | TreeKind::Acacia) {
             continue;
@@ -352,7 +353,8 @@ fn no_trees_in_water_or_on_beaches() {
     let mut low = 0;
     for z in -1024..1024 {
         for x in -1024..1024 {
-            if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
+            if terrain.surface_height(x, z) <= WATER_LEVEL + 1 && !terrain.biome_at(x, z).is_swamp()
+            {
                 low += 1;
                 assert_eq!(tree_at(&terrain, x, z), None, "{x}, {z}");
             }
@@ -816,9 +818,12 @@ fn jungle_trees_are_draped_in_vines_that_touch_their_wood() {
 
 #[test]
 fn other_trees_grow_no_vines() {
-    for tree in
-        all_trees().filter(|t| !matches!(t.kind, TreeKind::JungleTree | TreeKind::MegaJungle))
-    {
+    for tree in all_trees().filter(|t| {
+        !matches!(
+            t.kind,
+            TreeKind::JungleTree | TreeKind::MegaJungle | TreeKind::SwampOak
+        )
+    }) {
         assert!(tree.vines().is_empty(), "{:?}", tree.kind);
     }
 }

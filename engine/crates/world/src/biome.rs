@@ -171,6 +171,14 @@ impl Biome {
         )
     }
 
+    pub fn is_swamp(self) -> bool {
+        matches!(self, Biome::Swampland | Biome::SwamplandM)
+    }
+
+    pub fn is_mushroom_island(self) -> bool {
+        matches!(self, Biome::MushroomIsland | Biome::MushroomIslandShore)
+    }
+
     pub fn is_roofed(self) -> bool {
         matches!(self, Biome::RoofedForest | Biome::RoofedForestM)
     }
@@ -229,8 +237,8 @@ impl Biome {
         self.id() >= 128
     }
 
-    /// Блоки поверхности без снега; блоки, которых ещё нет (мицелий, подзол),
-    /// заменены ближайшими — этапы 3–5 плана `biomes-1.12` подставят свои.
+    /// Блоки поверхности без снега; блока, которого ещё нет (подзол),
+    /// заменён ближайшим — этап 5 плана `biomes-1.12` подставит свой.
     pub fn surface_blocks(self) -> SurfaceBlocks {
         let (top, filler) = match self {
             Biome::Desert
@@ -239,6 +247,7 @@ impl Biome {
             | Biome::Beach
             | Biome::ColdBeach => (Block::Sand, Block::Sand),
             Biome::StoneBeach => (Block::Stone, Block::Stone),
+            Biome::MushroomIsland | Biome::MushroomIslandShore => (Block::Mycelium, Block::Dirt),
             _ if self.is_mesa() => (Block::RedSand, Block::OrangeTerracotta),
             _ => (Block::Grass, Block::Dirt),
         };

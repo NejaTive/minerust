@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard())
 }
 
-const ALL: [Block; 50] = Block::ALL;
+const ALL: [Block; 55] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -17,7 +17,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(50), Err(50));
+    assert_eq!(Block::try_from(55), Err(55));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -68,6 +68,9 @@ fn solid_and_opaque() {
                 | Block::DeadBush
                 | Block::Reeds
                 | Block::Vine
+                | Block::Waterlily
+                | Block::BrownMushroom
+                | Block::RedMushroom
         );
         let solid =
             !matches!(block, Block::Air | Block::Water | Block::Lava | Block::Snow) && !plant;
@@ -120,7 +123,10 @@ fn render_layers() {
             | Block::Torch
             | Block::Cactus
             | Block::DeadBush
-            | Block::Reeds => RenderLayer::Cutout,
+            | Block::Reeds
+            | Block::Waterlily
+            | Block::BrownMushroom
+            | Block::RedMushroom => RenderLayer::Cutout,
             Block::Water | Block::Ice => RenderLayer::Translucent,
             _ => RenderLayer::Opaque,
         };
@@ -553,7 +559,13 @@ fn only_dead_bush_and_reeds_are_new_crosses() {
             block.shape() == Shape::Cross,
             matches!(
                 block,
-                Block::TallGrass | Block::Poppy | Block::Dandelion | Block::DeadBush | Block::Reeds
+                Block::TallGrass
+                    | Block::Poppy
+                    | Block::Dandelion
+                    | Block::DeadBush
+                    | Block::Reeds
+                    | Block::BrownMushroom
+                    | Block::RedMushroom
             ),
             "{block:?}"
         );
@@ -668,4 +680,57 @@ fn vine_bounds_hug_the_attached_sides() {
         Vec3::new(0.0, 1.0 - VINE_INSET, 1.0 - VINE_INSET).min(Vec3::new(0.0, 0.0, 0.0))
     );
     assert_eq!(max, Vec3::ONE);
+}
+
+#[test]
+fn swamp_and_island_blocks_are_declared() {
+    assert_eq!(Block::from_name("waterlily"), Some(Block::Waterlily));
+    assert_eq!(Block::from_name("mycelium"), Some(Block::Mycelium));
+    assert_eq!(Block::from_name("clay"), Some(Block::Clay));
+    assert_eq!(Block::Mycelium.tile(Facing::Top), Some(Tile::MyceliumTop));
+    assert_eq!(Block::Mycelium.tile(Facing::Side), Some(Tile::MyceliumSide));
+    assert_eq!(Block::Mycelium.tile(Facing::Bottom), Some(Tile::Dirt));
+    assert!(Block::Mycelium.random_ticks() && Block::Mycelium.is_opaque());
+    assert_eq!(Block::Clay.tile(Facing::Top), Some(Tile::Clay));
+    assert_eq!(
+        Block::BrownMushroom.tile(Facing::Side),
+        Some(Tile::BrownMushroom)
+    );
+    assert_eq!(
+        Block::RedMushroom.tile(Facing::Side),
+        Some(Tile::RedMushroom)
+    );
+    for block in [Block::BrownMushroom, Block::RedMushroom] {
+        assert_eq!(block.shape(), Shape::Cross);
+        assert!(block.is_mushroom() && block.needs_support() && !block.is_solid());
+    }
+}
+
+#[test]
+fn lily_floats_on_water_only() {
+    let lily = Block::Waterlily;
+    assert_eq!(lily.shape(), Shape::Lily);
+    assert!(lily.stands_on(Block::Water));
+    for support in [
+        Block::Stone,
+        Block::Dirt,
+        Block::Air,
+        Block::Lava,
+        Block::Ice,
+    ] {
+        assert!(!lily.stands_on(support), "{support:?}");
+    }
+    let (min, max) = lily.bounds(0);
+    assert_eq!((min, max), (Vec3::ZERO, Vec3::new(1.0, LILY_HEIGHT, 1.0)));
+    assert_eq!(lily.collision_height(), 0.0);
+}
+
+#[test]
+fn mushrooms_stand_on_any_solid_block() {
+    for mushroom in [Block::BrownMushroom, Block::RedMushroom] {
+        for support in [Block::Mycelium, Block::Stone, Block::Dirt, Block::Grass] {
+            assert!(mushroom.stands_on(support), "{support:?}");
+        }
+        assert!(!mushroom.stands_on(Block::Water) && !mushroom.stands_on(Block::Air));
+    }
 }

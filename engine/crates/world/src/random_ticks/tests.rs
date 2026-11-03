@@ -328,3 +328,21 @@ fn a_ceiling_vine_does_not_grow_down() {
     run(&mut ticks, &mut world, &light, 60_000, |_| false);
     assert_eq!(world.block(top - IVec3::Y), Block::Air);
 }
+
+#[test]
+fn mycelium_dies_under_a_block_and_spreads_to_lit_dirt() {
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::Dirt);
+    world.set_block(at(4, 4), Block::Mycelium);
+    world.set_block(at(4, 4) + IVec3::Y, Block::Stone);
+    let mut ticks = RandomTicks::new(5);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        w.block(at(4, 4)) == Block::Dirt
+    });
+    assert_eq!(world.block(at(4, 4)), Block::Dirt);
+
+    world.set_block(at(8, 8), Block::Mycelium);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        w.block(at(9, 8)) == Block::Mycelium
+    });
+    assert_eq!(world.block(at(9, 8)), Block::Mycelium);
+}

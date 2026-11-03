@@ -35,6 +35,9 @@ const BEDROCK_SCATTER: i32 = 3;
 const SALT_BEDROCK: u64 = 30;
 const SALT_SCREE: u64 = 31;
 const SALT_SANDSTONE: u64 = 32;
+const SWAMP_NOISE_SALT: i32 = 2345;
+const SWAMP_NOISE_FREQUENCY: f32 = 0.25;
+const SWAMP_LILY_BELOW: f32 = 0.12;
 const SANDSTONE_JITTER: u32 = 4;
 const SANDSTONE_BASE_Y: i32 = 63;
 pub const FLAT_SURFACE: i32 = 4;
@@ -79,6 +82,7 @@ pub struct Terrain {
     height: FastNoiseLite,
     map: BiomeMap,
     mesa: Mesa,
+    swamp: FastNoiseLite,
     climate: Mutex<HashMap<(i32, i32), Arc<ColumnClimate>>>,
     pub(crate) caves: Caves,
 }
@@ -95,10 +99,15 @@ impl Terrain {
         height.set_fractal_octaves(Some(5));
         height.set_frequency(Some(0.005));
 
+        let mut swamp = FastNoiseLite::with_seed(seed ^ SWAMP_NOISE_SALT);
+        swamp.set_noise_type(Some(NoiseType::Perlin));
+        swamp.set_frequency(Some(SWAMP_NOISE_FREQUENCY));
+
         Self {
             seed,
             world_type,
             height,
+            swamp,
             map: BiomeMap::new(seed),
             mesa: Mesa::new(seed),
             climate: Mutex::new(HashMap::new()),
@@ -126,6 +135,18 @@ impl Terrain {
             return Biome::Plains;
         }
         self.map.blocks(x, z, 1, 1)[0]
+    }
+
+    fn swamp_noise(&self, x: i32, z: i32) -> f32 {
+        self.swamp.get_noise_2d(x as f32, z as f32)
+    }
+
+    /// Лужа болота: верхний блок на уровне воды заменён водой (`BiomeSwamp.genTerrainBlocks`).
+    pub(crate) fn is_puddle(&self, x: i32, z: i32) -> bool {
+        self.world_type == WorldType::Standard
+            && self.biome_at(x, z).is_swamp()
+            && self.surface_height(x, z) == WATER_LEVEL
+            && self.swamp_noise(x, z) > 0.0
     }
 
     pub fn surface_height(&self, x: i32, z: i32) -> i32 {
@@ -303,6 +324,15 @@ impl Terrain {
                     };
                     column.set(IVec3::new(x, y, z), water);
                 }
+                if biome.is_swamp() && surface == WATER_LEVEL {
+                    let noise = self.swamp_noise(wx, wz);
+                    if noise > 0.0 {
+                        column.set(IVec3::new(x, surface, z), Block::Water);
+                        if noise < SWAMP_LILY_BELOW {
+                            column.set(IVec3::new(x, surface + 1, z), Block::Waterlily);
+                        }
+                    }
+                }
                 if column.get(IVec3::new(x, surface, z)) == Block::SnowyGrass {
                     column.set(IVec3::new(x, surface + 1, z), Block::Snow);
                 }
@@ -320,7 +350,7 @@ impl Terrain {
         if depth > 0 {
             let shallow = if biome.is_ocean() || biome.is_river() {
                 Block::Sand
-            } else if blocks.top == Block::Grass {
+            } else if matches!(blocks.top, Block::Grass | Block::Mycelium) {
                 Block::Dirt
             } else {
                 blocks.top

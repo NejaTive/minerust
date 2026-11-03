@@ -70,10 +70,16 @@ pub enum Tile {
     MushroomSkinRed,
     MushroomStem,
     MushroomInside,
+    Waterlily,
+    MyceliumTop,
+    MyceliumSide,
+    BrownMushroom,
+    RedMushroom,
+    Clay,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 63] = [
+    pub const ALL: [Tile; 69] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -137,6 +143,12 @@ impl Tile {
         Tile::MushroomSkinRed,
         Tile::MushroomStem,
         Tile::MushroomInside,
+        Tile::Waterlily,
+        Tile::MyceliumTop,
+        Tile::MyceliumSide,
+        Tile::BrownMushroom,
+        Tile::RedMushroom,
+        Tile::Clay,
     ];
 
     pub fn sway(self) -> f32 {
@@ -179,6 +191,9 @@ impl Tile {
                 | Tile::CactusBottom
                 | Tile::DeadBush
                 | Tile::Reeds
+                | Tile::Waterlily
+                | Tile::BrownMushroom
+                | Tile::RedMushroom
         )
     }
 }

@@ -8,8 +8,8 @@ use glam::IVec3;
 
 use crate::mesh::POSITION_UNITS;
 use world::block::{
-    CACTUS_INSET_UNITS, Facing, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, VINE_INSET_UNITS,
-    WATER_SURFACE,
+    CACTUS_INSET_UNITS, Facing, LILY_UNITS, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT,
+    VINE_INSET_UNITS, WATER_SURFACE,
 };
 use world::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW};
 
@@ -96,7 +96,8 @@ pub const SNOW_TOP: u8 = 58;
 pub const SNOW_SIDE: u8 = 59;
 pub const CACTUS: u8 = 63;
 pub const VINE: u8 = 69;
-pub const TEMPLATE_COUNT: usize = 79;
+pub const LILY: u8 = 79;
+pub const TEMPLATE_COUNT: usize = 81;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -321,6 +322,7 @@ fn build() -> [Template; TEMPLATE_COUNT] {
         back.corners.reverse();
         out.extend([front, back]);
     }
+    out.extend([&FACES[0], &FACES[1]].map(|f| cube_face(f, i32::from(LILY_UNITS))));
     out.try_into().expect("template count")
 }
 

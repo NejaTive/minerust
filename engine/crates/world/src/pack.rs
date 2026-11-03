@@ -36,6 +36,7 @@ const WATER_MAX_ALPHA: u8 = 180;
 const BIRCH_LEAVES: [f32; 3] = rgb(0x80A755);
 const SPRUCE_LEAVES: [f32; 3] = rgb(0x619961);
 const WATER: [f32; 3] = rgb(0x3F76E4);
+const WATERLILY: [f32; 3] = rgb(0x208030);
 
 const fn rgb(hex: u32) -> [f32; 3] {
     [
@@ -141,6 +142,12 @@ fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
         Tile::MushroomSkinRed => ("mushroom_block_skin_red", WHITE, BiomeTint::None),
         Tile::MushroomStem => ("mushroom_block_skin_stem", WHITE, BiomeTint::None),
         Tile::MushroomInside => ("mushroom_block_inside", WHITE, BiomeTint::None),
+        Tile::Waterlily => ("waterlily", WATERLILY, BiomeTint::None),
+        Tile::MyceliumTop => ("mycelium_top", WHITE, BiomeTint::None),
+        Tile::MyceliumSide => ("mycelium_side", WHITE, BiomeTint::None),
+        Tile::BrownMushroom => ("mushroom_brown", WHITE, BiomeTint::None),
+        Tile::RedMushroom => ("mushroom_red", WHITE, BiomeTint::None),
+        Tile::Clay => ("clay", WHITE, BiomeTint::None),
     }
 }
 
@@ -382,6 +389,12 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
     "mushroom_block_skin_red.png",
     "mushroom_block_skin_stem.png",
     "mushroom_block_inside.png",
+    "waterlily.png",
+    "mycelium_top.png",
+    "mycelium_side.png",
+    "mushroom_brown.png",
+    "mushroom_red.png",
+    "clay.png",
 ];
 
 fn builtin_file(path: &str) -> Option<&'static [u8]> {

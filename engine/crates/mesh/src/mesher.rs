@@ -2,7 +2,7 @@ use glam::IVec3;
 
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
-    AO_BRIGHTNESS, CACTUS, CROSS, CUBE_FACE, FACES, Face, LOG_BARK_X, LOG_BARK_Z, SNOW_SIDE,
+    AO_BRIGHTNESS, CACTUS, CROSS, CUBE_FACE, FACES, Face, LILY, LOG_BARK_X, LOG_BARK_Z, SNOW_SIDE,
     SNOW_TOP, TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, VINE, WATER_BOTTOM, WATER_SIDE,
     WATER_SIDE_LOW, WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
@@ -594,6 +594,11 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
                 }
             }
         }
+        Shape::Lily => {
+            let layer = Tile::Waterlily.layer() as u8;
+            mesh.quads.push(quad(LILY, layer));
+            mesh.quads.push(quad(LILY + 1, layer));
+        }
         Shape::Cross => {
             let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
             for t in CROSS..CROSS + 4 {
@@ -703,6 +708,8 @@ mod bench;
 mod cactus;
 #[cfg(test)]
 mod expand;
+#[cfg(test)]
+mod lily;
 #[cfg(test)]
 mod oriented;
 #[cfg(test)]

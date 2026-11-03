@@ -197,7 +197,12 @@ fn hollow([cheese, a, b]: Sample, density: f32) -> bool {
 fn carvable(block: Block) -> bool {
     matches!(
         block,
-        Block::Stone | Block::Dirt | Block::Sand | Block::Grass | Block::SnowyGrass
+        Block::Stone
+            | Block::Dirt
+            | Block::Sand
+            | Block::Grass
+            | Block::SnowyGrass
+            | Block::Mycelium
     )
 }
 

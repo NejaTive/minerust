@@ -622,3 +622,32 @@ fn losing_one_side_keeps_the_vine_on_the_other() {
     world.set_block_supported(vine + IVec3::Z, Block::Air);
     assert_eq!(world.block(vine), Block::Air);
 }
+
+#[test]
+fn lily_needs_a_water_source_below_and_pops_when_it_goes() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let water = IVec3::new(3, 10, 3);
+    let lily = water + IVec3::Y;
+    world.set_block(water, Block::Water);
+    assert!(world.can_place(lily, Block::Waterlily));
+    world.set_block_with_data(water, Block::Water, 3);
+    assert!(!world.can_place(lily, Block::Waterlily), "flowing water");
+    world.set_block(water, Block::Water);
+    world.set_block(lily, Block::Waterlily);
+    let changed = world.set_block_supported(water, Block::Stone);
+    assert_eq!(world.block(lily), Block::Air);
+    assert!(changed.contains(&lily));
+}
+
+#[test]
+fn mushrooms_pop_without_a_solid_floor() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let floor = IVec3::new(3, 10, 3);
+    world.set_block(floor, Block::Mycelium);
+    world.set_block(floor + IVec3::Y, Block::RedMushroom);
+    assert!(!world.can_place(floor + IVec3::Y * 2, Block::BrownMushroom));
+    world.set_block_supported(floor, Block::Air);
+    assert_eq!(world.block(floor + IVec3::Y), Block::Air);
+}
