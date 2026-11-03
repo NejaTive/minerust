@@ -4,7 +4,7 @@ use glam::{IVec2, IVec3};
 
 use crate::pos::{ColumnPos, SectionPos};
 
-use crate::block::{Block, FluidKind, fluid_height};
+use crate::block::{Block, FluidKind, VINE_SIDES, VINE_TOP, fluid_height};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::mob::MobRecord;
 use crate::section::SECTION_SIZE;
@@ -87,7 +87,23 @@ impl World {
         true
     }
 
+    pub fn vine_sides(&self, pos: IVec3, data: u8) -> u8 {
+        let above = self.block(pos + IVec3::Y);
+        let above_data = self.block_data(pos + IVec3::Y);
+        VINE_SIDES
+            .iter()
+            .filter(|&&(bit, dir)| {
+                data & bit != 0
+                    && (self.block(pos + dir).holds_vine()
+                        || (bit != VINE_TOP && above == Block::Vine && above_data & bit != 0))
+            })
+            .fold(0, |sides, &(bit, _)| sides | bit)
+    }
+
     pub fn is_supported(&self, pos: IVec3, block: Block, data: u8) -> bool {
+        if block == Block::Vine {
+            return self.vine_sides(pos, data) != 0;
+        }
         let Some(dir) = block.support_dir(data) else {
             return true;
         };
@@ -149,6 +165,18 @@ impl World {
             ] {
                 let around = cell + dir;
                 let (neighbor, data) = (self.block(around), self.block_data(around));
+                if neighbor == Block::Vine {
+                    let kept = self.vine_sides(around, data);
+                    let moved = if kept == 0 {
+                        self.set_block(around, Block::Air)
+                    } else {
+                        kept != data && self.set_block_with_data(around, neighbor, kept)
+                    };
+                    if moved {
+                        changed.push(around);
+                    }
+                    continue;
+                }
                 let depends = neighbor.support_dir(data) == Some(-dir)
                     || (neighbor.checks_sides() && dir.y == 0);
                 if depends

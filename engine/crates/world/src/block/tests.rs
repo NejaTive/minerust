@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard())
 }
 
-const ALL: [Block; 39] = Block::ALL;
+const ALL: [Block; 50] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -17,7 +17,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(39), Err(39));
+    assert_eq!(Block::try_from(50), Err(50));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -67,6 +67,7 @@ fn solid_and_opaque() {
                 | Block::Torch
                 | Block::DeadBush
                 | Block::Reeds
+                | Block::Vine
         );
         let solid =
             !matches!(block, Block::Air | Block::Water | Block::Lava | Block::Snow) && !plant;
@@ -77,6 +78,9 @@ fn solid_and_opaque() {
                 | Block::Leaves
                 | Block::BirchLeaves
                 | Block::SpruceLeaves
+                | Block::JungleLeaves
+                | Block::AcaciaLeaves
+                | Block::DarkOakLeaves
                 | Block::Water
                 | Block::Lava
                 | Block::Snow
@@ -91,7 +95,7 @@ fn solid_and_opaque() {
         );
         assert_eq!(
             block.needs_support(),
-            plant || matches!(block, Block::Snow | Block::Cactus),
+            (plant && block != Block::Vine) || matches!(block, Block::Snow | Block::Cactus),
             "{block:?}"
         );
         assert_eq!(block.is_opaque(), opaque, "{block:?}");
@@ -106,6 +110,10 @@ fn render_layers() {
             Block::Leaves
             | Block::BirchLeaves
             | Block::SpruceLeaves
+            | Block::JungleLeaves
+            | Block::AcaciaLeaves
+            | Block::DarkOakLeaves
+            | Block::Vine
             | Block::TallGrass
             | Block::Poppy
             | Block::Dandelion
@@ -259,7 +267,13 @@ fn support_direction_by_block() {
 fn only_log_torch_and_water_use_data() {
     for block in ALL {
         let expected = match block {
-            Block::Log | Block::BirchLog | Block::SpruceLog => DataKind::Axis,
+            Block::Log
+            | Block::BirchLog
+            | Block::SpruceLog
+            | Block::JungleLog
+            | Block::AcaciaLog
+            | Block::DarkOakLog => DataKind::Axis,
+            Block::Vine => DataKind::Sides,
             Block::Torch => DataKind::Attachment,
             Block::Water | Block::Lava => DataKind::Fluid,
             _ => DataKind::None,
@@ -466,6 +480,7 @@ fn states_cover_every_data_kind() {
             DataKind::Axis => 3,
             DataKind::Attachment => 5,
             DataKind::Fluid => usize::from(FLUID_MAX_LEVEL) + 2,
+            DataKind::Sides => 5,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -543,4 +558,114 @@ fn only_dead_bush_and_reeds_are_new_crosses() {
             "{block:?}"
         );
     }
+}
+
+#[test]
+fn jungle_savanna_and_roofed_blocks_are_appended_after_red_sandstone() {
+    let names = [
+        "jungle_log",
+        "jungle_leaves",
+        "acacia_log",
+        "acacia_leaves",
+        "dark_oak_log",
+        "dark_oak_leaves",
+        "vine",
+        "melon",
+        "brown_mushroom_block",
+        "red_mushroom_block",
+        "mushroom_stem",
+    ];
+    for (i, name) in names.into_iter().enumerate() {
+        let block = ALL[Block::RedSandstone as usize + 1 + i];
+        assert_eq!(block.def().name, name);
+        assert_eq!(Block::from_name(name), Some(block));
+    }
+}
+
+#[test]
+fn new_logs_have_axes_and_new_leaves_are_foliage_cutouts() {
+    for (log, side, end) in [
+        (Block::JungleLog, Tile::JungleLogSide, Tile::JungleLogTop),
+        (Block::AcaciaLog, Tile::AcaciaLogSide, Tile::AcaciaLogTop),
+        (Block::DarkOakLog, Tile::DarkOakLogSide, Tile::DarkOakLogTop),
+    ] {
+        assert!(log.is_log());
+        assert_eq!(log.tile(Facing::Side), Some(side));
+        assert_eq!(log.tile(Facing::Top), Some(end));
+        assert_eq!(log.tile(Facing::Bottom), Some(end));
+    }
+    for leaves in [
+        Block::JungleLeaves,
+        Block::AcaciaLeaves,
+        Block::DarkOakLeaves,
+    ] {
+        assert!(leaves.is_leaves() && leaves.holds_vine());
+        assert!(!leaves.is_opaque() && leaves.is_solid());
+        assert_eq!(leaves.render_layer(), RenderLayer::Cutout);
+    }
+    assert!(!Block::Leaves.is_log() && Block::Leaves.is_leaves() && !Block::Dirt.is_leaves());
+}
+
+#[test]
+fn melon_and_mushroom_blocks_are_opaque_cubes_with_their_faces() {
+    assert_eq!(Block::Melon.tile(Facing::Top), Some(Tile::MelonTop));
+    assert_eq!(Block::Melon.tile(Facing::Side), Some(Tile::MelonSide));
+    for (block, skin) in [
+        (Block::BrownMushroomBlock, Tile::MushroomSkinBrown),
+        (Block::RedMushroomBlock, Tile::MushroomSkinRed),
+    ] {
+        assert_eq!(block.tile(Facing::Top), Some(skin));
+        assert_eq!(block.tile(Facing::Side), Some(skin));
+        assert_eq!(block.tile(Facing::Bottom), Some(Tile::MushroomInside));
+    }
+    assert_eq!(
+        Block::MushroomStem.tile(Facing::Side),
+        Some(Tile::MushroomStem)
+    );
+    assert_eq!(
+        Block::MushroomStem.tile(Facing::Top),
+        Some(Tile::MushroomInside)
+    );
+    for block in [
+        Block::Melon,
+        Block::BrownMushroomBlock,
+        Block::RedMushroomBlock,
+        Block::MushroomStem,
+    ] {
+        assert!(block.is_opaque() && block.is_solid() && block.shape() == Shape::Cube);
+    }
+}
+
+#[test]
+fn vine_is_a_non_solid_targetable_side_mask() {
+    use crate::block::{VINE_NEG_X, VINE_POS_X, VINE_TOP};
+    let vine = Block::Vine;
+    assert_eq!(vine.shape(), Shape::Vine);
+    assert_eq!(vine.data_kind(), DataKind::Sides);
+    assert!(!vine.is_solid() && !vine.is_opaque() && vine.is_targetable());
+    assert!(vine.random_ticks() && !vine.is_replaceable());
+    assert_eq!(vine.collision_height(), 0.0);
+    assert_eq!(vine.tile(Facing::Side), Some(Tile::Vine));
+    assert_eq!(vine.placement_data(IVec3::X), Some(VINE_NEG_X));
+    assert_eq!(vine.placement_data(IVec3::NEG_X), Some(VINE_POS_X));
+    assert_eq!(vine.placement_data(IVec3::NEG_Y), Some(VINE_TOP));
+    assert_eq!(vine.placement_data(IVec3::Y), None);
+}
+
+#[test]
+fn vine_bounds_hug_the_attached_sides() {
+    use crate::block::{VINE_INSET, VINE_NEG_X, VINE_POS_X, VINE_POS_Z, VINE_TOP};
+    let (min, max) = Block::Vine.bounds(VINE_POS_X);
+    assert_eq!(
+        (min, max),
+        (Vec3::new(1.0 - VINE_INSET, 0.0, 0.0), Vec3::ONE)
+    );
+    let (min, max) = Block::Vine.bounds(VINE_NEG_X);
+    assert_eq!((min, max), (Vec3::ZERO, Vec3::new(VINE_INSET, 1.0, 1.0)));
+    let (min, max) = Block::Vine.bounds(VINE_TOP | VINE_POS_Z);
+    assert_eq!(
+        min,
+        Vec3::new(0.0, 1.0 - VINE_INSET, 1.0 - VINE_INSET).min(Vec3::new(0.0, 0.0, 0.0))
+    );
+    assert_eq!(max, Vec3::ONE);
 }

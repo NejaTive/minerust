@@ -1,6 +1,6 @@
 use glam::IVec3;
 
-use crate::block::Block;
+use crate::block::{Block, VINE_TOP};
 use crate::column::COLUMN_SECTIONS;
 use crate::light::LightMap;
 use crate::pos::ColumnPos;
@@ -15,6 +15,7 @@ pub const SPREAD_ATTEMPTS: usize = 4;
 pub const SNOW_MELT_LIGHT: u8 = 12;
 pub const STACK_MAX_HEIGHT: i32 = 3;
 pub const STACK_GROWTH_PERIOD: usize = 16;
+pub const VINE_GROWTH_PERIOD: usize = 4;
 
 const SPREAD_REACH: i32 = 1;
 const SPREAD_BELOW: i32 = 3;
@@ -84,6 +85,7 @@ impl RandomTicks {
             },
             Block::Snow if light.block(pos) >= SNOW_MELT_LIGHT => Block::Air,
             Block::Cactus | Block::Reeds => return self.grow_stack(world, pos, old, ticked),
+            Block::Vine => return self.grow_vine(world, pos, ticked),
             _ => return,
         };
         let changed = world.set_block_supported(pos, new);
@@ -108,6 +110,23 @@ impl RandomTicks {
         let changed = world.set_block_supported(top, block);
         if !changed.is_empty() {
             ticked.light_neutral.push(top);
+        }
+        ticked.changed.extend(changed);
+    }
+
+    fn grow_vine(&mut self, world: &mut World, pos: IVec3, ticked: &mut Ticked) {
+        let below = pos - IVec3::Y;
+        if self.below(VINE_GROWTH_PERIOD) != 0 || world.block(below) != Block::Air {
+            return;
+        }
+        let sides = world.block_data(pos) & !VINE_TOP;
+        let data = world.vine_sides(below, sides);
+        if data == 0 {
+            return;
+        }
+        let changed = world.set_block_supported_with_data(below, Block::Vine, data);
+        if !changed.is_empty() {
+            ticked.light_neutral.push(below);
         }
         ticked.changed.extend(changed);
     }

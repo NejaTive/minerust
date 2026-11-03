@@ -8,7 +8,8 @@ use glam::IVec3;
 
 use crate::mesh::POSITION_UNITS;
 use world::block::{
-    CACTUS_INSET_UNITS, Facing, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, WATER_SURFACE,
+    CACTUS_INSET_UNITS, Facing, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, VINE_INSET_UNITS,
+    WATER_SURFACE,
 };
 use world::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW};
 
@@ -94,7 +95,8 @@ pub const WATER_SIDE_SLOPED: u8 = 54;
 pub const SNOW_TOP: u8 = 58;
 pub const SNOW_SIDE: u8 = 59;
 pub const CACTUS: u8 = 63;
-pub const TEMPLATE_COUNT: usize = 69;
+pub const VINE: u8 = 69;
+pub const TEMPLATE_COUNT: usize = 79;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -258,6 +260,20 @@ fn cactus_face(face: &Face) -> Template {
     template
 }
 
+fn vine_plane(face: &Face) -> Template {
+    let mut template = cube_face(face, POSITION_UNITS);
+    let axis = face.normal.abs().max_position();
+    let inset = i32::from(VINE_INSET_UNITS);
+    for (corner, cell) in template.corners.iter_mut().zip(face.corners) {
+        corner.pos[axis] = if cell[axis] == 1 {
+            (POSITION_UNITS - inset) as u8
+        } else {
+            inset as u8
+        };
+    }
+    template
+}
+
 fn build() -> [Template; TEMPLATE_COUNT] {
     let mut out = Vec::with_capacity(TEMPLATE_COUNT);
     let sides = &FACES[2..];
@@ -299,6 +315,12 @@ fn build() -> [Template; TEMPLATE_COUNT] {
     out.push(cube_face(&FACES[0], i32::from(SNOW_UNITS)));
     out.extend(sides.iter().map(|f| cube_face(f, i32::from(SNOW_UNITS))));
     out.extend(FACES.iter().map(cactus_face));
+    for face in [&FACES[2], &FACES[3], &FACES[4], &FACES[5], &FACES[0]] {
+        let front = vine_plane(face);
+        let mut back = front;
+        back.corners.reverse();
+        out.extend([front, back]);
+    }
     out.try_into().expect("template count")
 }
 

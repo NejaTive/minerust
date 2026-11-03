@@ -18,6 +18,21 @@ fn generate_timing() {
 
 #[test]
 #[ignore]
+fn generate_timing_jungle() {
+    let terrain = Terrain::new(4);
+    let keys: Vec<ColumnPos> = (-72..-56)
+        .flat_map(|x| (4..12).map(move |z| ColumnPos::new(x, z)))
+        .collect();
+    let start = std::time::Instant::now();
+    for &key in &keys {
+        std::hint::black_box(terrain.generate(key));
+    }
+    let per_column = start.elapsed() / keys.len() as u32;
+    println!("generate jungle: {per_column:?} per column");
+}
+
+#[test]
+#[ignore]
 fn tint_timing() {
     let terrain = Terrain::new(1337);
     let palette = BiomePalette::constants();

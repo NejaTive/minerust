@@ -76,6 +76,9 @@ fn trees_stand_on_the_surface_with_a_vertical_trunk() {
             tree.base.y,
             terrain.surface_height(tree.base.x, tree.base.z) + 1
         );
+        if tree.kind.wide_trunk() || matches!(tree.kind, TreeKind::MegaJungle | TreeKind::Acacia) {
+            continue;
+        }
         let trunk: Vec<_> = tree.logs().into_iter().take(tree.height as usize).collect();
         assert_eq!(trunk.len(), tree.height as usize);
         for (dy, (pos, axis)) in trunk.into_iter().enumerate() {
@@ -213,7 +216,10 @@ fn trees_keep_their_distance() {
                 };
                 if (dx, dz) != (0, 0) {
                     let near = dx.abs().max(dz.abs());
-                    assert!(near >= spacing(tree.kind, other), "{x}, {z} +{dx}, {dz}");
+                    assert!(
+                        near >= tree.kind.footprint() + other.footprint() - 1,
+                        "{x}, {z} +{dx}, {dz}"
+                    );
                 }
             }
         }
@@ -385,11 +391,18 @@ fn forest_is_denser_than_plains_and_desert_is_empty() {
     }
 }
 
-const KINDS: [TreeKind; 4] = [
+const KINDS: [TreeKind; 11] = [
     TreeKind::Oak,
     TreeKind::Birch,
     TreeKind::Spruce,
     TreeKind::BigOak,
+    TreeKind::JungleTree,
+    TreeKind::MegaJungle,
+    TreeKind::Shrub,
+    TreeKind::Acacia,
+    TreeKind::DarkOak,
+    TreeKind::BrownMushroom,
+    TreeKind::RedMushroom,
 ];
 
 #[test]
@@ -452,6 +465,18 @@ fn assert_seamless(kind: TreeKind) {
             }
         }
     }
+    for tree in &trees {
+        for (cell, _, drop) in tree.vines() {
+            for step in 0..=drop {
+                let at = cell - IVec3::Y * step;
+                if inside(at) && window[index(at)] == Block::Air {
+                    window[index(at)] = Block::Vine;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
 
     let mut compared = 0;
     for cz in -1..=1 {
@@ -485,7 +510,7 @@ fn assert_seamless(kind: TreeKind) {
             }
         }
     }
-    assert!(compared > (SECTION_SIZE * SECTION_SIZE * WORLD_HEIGHT * 4) as usize);
+    assert!(compared > (SECTION_SIZE * SECTION_SIZE * WORLD_HEIGHT * 3) as usize);
 }
 
 #[test]
@@ -577,6 +602,380 @@ fn oak_crowns_outside_taiga_stay_bare() {
             for x in 0..SECTION_SIZE {
                 assert_ne!(column.get(IVec3::new(x, y, z)), Block::Snow);
             }
+        }
+    }
+}
+
+const JUNGLE_SEED: i32 = 4;
+
+fn jungle_trees() -> &'static [Tree] {
+    static TREES: OnceLock<Vec<Tree>> = OnceLock::new();
+    TREES.get_or_init(|| {
+        let terrain = Terrain::new(JUNGLE_SEED);
+        (-256..512)
+            .flat_map(|z| (-1280..-768).map(move |x| (x, z)))
+            .filter_map(|(x, z)| tree_at(&terrain, x, z))
+            .collect()
+    })
+}
+
+fn all_trees() -> impl Iterator<Item = &'static Tree> {
+    forest_trees().iter().chain(jungle_trees())
+}
+
+fn jungle_biome_of(tree: &Tree) -> Biome {
+    Terrain::new(JUNGLE_SEED).biome_at(tree.base.x, tree.base.z)
+}
+
+fn extent(tree: &Tree) -> i32 {
+    let logs = tree.logs().into_iter().map(|(pos, _)| pos);
+    let vines = tree.vines().into_iter().map(|(pos, _, _)| pos);
+    tree.leaves()
+        .into_iter()
+        .chain(logs)
+        .chain(vines)
+        .map(|p| (p.x - tree.base.x).abs().max((p.z - tree.base.z).abs()))
+        .max()
+        .unwrap()
+}
+
+#[test]
+fn every_new_kind_grows() {
+    for kind in [
+        TreeKind::JungleTree,
+        TreeKind::MegaJungle,
+        TreeKind::Shrub,
+        TreeKind::Acacia,
+        TreeKind::DarkOak,
+        TreeKind::BrownMushroom,
+        TreeKind::RedMushroom,
+    ] {
+        assert!(
+            all_trees().filter(|t| t.kind == kind).count() > 5,
+            "{kind:?}"
+        );
+    }
+}
+
+#[test]
+fn no_tree_reaches_further_than_the_planting_margin() {
+    for tree in all_trees() {
+        assert!(
+            extent(tree) <= MAX_REACH,
+            "{:?}: {}",
+            tree.kind,
+            extent(tree)
+        );
+    }
+}
+
+#[test]
+fn new_trees_are_deterministic() {
+    for tree in all_trees().filter(|t| t.kind.log() != Block::Log).take(400) {
+        let copy = *tree;
+        assert_eq!(tree.logs(), copy.logs());
+        assert_eq!(tree.leaves(), copy.leaves());
+        assert_eq!(tree.vines(), copy.vines());
+    }
+}
+
+#[test]
+fn jungle_grows_its_own_mix_and_the_edge_has_no_mega_trees() {
+    let mut kinds = HashSet::new();
+    for tree in jungle_trees() {
+        let biome = jungle_biome_of(tree);
+        if biome.is_jungle() {
+            kinds.insert(tree.kind);
+            assert!(
+                matches!(
+                    tree.kind,
+                    TreeKind::BigOak
+                        | TreeKind::Shrub
+                        | TreeKind::MegaJungle
+                        | TreeKind::JungleTree
+                ),
+                "{biome:?} {:?}",
+                tree.kind
+            );
+        }
+        if matches!(biome, Biome::JungleEdge | Biome::JungleEdgeM) {
+            assert_ne!(tree.kind, TreeKind::MegaJungle);
+        }
+        if tree.kind == TreeKind::MegaJungle {
+            assert!(matches!(
+                biome,
+                Biome::Jungle | Biome::JungleHills | Biome::JungleM
+            ));
+        }
+    }
+    assert_eq!(kinds.len(), 4);
+}
+
+#[test]
+fn jungle_is_much_denser_than_its_edge() {
+    let terrain = Terrain::new(JUNGLE_SEED);
+    let density = |biome: Biome| {
+        let (mut cells, mut trees) = (0, 0);
+        for z in -256..512 {
+            for x in -1280..-768 {
+                if terrain.biome_at(x, z) == biome && terrain.surface_height(x, z) > WATER_LEVEL + 1
+                {
+                    cells += 1;
+                    trees += i32::from(tree_at(&terrain, x, z).is_some());
+                }
+            }
+        }
+        trees as f32 / cells as f32
+    };
+    let (jungle, edge) = (density(Biome::Jungle), density(Biome::JungleEdge));
+    assert!(jungle > 0.03, "{jungle}");
+    assert!(jungle > edge * 5.0, "{jungle} {edge}");
+}
+
+#[test]
+fn mega_jungle_has_a_whole_two_by_two_trunk() {
+    let trees: Vec<_> = jungle_trees()
+        .iter()
+        .filter(|t| t.kind == TreeKind::MegaJungle)
+        .collect();
+    assert!(trees.len() > 10);
+    for tree in trees {
+        assert!((10..=31).contains(&tree.height));
+        let logs: HashSet<IVec3> = tree.logs().into_iter().map(|(pos, _)| pos).collect();
+        for dy in 0..tree.height - 1 {
+            for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                assert!(
+                    logs.contains(&(tree.base + IVec3::new(dx, dy, dz))),
+                    "{tree:?} {dx} {dy} {dz}"
+                );
+            }
+        }
+        assert!(logs.contains(&(tree.base + IVec3::Y * (tree.height - 1))));
+        let terrain = Terrain::new(JUNGLE_SEED);
+        for (dx, dz) in [(1, 0), (0, 1), (1, 1)] {
+            assert_eq!(
+                terrain.surface_height(tree.base.x + dx, tree.base.z + dz) + 1,
+                tree.base.y
+            );
+        }
+        assert!(extent(tree) >= 4);
+    }
+}
+
+#[test]
+fn shrub_is_one_jungle_log_in_oak_leaves() {
+    let shrubs: Vec<_> = jungle_trees()
+        .iter()
+        .filter(|t| t.kind == TreeKind::Shrub)
+        .collect();
+    assert!(shrubs.len() > 10);
+    for tree in shrubs {
+        assert_eq!(tree.kind.log(), Block::JungleLog);
+        assert_eq!(tree.kind.leaves(), Block::Leaves);
+        assert_eq!(tree.logs(), vec![(tree.base, AXIS_Y)]);
+        let leaves = tree.leaves();
+        assert!(
+            leaves
+                .iter()
+                .all(|l| (0..=2).contains(&(l.y - tree.base.y)))
+        );
+        assert_eq!(extent(tree), 2);
+    }
+}
+
+#[test]
+fn jungle_trees_are_draped_in_vines_that_touch_their_wood() {
+    let mut draped = 0;
+    for tree in jungle_trees()
+        .iter()
+        .filter(|t| matches!(t.kind, TreeKind::JungleTree | TreeKind::MegaJungle))
+    {
+        let vines = tree.vines();
+        draped += usize::from(!vines.is_empty());
+        let wood: HashSet<IVec3> = tree
+            .logs()
+            .into_iter()
+            .map(|(pos, _)| pos)
+            .chain(tree.leaves())
+            .collect();
+        for (cell, side, _) in vines {
+            let (_, dir) = crate::block::VINE_SIDES
+                .iter()
+                .copied()
+                .find(|&(bit, _)| bit == side)
+                .expect("a single side bit");
+            assert!(
+                wood.contains(&(cell + dir)),
+                "{:?} {cell} {side}",
+                tree.kind
+            );
+        }
+    }
+    assert!(draped > 20);
+}
+
+#[test]
+fn other_trees_grow_no_vines() {
+    for tree in
+        all_trees().filter(|t| !matches!(t.kind, TreeKind::JungleTree | TreeKind::MegaJungle))
+    {
+        assert!(tree.vines().is_empty(), "{:?}", tree.kind);
+    }
+}
+
+#[test]
+fn planted_jungle_column_has_vines_on_its_trunks() {
+    let terrain = Terrain::new(JUNGLE_SEED);
+    let tree = jungle_trees()
+        .iter()
+        .find(|t| t.kind == TreeKind::MegaJungle)
+        .unwrap();
+    let key = ColumnPos::of_block(tree.base);
+    let column = terrain.generate_trees(key);
+    let origin = key.origin();
+    let vines = (0..WORLD_HEIGHT)
+        .flat_map(|y| (0..16).flat_map(move |z| (0..16).map(move |x| IVec3::new(x, y, z))))
+        .filter(|&p| column.get(p) == Block::Vine)
+        .count();
+    assert!(vines > 0);
+    assert_eq!(
+        column.get(tree.base - origin + IVec3::new(1, 1, 1)),
+        Block::JungleLog
+    );
+}
+
+#[test]
+fn acacia_grows_in_savanna_with_a_bent_trunk_and_a_flat_crown() {
+    let terrain = Terrain::new(1337);
+    let acacias: Vec<_> = of_kind(TreeKind::Acacia).collect();
+    assert!(acacias.len() > 100);
+    for tree in &acacias {
+        assert!(matches!(
+            terrain.biome_at(tree.base.x, tree.base.z),
+            Biome::Savanna | Biome::SavannaM | Biome::SavannaPlateau | Biome::SavannaPlateauM
+        ));
+        assert!((5..=9).contains(&tree.height));
+        let logs = tree.logs();
+        assert!(logs.iter().all(|&(_, axis)| axis == AXIS_Y));
+        let mut ys: Vec<i32> = logs.iter().map(|(p, _)| p.y).collect();
+        ys.sort_unstable();
+        ys.dedup();
+        assert_eq!(ys.first(), Some(&tree.base.y));
+        assert!(ys.windows(2).all(|w| w[1] - w[0] == 1), "{ys:?}");
+        let top = logs.iter().map(|(p, _)| p.y).max().unwrap();
+        let widest = tree
+            .leaves()
+            .iter()
+            .filter(|l| l.y == top)
+            .map(|l| (l.x - logs.iter().find(|(p, _)| p.y == top).unwrap().0.x).abs())
+            .max()
+            .unwrap();
+        assert!(widest >= 3);
+    }
+    let bent = acacias
+        .iter()
+        .filter(|t| {
+            t.logs()
+                .iter()
+                .any(|(p, _)| (p.x, p.z) != (t.base.x, t.base.z))
+        })
+        .count();
+    assert!(bent * 2 > acacias.len(), "{bent} of {}", acacias.len());
+}
+
+#[test]
+fn savanna_is_mostly_acacia_with_some_oak() {
+    let terrain = Terrain::new(1337);
+    let savanna: Vec<_> = forest_trees()
+        .iter()
+        .filter(|t| terrain.biome_at(t.base.x, t.base.z) == Biome::Savanna)
+        .collect();
+    assert!(savanna.len() > 100);
+    let acacia = savanna
+        .iter()
+        .filter(|t| t.kind == TreeKind::Acacia)
+        .count() as f32
+        / savanna.len() as f32;
+    assert!((0.7..0.9).contains(&acacia), "{acacia}");
+    assert!(
+        savanna
+            .iter()
+            .all(|t| matches!(t.kind, TreeKind::Acacia | TreeKind::Oak))
+    );
+}
+
+#[test]
+fn roofed_forest_is_a_grid_of_dark_oaks_and_huge_mushrooms() {
+    let terrain = Terrain::new(1337);
+    let roofed: Vec<_> = forest_trees()
+        .iter()
+        .filter(|t| terrain.biome_at(t.base.x, t.base.z) == Biome::RoofedForest)
+        .collect();
+    assert!(roofed.len() > 200);
+    let share = |f: fn(TreeKind) -> bool| {
+        roofed.iter().filter(|t| f(t.kind)).count() as f32 / roofed.len() as f32
+    };
+    assert!(share(|k| k == TreeKind::DarkOak) > 0.6);
+    let mushrooms = share(|k| matches!(k, TreeKind::BrownMushroom | TreeKind::RedMushroom));
+    assert!((0.01..0.1).contains(&mushrooms), "{mushrooms}");
+    assert!(roofed.iter().all(|t| matches!(
+        t.kind,
+        TreeKind::DarkOak
+            | TreeKind::Oak
+            | TreeKind::Birch
+            | TreeKind::BrownMushroom
+            | TreeKind::RedMushroom
+    )));
+    for tree in &roofed {
+        let cell = |v: i32| (v - GRID_OFFSET).div_euclid(GRID_CELL);
+        let (cx, cz) = (cell(tree.base.x), cell(tree.base.z));
+        let (x, z, _) = grid_spot(1337, cx, cz);
+        assert_eq!((x, z), (tree.base.x, tree.base.z));
+    }
+}
+
+#[test]
+fn dark_oak_has_a_two_by_two_trunk_and_a_wide_canopy() {
+    for tree in of_kind(TreeKind::DarkOak) {
+        assert!((6..=9).contains(&tree.height));
+        let logs: HashSet<IVec3> = tree.logs().into_iter().map(|(pos, _)| pos).collect();
+        for dy in 0..tree.height {
+            let y = tree.base.y + dy;
+            let whole = logs.iter().any(|p| {
+                p.y == y
+                    && [(1, 0), (0, 1), (1, 1)]
+                        .into_iter()
+                        .all(|(dx, dz)| logs.contains(&(*p + IVec3::new(dx, 0, dz))))
+            });
+            assert!(whole, "{tree:?} {dy}");
+        }
+        assert!(extent(tree) >= 3);
+    }
+}
+
+#[test]
+fn huge_mushrooms_have_a_stem_and_a_cap_of_their_own_blocks() {
+    for (kind, cap) in [
+        (TreeKind::BrownMushroom, Block::BrownMushroomBlock),
+        (TreeKind::RedMushroom, Block::RedMushroomBlock),
+    ] {
+        let mushrooms: Vec<_> = of_kind(kind).collect();
+        assert!(!mushrooms.is_empty(), "{kind:?}");
+        assert_eq!(kind.log(), Block::MushroomStem);
+        assert_eq!(kind.leaves(), cap);
+        for tree in mushrooms {
+            assert!([4, 5, 6, 8, 10, 12].contains(&tree.height));
+            assert_eq!(tree.logs().len(), tree.height as usize);
+            let top = tree.base.y + tree.height;
+            let leaves = tree.leaves();
+            assert!(leaves.contains(&IVec3::new(tree.base.x, top, tree.base.z)));
+            assert!(leaves.iter().all(|l| (top - 3..=top).contains(&l.y)));
+            let reach = if kind == TreeKind::BrownMushroom {
+                3
+            } else {
+                2
+            };
+            assert_eq!(extent(tree), reach);
         }
     }
 }

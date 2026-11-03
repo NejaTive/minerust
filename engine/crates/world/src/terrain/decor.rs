@@ -1,4 +1,5 @@
 use super::*;
+use crate::block::VINE_SIDES;
 use crate::stream::Stream;
 
 const SALT_DECOR: u64 = 33;
@@ -11,6 +12,12 @@ const BUSH_SPREAD: u32 = 8;
 const BUSH_SKY_REACH: u32 = 32;
 const REED_TRIES: u32 = 20;
 const REED_SPREAD: u32 = 4;
+const MELON_TRIES: u32 = 64;
+const MELON_SPREAD: u32 = 8;
+const MELON_VERTICAL_SPREAD: u32 = 4;
+const VINE_ATTEMPTS: u32 = 50;
+const VINE_SPREAD: u32 = 4;
+const VINE_CEILING: i32 = 128;
 const CENTER: i32 = 8;
 
 const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
@@ -19,6 +26,8 @@ struct Counts {
     cacti: u32,
     bushes: u32,
     reeds: u32,
+    melons: u32,
+    vines: u32,
 }
 
 fn counts(biome: Biome) -> Counts {
@@ -27,20 +36,34 @@ fn counts(biome: Biome) -> Counts {
             cacti: 10,
             bushes: 2,
             reeds: 50,
+            ..Counts::NONE
         }
     } else if biome.is_mesa() {
         Counts {
             cacti: 5,
             bushes: 20,
             reeds: 3,
+            ..Counts::NONE
+        }
+    } else if biome.is_jungle() {
+        Counts {
+            melons: 1,
+            vines: VINE_ATTEMPTS,
+            ..Counts::NONE
         }
     } else {
-        Counts {
-            cacti: 0,
-            bushes: 0,
-            reeds: 0,
-        }
+        Counts::NONE
     }
+}
+
+impl Counts {
+    const NONE: Counts = Counts {
+        cacti: 0,
+        bushes: 0,
+        reeds: 0,
+        melons: 0,
+        vines: 0,
+    };
 }
 
 struct Spot {
@@ -117,6 +140,49 @@ impl Terrain {
                     self.plant_reeds(key, column, &climate, &at, height);
                 }
             }
+        }
+        for _ in 0..counts.melons {
+            let spot = pick(&mut rng);
+            let reach = 2 * surface(&spot) as u32;
+            let y = rng.below(reach.max(1)) as i32;
+            for _ in 0..MELON_TRIES {
+                let at = IVec3::new(
+                    spot.x + rng.spread(MELON_SPREAD),
+                    y + rng.spread(MELON_VERTICAL_SPREAD),
+                    spot.z + rng.spread(MELON_SPREAD),
+                );
+                if Column::contains(at)
+                    && column.get(at) == Block::Air
+                    && column.get(at - IVec3::Y) == Block::Grass
+                {
+                    column.set(at, Block::Melon);
+                }
+            }
+        }
+        for _ in 0..counts.vines {
+            let spot = pick(&mut rng);
+            self.grow_vines(&mut rng, column, IVec3::new(spot.x, WATER_LEVEL, spot.z));
+        }
+    }
+
+    fn grow_vines(&self, rng: &mut Stream, column: &mut Column, start: IVec3) {
+        let mut at = start;
+        while at.y < VINE_CEILING {
+            if column.get(at) == Block::Air {
+                let side = VINE_SIDES[..4].iter().find(|&&(_, dir)| {
+                    Column::contains(at + dir) && column.get(at + dir).is_opaque()
+                });
+                if let Some(&(bit, _)) = side {
+                    column.set_with_data(at, Block::Vine, bit);
+                }
+            } else {
+                at.x += rng.spread(VINE_SPREAD);
+                at.z += rng.spread(VINE_SPREAD);
+                if !Column::contains(at) {
+                    return;
+                }
+            }
+            at.y += 1;
         }
     }
 
