@@ -5,6 +5,7 @@ use game::loader::{DEFAULT_RADIUS, MAX_RADIUS, MIN_RADIUS};
 use mesh::mesher::MeshOptions;
 use wasm_bindgen::prelude::*;
 use world::block::BLOCKS;
+use world::item::ITEMS;
 
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -79,6 +80,26 @@ pub fn blocks() -> Vec<BlockInfo> {
             name: def.name.to_owned(),
             label: def.label.to_owned(),
             placeable: def.selectable,
+        })
+        .collect()
+}
+
+#[wasm_bindgen]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemInfo {
+    #[wasm_bindgen(getter_with_clone)]
+    pub name: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub label: String,
+}
+
+#[wasm_bindgen]
+pub fn items() -> Vec<ItemInfo> {
+    ITEMS
+        .iter()
+        .map(|def| ItemInfo {
+            name: def.name.to_owned(),
+            label: def.label.to_owned(),
         })
         .collect()
 }

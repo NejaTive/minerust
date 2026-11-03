@@ -21,6 +21,7 @@ pub struct TextureSet {
     palette: BiomePalette,
 }
 
+#[derive(Clone)]
 pub struct DecodedImage {
     pub width: u32,
     pub height: u32,

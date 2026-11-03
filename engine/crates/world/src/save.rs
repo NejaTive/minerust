@@ -1,17 +1,18 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use glam::IVec3;
+use glam::{IVec3, Vec3};
 
 use crate::block::Block;
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
+use crate::mob::{MobKind, MobRecord};
 use crate::section::{SECTION_SIZE, SECTION_VOLUME};
 
-pub const FORMAT_VERSION: u8 = 2;
+pub const FORMAT_VERSION: u8 = 3;
 
 type Migration = fn(&[u8]) -> Result<Vec<u8>, SaveError>;
 
-const MIGRATIONS: &[Migration] = &[v1_to_v2];
+const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3];
 
 fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut out = Vec::with_capacity(body.len() + 1);
@@ -20,11 +21,21 @@ fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     Ok(out)
 }
 
+fn v2_to_v3(body: &[u8]) -> Result<Vec<u8>, SaveError> {
+    let (&flags, rest) = body.split_first().ok_or(SaveError::Truncated)?;
+    let mut out = Vec::with_capacity(body.len() + 2);
+    out.push(flags);
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(rest);
+    Ok(out)
+}
+
 const _: () = assert!(MIGRATIONS.len() + 1 == FORMAT_VERSION as usize);
 
 const MAGIC: &[u8; 3] = b"MRC";
 const COLUMN_VOLUME: usize = (SECTION_SIZE * SECTION_SIZE * WORLD_HEIGHT) as usize;
 const RUN_SIZE: usize = 3;
+const MOB_SIZE: usize = 17;
 
 const _: () = assert!(COLUMN_SECTIONS <= 8);
 
@@ -37,6 +48,7 @@ pub enum SaveError {
     UnknownBlock(u8),
     Truncated,
     Overflow,
+    UnknownMob(u8),
 }
 
 impl fmt::Display for SaveError {
@@ -45,6 +57,7 @@ impl fmt::Display for SaveError {
             SaveError::BadMagic => write!(f, "not a column: bad magic"),
             SaveError::UnsupportedVersion(v) => write!(f, "unsupported column format {v}"),
             SaveError::UnknownBlock(b) => write!(f, "unknown block {b}"),
+            SaveError::UnknownMob(m) => write!(f, "unknown mob {m}"),
             SaveError::Truncated => write!(f, "column data is truncated"),
             SaveError::Overflow => write!(f, "column data is too long"),
         }
@@ -64,6 +77,13 @@ pub fn encode_column(column: &Column) -> Vec<u8> {
         })
         .collect();
     bytes.push(with_data.iter().fold(0, |flags, &(sy, _)| flags | 1 << sy));
+    bytes.extend_from_slice(&(column.mobs.len() as u16).to_le_bytes());
+    for mob in &column.mobs {
+        bytes.push(mob.kind as u8);
+        for value in [mob.pos.x, mob.pos.y, mob.pos.z, mob.yaw] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
     for (_, data) in with_data {
         bytes.extend_from_slice(data);
     }
@@ -90,6 +110,22 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     let body = upgrade(version, body, MIGRATIONS)?;
     let (&flags, mut body) = body.split_first().ok_or(SaveError::Truncated)?;
     let mut column = Column::new();
+    let (count, rest) = body.split_at_checked(2).ok_or(SaveError::Truncated)?;
+    let count = usize::from(u16::from_le_bytes([count[0], count[1]]));
+    let (mobs, rest) = rest
+        .split_at_checked(count * MOB_SIZE)
+        .ok_or(SaveError::Truncated)?;
+    body = rest;
+    for mob in mobs.as_chunks::<MOB_SIZE>().0 {
+        let kind = MobKind::try_from(mob[0]).map_err(SaveError::UnknownMob)?;
+        let f =
+            |i: usize| f32::from_le_bytes(mob[1 + 4 * i..5 + 4 * i].try_into().expect("4 bytes"));
+        column.mobs.push(MobRecord {
+            kind,
+            pos: Vec3::new(f(0), f(1), f(2)),
+            yaw: f(3),
+        });
+    }
     let mut section_data = Vec::new();
     for sy in (0..COLUMN_SECTIONS).filter(|sy| flags >> sy & 1 == 1) {
         let (data, rest) = body

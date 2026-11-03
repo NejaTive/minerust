@@ -82,3 +82,43 @@ fn defaults_are_within_limits() {
     assert!((l.fov_min..=l.fov_max).contains(&d.fov));
     assert!(d.ambient_occlusion);
 }
+
+#[test]
+fn items_do_not_collide_with_blocks() {
+    let list = items();
+    assert!(list.iter().any(|item| item.name == "pig_spawn_egg"));
+    for item in &list {
+        assert!(Block::from_name(&item.name).is_none(), "{}", item.name);
+    }
+}
+
+#[test]
+fn js_fixture_matches_items() {
+    let rows: Vec<String> = items()
+        .iter()
+        .map(|i| {
+            format!(
+                "  {{ \"name\": \"{}\", \"label\": \"{}\" }}",
+                i.name, i.label
+            )
+        })
+        .collect();
+    let inline = format!("[{}]\n", rows.join(", ").trim());
+    let expected = if inline.len() <= 81 {
+        inline
+    } else {
+        format!("[\n{}\n]\n", rows.join(",\n"))
+    };
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../src/settings/items.fixture.json"
+    );
+    if std::env::var_os("UPDATE_FIXTURES").is_some() {
+        std::fs::write(path, &expected).unwrap();
+    }
+    let actual = std::fs::read_to_string(path).unwrap_or_default();
+    assert_eq!(
+        actual, expected,
+        "фикстура устарела: UPDATE_FIXTURES=1 cargo test -p engine js_fixture"
+    );
+}

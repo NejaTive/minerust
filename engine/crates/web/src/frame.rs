@@ -1,9 +1,11 @@
 use game::Game;
 use game::camera::NEAR;
 use glam::{Vec2, Vec3};
+use render::entity::{MobInstance, ModelKind};
 use render::fog::Fog;
 use render::{Effects, FrameParams};
 use world::block::FluidKind;
+use world::mob::MobKind;
 use world::terrain::WATER_LEVEL;
 
 const UNDERWATER_FOG: Fog = Fog {
@@ -65,5 +67,22 @@ pub(crate) fn frame_params(
         near: NEAR,
         far,
         dt,
+        mobs: game
+            .mob_views()
+            .into_iter()
+            .map(|view| MobInstance {
+                kind: match view.kind {
+                    MobKind::Pig => ModelKind::Pig,
+                },
+                feet: view.pose.feet,
+                yaw: view.pose.yaw,
+                head_yaw: view.pose.head_yaw,
+                head_pitch: view.pose.head_pitch,
+                limb_phase: view.pose.limb_phase,
+                limb_swing: view.pose.limb_swing,
+                sky_level: f32::from(view.sky_level),
+                block_level: f32::from(view.block_level),
+            })
+            .collect(),
     }
 }

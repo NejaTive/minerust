@@ -9,6 +9,9 @@ use crate::textures::{
 use crate::tile::Tile;
 
 const BLOCKS_DIR: &str = "assets/minecraft/textures/blocks/";
+const ENTITY_PIG: &str = "assets/minecraft/textures/entity/pig/pig.png";
+const ITEM_SPAWN_EGG: &str = "assets/minecraft/textures/items/spawn_egg.png";
+const ITEM_SPAWN_EGG_OVERLAY: &str = "assets/minecraft/textures/items/spawn_egg_overlay.png";
 const GUI_DIR: &str = "assets/minecraft/textures/gui/";
 const GUI_WIDGETS: &str = "widgets.png";
 const GUI_ICONS: &str = "icons.png";
@@ -43,6 +46,15 @@ pub struct TexturePack {
     pub description: String,
     pub icon: Option<Vec<u8>>,
     pub gui: GuiImages,
+    pub entities: EntityImages,
+}
+
+#[derive(Clone)]
+pub struct EntityImages {
+    /// Лист 2:1 (в ванильном паке 64×32); UV модели нормализованы по размеру листа.
+    pub pig: DecodedImage,
+    pub spawn_egg: DecodedImage,
+    pub spawn_egg_overlay: DecodedImage,
 }
 
 /// PNG-листы интерфейса; координаты в них считаются в единицах 256×256 (`width / 256` пикселей на единицу).
@@ -118,11 +130,13 @@ pub fn load(zip_bytes: &[u8]) -> Result<TexturePack, String> {
     let textures = build(&mut read, Some(&builtin().textures))?;
     let (description, icon) = read_meta(&mut read);
     let gui = gui_images(&mut read);
+    let entities = entity_images(&mut read);
     Ok(TexturePack {
         textures,
         description,
         icon,
         gui,
+        entities,
     })
 }
 
@@ -134,6 +148,36 @@ pub fn builtin() -> TexturePack {
         description: "Faithful 32x".into(),
         icon: None,
         gui: builtin_gui(),
+        entities: builtin_entities(),
+    }
+}
+
+pub fn builtin_entities() -> EntityImages {
+    entity_images(&mut |_| None)
+}
+
+fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages {
+    let mut image = |path: &str, valid: fn(&DecodedImage) -> bool| {
+        read(path)
+            .and_then(|bytes| decode_png(&bytes).ok())
+            .filter(valid)
+            .unwrap_or_else(|| {
+                let bytes =
+                    builtin_entity_file(path).expect("built-in entity textures are complete");
+                decode_png(bytes).expect("built-in entity textures are valid")
+            })
+    };
+    let pig = image(ENTITY_PIG, |i| i.width >= 64 && i.width == 2 * i.height);
+    let spawn_egg = image(ITEM_SPAWN_EGG, |i| {
+        i.width >= MIN_TILE_SIZE && i.width == i.height
+    });
+    let spawn_egg_overlay = image(ITEM_SPAWN_EGG_OVERLAY, |i| {
+        i.width >= MIN_TILE_SIZE && i.width == i.height
+    });
+    EntityImages {
+        pig,
+        spawn_egg,
+        spawn_egg_overlay,
     }
 }
 
@@ -271,6 +315,37 @@ fn builtin_gui_file(name: &str) -> Option<&'static [u8]> {
     BUILTIN_GUI
         .iter()
         .find(|(file, _)| file.strip_prefix("gui/") == Some(name))
+        .map(|(_, bytes)| *bytes)
+}
+
+const BUILTIN_ENTITIES: &[(&str, &[u8])] = &[
+    (
+        ENTITY_PIG,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/pig/pig.png"
+        )),
+    ),
+    (
+        ITEM_SPAWN_EGG,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/items/spawn_egg.png"
+        )),
+    ),
+    (
+        ITEM_SPAWN_EGG_OVERLAY,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/items/spawn_egg_overlay.png"
+        )),
+    ),
+];
+
+fn builtin_entity_file(path: &str) -> Option<&'static [u8]> {
+    BUILTIN_ENTITIES
+        .iter()
+        .find(|(file, _)| *file == path)
         .map(|(_, bytes)| *bytes)
 }
 

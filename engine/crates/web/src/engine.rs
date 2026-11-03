@@ -6,6 +6,8 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 use world::block::Block;
 use world::clouds::CloudMask;
+use world::item::Item;
+use world::pack::EntityImages;
 use world::pos::ColumnPos;
 use world::save::{FORMAT_VERSION, decode_column, encode_column};
 use world::terrain::WorldType;
@@ -20,6 +22,7 @@ const BAD_CAMERA_STATE: &str = "camera state must be 5 or 6 finite numbers";
 
 thread_local! {
     static ICON_TEXTURES: RefCell<TextureSet> = RefCell::new(TextureSet::standard());
+    static ICON_ENTITIES: RefCell<EntityImages> = RefCell::new(world::pack::builtin_entities());
 }
 
 #[wasm_bindgen]
@@ -123,6 +126,8 @@ impl Engine {
         let pack = world::pack::load(zip).map_err(|e| JsError::new(&e))?;
         self.renderer.set_textures(&pack.textures);
         let info = PackInfo::of(&pack);
+        self.renderer.set_entity_textures(&pack.entities);
+        ICON_ENTITIES.with(|icons| *icons.borrow_mut() = pack.entities);
         ICON_TEXTURES.with(|icons| *icons.borrow_mut() = pack.textures);
         Ok(info)
     }
@@ -132,6 +137,9 @@ impl Engine {
         let standard = TextureSet::standard();
         self.renderer.set_textures(&standard);
         ICON_TEXTURES.with(|icons| *icons.borrow_mut() = standard);
+        let entities = world::pack::builtin_entities();
+        self.renderer.set_entity_textures(&entities);
+        ICON_ENTITIES.with(|icons| *icons.borrow_mut() = entities);
     }
 
     pub async fn create(
@@ -443,4 +451,14 @@ pub fn block_icon(name: &str) -> Option<Vec<u8>> {
 #[wasm_bindgen]
 pub fn block_icon_size() -> u32 {
     ICON_TEXTURES.with(|icons| icons.borrow().size())
+}
+
+#[wasm_bindgen]
+pub fn item_icon(name: &str) -> Option<Vec<u8>> {
+    ICON_ENTITIES.with(|entities| Some(Item::from_name(name)?.icon_pixels(&entities.borrow())))
+}
+
+#[wasm_bindgen]
+pub fn item_icon_size() -> u32 {
+    ICON_ENTITIES.with(|entities| Item::icon_size(&entities.borrow()))
 }

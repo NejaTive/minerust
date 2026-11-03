@@ -2,7 +2,7 @@ use super::*;
 use crate::pos::ColumnPos;
 use crate::terrain::Terrain;
 
-const HEADER: usize = 5;
+const HEADER: usize = 7;
 
 const BLOCKS: [Block; 13] = [
     Block::Air,
@@ -233,18 +233,19 @@ fn v1_column_migrates_with_zero_data() {
     bytes.extend_from_slice(&(COLUMN_VOLUME as u16).to_le_bytes());
     let column = decode_column(&bytes).expect("v1 decodes");
     assert!(column.section(0).data().is_none());
-    assert_eq!(encode_column(&column).len(), bytes.len() + 1);
+    assert_eq!(encode_column(&column).len(), bytes.len() + 3);
 }
 
 #[test]
-fn column_without_data_costs_one_flag_byte_over_v1() {
+fn column_without_mobs_costs_a_count_over_v2() {
     let terrain = Terrain::new(1337);
     for key in [ColumnPos::ZERO, ColumnPos::new(-7, 12)] {
         let column = terrain.generate(key);
-        let v2 = encode_column(&column);
-        let migrated = v1_to_v2(&v2[4 + 1..]).expect("migrates");
-        assert_eq!(migrated, v2[4..]);
-        assert_eq!(v2[4], 0);
+        let v3 = encode_column(&column);
+        let mut v2 = v3[4..].to_vec();
+        v2.drain(1..3);
+        assert_eq!(v2_to_v3(&v2).expect("migrates"), v3[4..]);
+        assert_eq!(v3[4], 0);
     }
 }
 
@@ -292,4 +293,36 @@ fn rejects_truncated_section_data() {
     let mut bytes = encode_column(&Column::new());
     bytes[4] = 0xFF;
     assert_eq!(decode_column(&bytes).err(), Some(SaveError::Truncated));
+}
+
+#[test]
+fn mobs_round_trip() {
+    let mut column = filled(Block::Stone);
+    column.mobs = vec![
+        MobRecord {
+            kind: MobKind::Pig,
+            pos: glam::Vec3::new(3.5, 70.0, -2.25),
+            yaw: 1.5,
+        },
+        MobRecord {
+            kind: MobKind::Pig,
+            pos: glam::Vec3::new(0.5, 64.0, 9.0),
+            yaw: -0.5,
+        },
+    ];
+    let decoded = decode_column(&encode_column(&column)).expect("decodes");
+    assert_eq!(decoded.mobs, column.mobs);
+}
+
+#[test]
+fn unknown_mob_kind_is_rejected() {
+    let mut column = Column::new();
+    column.mobs.push(MobRecord {
+        kind: MobKind::Pig,
+        pos: glam::Vec3::ZERO,
+        yaw: 0.0,
+    });
+    let mut bytes = encode_column(&column);
+    bytes[HEADER - 2 + 2] = 99;
+    assert_eq!(decode_column(&bytes).err(), Some(SaveError::UnknownMob(99)));
 }

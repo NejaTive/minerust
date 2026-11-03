@@ -15,6 +15,7 @@ use crate::clouds::{
     upload_cloud_mask,
 };
 use crate::effects::Effects;
+use crate::entity::{self, MobInstance};
 use crate::exposure_pass::ExposureState;
 use crate::frustum::Frustum;
 use crate::globals::{Globals, view_dir_matrix};
@@ -66,6 +67,7 @@ pub struct FrameParams {
     pub near: f32,
     pub far: f32,
     pub dt: f32,
+    pub mobs: Vec<MobInstance>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -167,6 +169,17 @@ fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGrou
     }
 }
 
+const ENTITY_BUFFER_START: u64 = 64 * 1024;
+
+fn create_entity_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("entities"),
+        size,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
 pub struct PendingFrame {
     frame: wgpu::SurfaceTexture,
     encoder: wgpu::CommandEncoder,
@@ -195,6 +208,10 @@ pub struct Renderer {
     cloud_texture: wgpu::Texture,
     rain_cover_texture: wgpu::Texture,
     biome_texture: wgpu::Texture,
+    entity_buffer: wgpu::Buffer,
+    entity_capacity: u64,
+    entity_layout: wgpu::BindGroupLayout,
+    entity_group: wgpu::BindGroup,
     outline_buffer: wgpu::Buffer,
     outline_block: Option<(IVec3, Block, u8)>,
     globals_buffer: wgpu::Buffer,
@@ -522,10 +539,24 @@ impl Renderer {
             ],
             ..Default::default()
         });
+        let entity_layout = entity::texture_layout(&device);
+        let entity_layout_pipeline =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("entity"),
+                bind_group_layouts: &[Some(&globals_layout), None, None, Some(&entity_layout)],
+                ..Default::default()
+            });
+        let entity_group = entity::create_texture_group(
+            &device,
+            &queue,
+            &entity_layout,
+            &world::pack::builtin_entities(),
+        );
         let scene_layouts = SceneLayouts {
             plain: pipeline_layout,
             blocks: block_layout,
             water: water_layout,
+            entity: entity_layout_pipeline,
         };
         let outline_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outline"),
@@ -590,6 +621,8 @@ impl Renderer {
             .contains(wgpu::Features::TIMESTAMP_QUERY)
             .then(|| GpuTimer::new(&device, &queue));
 
+        let entity_buffer = create_entity_buffer(&device, ENTITY_BUFFER_START);
+
         Ok(Renderer {
             surface,
             device,
@@ -612,6 +645,10 @@ impl Renderer {
             cloud_texture,
             rain_cover_texture,
             biome_texture,
+            entity_buffer,
+            entity_capacity: ENTITY_BUFFER_START,
+            entity_layout,
+            entity_group,
             outline_buffer,
             outline_block: None,
             globals_buffer,
@@ -731,6 +768,27 @@ impl Renderer {
             &self.global_sources,
             &self.shadow_pass_buffers,
         );
+    }
+
+    pub fn set_entity_textures(&mut self, images: &world::pack::EntityImages) {
+        self.entity_group =
+            entity::create_texture_group(&self.device, &self.queue, &self.entity_layout, images);
+    }
+
+    fn upload_mobs(&mut self, params: &FrameParams) -> u32 {
+        let frustum = Frustum::from_view_proj(params.view_proj);
+        let floats =
+            entity::visible_vertices(&params.mobs, |min, max| frustum.intersects_aabb(min, max));
+        if floats.is_empty() {
+            return 0;
+        }
+        let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+        if bytes.len() as u64 > self.entity_capacity {
+            self.entity_capacity = (bytes.len() as u64).next_power_of_two();
+            self.entity_buffer = create_entity_buffer(&self.device, self.entity_capacity);
+        }
+        self.queue.write_buffer(&self.entity_buffer, 0, &bytes);
+        (floats.len() / entity::VERTEX_FLOATS) as u32
     }
 
     pub fn set_cloud_mask(&self, mask: &CloudMask) {
@@ -855,6 +913,7 @@ impl Renderer {
     }
 
     pub fn begin(&mut self, params: &FrameParams) -> Result<Option<PendingFrame>, String> {
+        let mob_vertices = self.upload_mobs(params);
         let (sun_screen, sun_ray) = if params.effects.hdr && params.effects.sun_rays {
             light_rays(
                 params.view_proj,
@@ -1075,6 +1134,15 @@ impl Renderer {
                 }
             }
             self.drawn_sections = visible.len() as u32;
+
+            if mob_vertices > 0 {
+                pass.set_pipeline(&pipes.entity);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(3, &self.entity_group, &[]);
+                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                pass.draw(0..mob_vertices, 0..1);
+                counts.draw_calls += 1;
+            }
 
             if self.outline_block.is_some() {
                 pass.set_pipeline(&pipes.outline);

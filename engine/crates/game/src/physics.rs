@@ -106,6 +106,8 @@ pub struct Input {
 
 pub struct Player {
     pub feet: Vec3,
+    pub width: f32,
+    pub height: f32,
     pub velocity: Vec3,
     pub mode: Mode,
     pub on_ground: bool,
@@ -116,8 +118,14 @@ pub struct Player {
 
 impl Player {
     pub fn new(feet: Vec3, mode: Mode) -> Self {
+        Self::sized(feet, mode, PLAYER_WIDTH, PLAYER_HEIGHT)
+    }
+
+    pub fn sized(feet: Vec3, mode: Mode, width: f32, height: f32) -> Self {
         Self {
             feet,
+            width,
+            height,
             velocity: Vec3::ZERO,
             mode,
             on_ground: false,
@@ -132,10 +140,10 @@ impl Player {
     }
 
     pub fn aabb(&self) -> (Vec3, Vec3) {
-        let half = PLAYER_WIDTH / 2.0;
+        let half = self.width / 2.0;
         (
             self.feet - Vec3::new(half, 0.0, half),
-            self.feet + Vec3::new(half, PLAYER_HEIGHT, half),
+            self.feet + Vec3::new(half, self.height, half),
         )
     }
 
@@ -335,6 +343,11 @@ impl Player {
         }
     }
 
+    pub fn push(&mut self, delta: Vec2, collision: impl Fn(IVec3) -> Collision) {
+        self.move_axis(0, delta.x, &collision);
+        self.move_axis(2, delta.y, &collision);
+    }
+
     fn step_up(
         &mut self,
         start: Vec3,
@@ -370,9 +383,9 @@ impl Player {
         }
         let (min, max) = self.aabb();
         let (below, above) = if axis == 1 {
-            (0.0, PLAYER_HEIGHT)
+            (0.0, self.height)
         } else {
-            (PLAYER_WIDTH / 2.0, PLAYER_WIDTH / 2.0)
+            (self.width / 2.0, self.width / 2.0)
         };
         let lo = (min + EPS).floor().as_ivec3();
         let hi = (max - EPS).floor().as_ivec3();

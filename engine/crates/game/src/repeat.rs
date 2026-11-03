@@ -27,6 +27,10 @@ impl Repeat {
         self.pending = false;
     }
 
+    pub fn fire_once(&mut self) -> bool {
+        std::mem::take(&mut self.pending)
+    }
+
     pub fn fire(&mut self, time: f32) -> bool {
         if self.pending {
             self.pending = false;
