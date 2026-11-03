@@ -118,6 +118,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
       />
       <CreateWorldScreen
         v-else-if="screen === 'create'"
+        :show-debug="settings.showDebug"
         :busy="working"
         @submit="createWorld"
         @cancel="back"
