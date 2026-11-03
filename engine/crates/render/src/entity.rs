@@ -205,13 +205,13 @@ fn push_box(part: &BoxPart, instance: &MobInstance, out: &mut Vec<f32>) {
             (Vec3::new(lo.x, lo.y, lo.z), Vec2::new(u + dz, v + dz)),
         ],
         [
-            (Vec3::new(hi.x, hi.y, hi.z), Vec2::new(u + dz + dx, v + dz)),
+            (Vec3::new(hi.x, hi.y, hi.z), Vec2::new(u + dz + 2.0 * dx, v)),
+            (Vec3::new(lo.x, hi.y, hi.z), Vec2::new(u + dz + dx, v)),
+            (Vec3::new(lo.x, hi.y, lo.z), Vec2::new(u + dz + dx, v + dz)),
             (
-                Vec3::new(lo.x, hi.y, hi.z),
+                Vec3::new(hi.x, hi.y, lo.z),
                 Vec2::new(u + dz + 2.0 * dx, v + dz),
             ),
-            (Vec3::new(lo.x, hi.y, lo.z), Vec2::new(u + dz + 2.0 * dx, v)),
-            (Vec3::new(hi.x, hi.y, lo.z), Vec2::new(u + dz + dx, v)),
         ],
     ];
     for face in faces {
