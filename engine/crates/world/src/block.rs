@@ -33,6 +33,19 @@ pub enum Block {
     Snow,
     Ice,
     Barrier,
+    Cactus,
+    DeadBush,
+    RedSand,
+    Terracotta,
+    WhiteTerracotta,
+    OrangeTerracotta,
+    YellowTerracotta,
+    BrownTerracotta,
+    RedTerracotta,
+    SilverTerracotta,
+    Reeds,
+    Sandstone,
+    RedSandstone,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -53,6 +66,9 @@ impl FluidKind {
 pub const WATER_SURFACE: f32 = 0.875;
 pub const SNOW_UNITS: u8 = 2;
 pub const SNOW_HEIGHT: f32 = SNOW_UNITS as f32 / 16.0;
+pub const CACTUS_INSET_UNITS: u8 = 1;
+pub const CACTUS_INSET: f32 = CACTUS_INSET_UNITS as f32 / 16.0;
+pub const CACTUS_HEIGHT: f32 = 15.0 / 16.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RenderLayer {
@@ -67,6 +83,7 @@ pub enum Shape {
     Cross,
     Torch,
     Layer,
+    Cactus,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -207,7 +224,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 26] = [
+pub const BLOCKS: [BlockDef; 39] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -325,10 +342,63 @@ pub const BLOCKS: [BlockDef; 26] = [
         label: "барьер",
         ..BlockDef::CUBE
     },
+    BlockDef {
+        opaque: false,
+        needs_support: true,
+        random_ticks: true,
+        layer: RenderLayer::Cutout,
+        shape: Shape::Cactus,
+        top: Some(Tile::CactusTop),
+        side: Some(Tile::CactusSide),
+        bottom: Some(Tile::CactusBottom),
+        ..BlockDef::uniform("cactus", "кактус", Tile::CactusSide)
+    },
+    BlockDef::plant("dead_bush", "сухой куст", Tile::DeadBush),
+    BlockDef {
+        falls: true,
+        ..BlockDef::uniform("red_sand", "красный песок", Tile::RedSand)
+    },
+    BlockDef::uniform("terracotta", "терракота", Tile::Terracotta),
+    BlockDef::uniform("white_terracotta", "белая терракота", Tile::TerracottaWhite),
+    BlockDef::uniform(
+        "orange_terracotta",
+        "оранжевая терракота",
+        Tile::TerracottaOrange,
+    ),
+    BlockDef::uniform(
+        "yellow_terracotta",
+        "жёлтая терракота",
+        Tile::TerracottaYellow,
+    ),
+    BlockDef::uniform(
+        "brown_terracotta",
+        "коричневая терракота",
+        Tile::TerracottaBrown,
+    ),
+    BlockDef::uniform("red_terracotta", "красная терракота", Tile::TerracottaRed),
+    BlockDef::uniform(
+        "silver_terracotta",
+        "светло-серая терракота",
+        Tile::TerracottaSilver,
+    ),
+    BlockDef {
+        random_ticks: true,
+        ..BlockDef::plant("reeds", "сахарный тростник", Tile::Reeds)
+    },
+    BlockDef {
+        top: Some(Tile::SandstoneTop),
+        bottom: Some(Tile::SandstoneBottom),
+        ..BlockDef::uniform("sandstone", "песчаник", Tile::SandstoneSide)
+    },
+    BlockDef {
+        top: Some(Tile::RedSandstoneTop),
+        bottom: Some(Tile::RedSandstoneBottom),
+        ..BlockDef::uniform("red_sandstone", "красный песчаник", Tile::RedSandstoneSide)
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 26] = [
+    pub const ALL: [Block; 39] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -355,6 +425,19 @@ impl Block {
         Block::Snow,
         Block::Ice,
         Block::Barrier,
+        Block::Cactus,
+        Block::DeadBush,
+        Block::RedSand,
+        Block::Terracotta,
+        Block::WhiteTerracotta,
+        Block::OrangeTerracotta,
+        Block::YellowTerracotta,
+        Block::BrownTerracotta,
+        Block::RedTerracotta,
+        Block::SilverTerracotta,
+        Block::Reeds,
+        Block::Sandstone,
+        Block::RedSandstone,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -372,6 +455,7 @@ impl Block {
     pub fn collision_height(self) -> f32 {
         match self.shape() {
             Shape::Layer => SNOW_HEIGHT,
+            Shape::Cactus => CACTUS_HEIGHT,
             _ if self.is_solid() => 1.0,
             _ => 0.0,
         }
@@ -423,6 +507,10 @@ impl Block {
                 (a.min(b), a.max(b))
             }
             Shape::Layer => (Vec3::ZERO, Vec3::new(1.0, SNOW_HEIGHT, 1.0)),
+            Shape::Cactus => (
+                Vec3::new(CACTUS_INSET, 0.0, CACTUS_INSET),
+                Vec3::new(1.0 - CACTUS_INSET, CACTUS_HEIGHT, 1.0 - CACTUS_INSET),
+            ),
             _ => (Vec3::ZERO, Vec3::ONE),
         }
     }
@@ -503,6 +591,46 @@ impl Block {
 
     pub fn is_replaceable(self) -> bool {
         self.def().replaceable
+    }
+
+    pub fn is_sand(self) -> bool {
+        matches!(self, Block::Sand | Block::RedSand)
+    }
+
+    pub fn is_terracotta(self) -> bool {
+        matches!(
+            self,
+            Block::Terracotta
+                | Block::WhiteTerracotta
+                | Block::OrangeTerracotta
+                | Block::YellowTerracotta
+                | Block::BrownTerracotta
+                | Block::RedTerracotta
+                | Block::SilverTerracotta
+        )
+    }
+
+    pub fn is_stackable_plant(self) -> bool {
+        matches!(self, Block::Cactus | Block::Reeds)
+    }
+
+    pub fn checks_sides(self) -> bool {
+        self == Block::Cactus
+    }
+
+    pub fn stands_on(self, support: Block) -> bool {
+        match self {
+            Block::Cactus => support.is_sand() || support == Block::Cactus,
+            Block::DeadBush => {
+                support.is_sand() || support.is_terracotta() || support == Block::Dirt
+            }
+            Block::Reeds => {
+                support.is_sand()
+                    || support == Block::Reeds
+                    || matches!(support, Block::Dirt | Block::Grass)
+            }
+            _ => support.is_solid(),
+        }
     }
 
     pub fn needs_support(self) -> bool {

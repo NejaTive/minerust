@@ -225,8 +225,8 @@ impl Biome {
         self.id() >= 128
     }
 
-    /// Блоки поверхности без снега; блоки, которых ещё нет (красный песок, терракота,
-    /// мицелий, подзол), заменены ближайшими — этапы 2–5 плана `biomes-1.12` подставят свои.
+    /// Блоки поверхности без снега; блоки, которых ещё нет (мицелий, подзол),
+    /// заменены ближайшими — этапы 3–5 плана `biomes-1.12` подставят свои.
     pub fn surface_blocks(self) -> SurfaceBlocks {
         let (top, filler) = match self {
             Biome::Desert
@@ -235,7 +235,7 @@ impl Biome {
             | Biome::Beach
             | Biome::ColdBeach => (Block::Sand, Block::Sand),
             Biome::StoneBeach => (Block::Stone, Block::Stone),
-            _ if self.is_mesa() => (Block::Sand, Block::Stone),
+            _ if self.is_mesa() => (Block::RedSand, Block::OrangeTerracotta),
             _ => (Block::Grass, Block::Dirt),
         };
         SurfaceBlocks { top, filler }

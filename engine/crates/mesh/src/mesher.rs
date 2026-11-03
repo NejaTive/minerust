@@ -2,9 +2,9 @@ use glam::IVec3;
 
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
-    AO_BRIGHTNESS, CROSS, CUBE_FACE, FACES, Face, LOG_BARK_X, LOG_BARK_Z, SNOW_SIDE, SNOW_TOP,
-    TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW,
-    WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
+    AO_BRIGHTNESS, CACTUS, CROSS, CUBE_FACE, FACES, Face, LOG_BARK_X, LOG_BARK_Z, SNOW_SIDE,
+    SNOW_TOP, TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, WATER_BOTTOM, WATER_SIDE,
+    WATER_SIDE_LOW, WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
 use world::block::{
     ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, FluidKind, RenderLayer, Shape, fluid_height_units,
@@ -285,6 +285,10 @@ pub(crate) fn mesh_cached(
                     push_layer(&mut meshes.solid, blocks, lights, index, cell, &faces);
                     continue;
                 }
+                if block.shape() == Shape::Cactus {
+                    push_cactus(&mut meshes.cutout, blocks, lights, index, cell, &faces);
+                    continue;
+                }
                 if block.shape() != Shape::Cube {
                     let (sky, block_light) = lights.at(index, 0);
                     let light = [sky, block_light].map(|l| half_average(l, 1));
@@ -508,6 +512,35 @@ fn push_layer(
     }
 }
 
+fn push_cactus(
+    mesh: &mut MeshData,
+    blocks: &Neighborhood,
+    lights: &Lights,
+    index: usize,
+    cell: [u8; 3],
+    faces: &FaceStrides,
+) {
+    let (sky, block_light) = lights.at(index, 0);
+    let light = [sky, block_light].map(|l| half_average(l, 1));
+    for (face_index, (face, normal, _)) in faces.iter().enumerate() {
+        if face_index < 2 && blocks.at(index, *normal).is_opaque() {
+            continue;
+        }
+        let Some(tile) = Block::Cactus.tile(face.facing) else {
+            continue;
+        };
+        mesh.quads.push(Quad::new(
+            cell,
+            CACTUS + face_index as u8,
+            false,
+            tile.layer() as u8,
+            [3; 4],
+            [light[0]; 4],
+            [light[1]; 4],
+        ));
+    }
+}
+
 fn push_ice(
     mesh: &mut MeshData,
     blocks: &Neighborhood,
@@ -549,7 +582,7 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
         )
     };
     match block.shape() {
-        Shape::Cube | Shape::Layer => {}
+        Shape::Cube | Shape::Layer | Shape::Cactus => {}
         Shape::Cross => {
             let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
             for t in CROSS..CROSS + 4 {
@@ -655,6 +688,8 @@ pub fn mesh_world_section(
 
 #[cfg(test)]
 mod bench;
+#[cfg(test)]
+mod cactus;
 #[cfg(test)]
 mod expand;
 #[cfg(test)]

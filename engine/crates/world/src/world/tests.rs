@@ -481,3 +481,95 @@ fn snow_is_replaced_by_placed_blocks() {
     world.set_block(pos, Block::Snow);
     assert!(world.can_place(pos, Block::Stone));
 }
+
+#[test]
+fn cactus_needs_sand_and_free_sides() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let floor = IVec3::new(5, 10, 5);
+    let above = floor + IVec3::Y;
+    world.set_block(floor, Block::Sand);
+    assert!(world.can_place(above, Block::Cactus));
+    world.set_block(floor, Block::Grass);
+    assert!(!world.can_place(above, Block::Cactus));
+    world.set_block(floor, Block::RedSand);
+    world.set_block(above, Block::Cactus);
+    assert!(world.can_place(above + IVec3::Y, Block::Cactus));
+    world.set_block(above + IVec3::Y + IVec3::X, Block::Stone);
+    assert!(!world.can_place(above + IVec3::Y, Block::Cactus));
+}
+
+#[test]
+fn solid_block_next_to_cactus_breaks_it() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let floor = IVec3::new(5, 10, 5);
+    world.set_block(floor, Block::Sand);
+    world.set_block(floor + IVec3::Y, Block::Cactus);
+    world.set_block(floor + 2 * IVec3::Y, Block::Cactus);
+    world.set_block_supported(floor + IVec3::Y + IVec3::Z, Block::Stone);
+    assert_eq!(world.block(floor + IVec3::Y), Block::Air);
+    assert_eq!(world.block(floor + 2 * IVec3::Y), Block::Air);
+}
+
+#[test]
+fn breaking_sand_under_cactus_and_reeds_removes_them() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let floor = IVec3::new(5, 10, 5);
+    world.set_block(floor, Block::Sand);
+    world.set_block(floor + IVec3::X, Block::Water);
+    world.set_block(floor + IVec3::Y, Block::Reeds);
+    world.set_block(floor + 2 * IVec3::Y, Block::Reeds);
+    world.set_block_supported(floor, Block::Air);
+    assert_eq!(world.block(floor + IVec3::Y), Block::Air);
+    assert_eq!(world.block(floor + 2 * IVec3::Y), Block::Air);
+}
+
+#[test]
+fn reeds_need_water_beside_the_ground() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let floor = IVec3::new(5, 10, 5);
+    let above = floor + IVec3::Y;
+    world.set_block(floor, Block::Grass);
+    assert!(!world.can_place(above, Block::Reeds));
+    world.set_block(floor + IVec3::NEG_Z, Block::Water);
+    assert!(world.can_place(above, Block::Reeds));
+    world.set_block(floor, Block::Stone);
+    assert!(!world.can_place(above, Block::Reeds));
+    world.set_block(floor, Block::Sand);
+    world.set_block(above, Block::Reeds);
+    world.set_block(floor + IVec3::NEG_Z, Block::Air);
+    assert!(
+        world.can_place(above + IVec3::Y, Block::Reeds),
+        "stacking needs no water"
+    );
+}
+
+#[test]
+fn dead_bush_stands_on_sand_clay_and_dirt() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let floor = IVec3::new(5, 10, 5);
+    for ground in [
+        Block::Sand,
+        Block::RedSand,
+        Block::Terracotta,
+        Block::OrangeTerracotta,
+        Block::Dirt,
+    ] {
+        world.set_block(floor, ground);
+        assert!(
+            world.can_place(floor + IVec3::Y, Block::DeadBush),
+            "{ground:?}"
+        );
+    }
+    for ground in [Block::Stone, Block::Grass, Block::Sandstone] {
+        world.set_block(floor, ground);
+        assert!(
+            !world.can_place(floor + IVec3::Y, Block::DeadBush),
+            "{ground:?}"
+        );
+    }
+}

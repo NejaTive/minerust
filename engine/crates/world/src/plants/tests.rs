@@ -58,14 +58,18 @@ fn plains_have_reasonable_grass_share() {
 }
 
 #[test]
-fn desert_has_no_plants() {
+fn desert_has_no_meadow_plants() {
     let terrain = Terrain::new(7);
     for key in columns_of(&terrain, Biome::Desert, 6) {
         let column = terrain.generate(key);
         for z in 0..16 {
             for x in 0..16 {
-                let has_plant =
-                    (0..WORLD_HEIGHT).any(|y| column.get([x, y, z].into()).needs_support());
+                let has_plant = (0..WORLD_HEIGHT).any(|y| {
+                    matches!(
+                        column.get([x, y, z].into()),
+                        Block::TallGrass | Block::Poppy | Block::Dandelion
+                    )
+                });
                 let biome = terrain.biome_at(key.origin().x + x, key.origin().z + z);
                 assert!(!has_plant || biome != Biome::Desert, "{key} {x},{z}");
             }

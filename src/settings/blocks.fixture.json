@@ -24,5 +24,18 @@
   { "name": "snowy_grass", "label": "заснеженная трава", "placeable": true },
   { "name": "snow", "label": "снег", "placeable": true },
   { "name": "ice", "label": "лёд", "placeable": true },
-  { "name": "barrier", "label": "барьер", "placeable": false }
+  { "name": "barrier", "label": "барьер", "placeable": false },
+  { "name": "cactus", "label": "кактус", "placeable": true },
+  { "name": "dead_bush", "label": "сухой куст", "placeable": true },
+  { "name": "red_sand", "label": "красный песок", "placeable": true },
+  { "name": "terracotta", "label": "терракота", "placeable": true },
+  { "name": "white_terracotta", "label": "белая терракота", "placeable": true },
+  { "name": "orange_terracotta", "label": "оранжевая терракота", "placeable": true },
+  { "name": "yellow_terracotta", "label": "жёлтая терракота", "placeable": true },
+  { "name": "brown_terracotta", "label": "коричневая терракота", "placeable": true },
+  { "name": "red_terracotta", "label": "красная терракота", "placeable": true },
+  { "name": "silver_terracotta", "label": "светло-серая терракота", "placeable": true },
+  { "name": "reeds", "label": "сахарный тростник", "placeable": true },
+  { "name": "sandstone", "label": "песчаник", "placeable": true },
+  { "name": "red_sandstone", "label": "красный песчаник", "placeable": true }
 ]

@@ -13,6 +13,8 @@ pub const STEP_TICKS: u32 = 3;
 pub const SPREAD_LIGHT: u8 = 9;
 pub const SPREAD_ATTEMPTS: usize = 4;
 pub const SNOW_MELT_LIGHT: u8 = 12;
+pub const STACK_MAX_HEIGHT: i32 = 3;
+pub const STACK_GROWTH_PERIOD: usize = 16;
 
 const SPREAD_REACH: i32 = 1;
 const SPREAD_BELOW: i32 = 3;
@@ -81,11 +83,31 @@ impl RandomTicks {
                 None => return,
             },
             Block::Snow if light.block(pos) >= SNOW_MELT_LIGHT => Block::Air,
+            Block::Cactus | Block::Reeds => return self.grow_stack(world, pos, old, ticked),
             _ => return,
         };
         let changed = world.set_block_supported(pos, new);
         if old.lights_like(new) {
             ticked.light_neutral.push(pos);
+        }
+        ticked.changed.extend(changed);
+    }
+
+    fn grow_stack(&mut self, world: &mut World, pos: IVec3, block: Block, ticked: &mut Ticked) {
+        let top = pos + IVec3::Y;
+        let height = (0..STACK_MAX_HEIGHT)
+            .take_while(|&d| world.block(pos - IVec3::Y * d) == block)
+            .count() as i32;
+        if height >= STACK_MAX_HEIGHT
+            || world.block(top) != Block::Air
+            || self.below(STACK_GROWTH_PERIOD) != 0
+            || !world.can_place(top, block)
+        {
+            return;
+        }
+        let changed = world.set_block_supported(top, block);
+        if !changed.is_empty() {
+            ticked.light_neutral.push(top);
         }
         ticked.changed.extend(changed);
     }

@@ -90,5 +90,6 @@ fn surface_blocks_use_existing_blocks_only() {
     assert_eq!(Biome::Beach.surface_blocks().filler, Block::Sand);
     assert_eq!(Biome::StoneBeach.surface_blocks().top, Block::Stone);
     assert_eq!(Biome::Plains.surface_blocks().top, Block::Grass);
-    assert_eq!(Biome::Mesa.surface_blocks().top, Block::Sand);
+    assert_eq!(Biome::Mesa.surface_blocks().top, Block::RedSand);
+    assert_eq!(Biome::Mesa.surface_blocks().filler, Block::OrangeTerracotta);
 }

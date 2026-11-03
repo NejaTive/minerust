@@ -16,6 +16,8 @@ pub struct World {
     dirty: HashSet<ColumnPos>,
 }
 
+const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
+
 impl World {
     pub fn new() -> Self {
         Self {
@@ -90,7 +92,25 @@ impl World {
             return true;
         };
         let support = self.block(pos + dir);
-        support.is_solid() && (dir.y != 0 || support.is_opaque())
+        if !(block.stands_on(support) && (dir.y != 0 || support.is_opaque())) {
+            return false;
+        }
+        if block.checks_sides() && self.has_solid_side(pos) {
+            return false;
+        }
+        block != Block::Reeds || support == Block::Reeds || self.water_beside(pos + dir)
+    }
+
+    fn has_solid_side(&self, pos: IVec3) -> bool {
+        HORIZONTAL
+            .iter()
+            .any(|&dir| self.block(pos + dir).is_solid())
+    }
+
+    fn water_beside(&self, pos: IVec3) -> bool {
+        HORIZONTAL
+            .iter()
+            .any(|&dir| self.block(pos + dir).is_water())
     }
 
     pub fn can_place(&self, pos: IVec3, block: Block) -> bool {
@@ -129,7 +149,9 @@ impl World {
             ] {
                 let around = cell + dir;
                 let (neighbor, data) = (self.block(around), self.block_data(around));
-                if neighbor.support_dir(data) == Some(-dir)
+                let depends = neighbor.support_dir(data) == Some(-dir)
+                    || (neighbor.checks_sides() && dir.y == 0);
+                if depends
                     && !self.is_supported(around, neighbor, data)
                     && self.set_block(around, Block::Air)
                 {

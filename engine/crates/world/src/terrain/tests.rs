@@ -130,7 +130,13 @@ fn beaches_are_sand() {
     let (_, layers) = ground_layers(&terrain, x, z);
     let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
     assert_eq!(sand, DIRT_DEPTH as usize + 1);
-    assert!(matches!(layers[sand], Block::Stone | Block::Bedrock));
+    let rest = layers[sand..]
+        .iter()
+        .skip_while(|&&b| b == Block::Sandstone);
+    assert!(
+        rest.clone()
+            .all(|&b| matches!(b, Block::Stone | Block::Bedrock))
+    );
 }
 
 #[test]
@@ -191,8 +197,9 @@ fn sand_over_stone_in_desert() {
     assert!(
         layers[sand..]
             .iter()
-            .all(|&b| matches!(b, Block::Stone | Block::Bedrock))
+            .all(|&b| matches!(b, Block::Sandstone | Block::Stone | Block::Bedrock))
     );
+    assert_eq!(layers[sand], Block::Sandstone);
 }
 
 #[test]

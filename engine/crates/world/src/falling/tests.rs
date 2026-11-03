@@ -178,3 +178,12 @@ fn sand_displaces_lava() {
     settle(&mut world, &mut falling);
     assert_eq!(world.block(at(FLOOR + 1)), Block::Sand);
 }
+
+#[test]
+fn red_sand_falls_to_the_floor() {
+    let mut world = flat_world(&[(0, 0)]);
+    let mut falling = Falling::new();
+    put(&mut world, &mut falling, at(20), Block::RedSand);
+    settle(&mut world, &mut falling);
+    assert_eq!(world.block(at(FLOOR + 1)), Block::RedSand);
+}
