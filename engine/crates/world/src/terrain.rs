@@ -25,12 +25,17 @@ const TAIGA_COLD: (f32, f32) = (0.55, 0.7);
 const BEDROCK_SCATTER: i32 = 3;
 const SALT_BEDROCK: u64 = 30;
 pub const FLAT_SURFACE: i32 = 4;
+pub const DEBUG_GRID_Y: i32 = 70;
+pub const DEBUG_FLOOR_Y: i32 = 60;
+pub const DEBUG_SPAWN_Y: i32 = 72;
+const DEBUG_STEP: i32 = 2;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum WorldType {
     #[default]
     Standard,
     Flat,
+    Debug,
 }
 
 impl WorldType {
@@ -38,6 +43,7 @@ impl WorldType {
         match name {
             "standard" => Some(Self::Standard),
             "flat" => Some(Self::Flat),
+            "debug" => Some(Self::Debug),
             _ => None,
         }
     }
@@ -127,7 +133,7 @@ impl Terrain {
     }
 
     pub fn biome_weights(&self, x: i32, z: i32) -> BiomeWeights {
-        if self.world_type == WorldType::Flat {
+        if self.world_type != WorldType::Standard {
             return BiomeWeights {
                 plains: 1.0,
                 desert: 0.0,
@@ -172,8 +178,10 @@ impl Terrain {
     }
 
     pub(crate) fn surface(&self, x: i32, z: i32, w: BiomeWeights) -> i32 {
-        if self.world_type == WorldType::Flat {
-            return FLAT_SURFACE;
+        match self.world_type {
+            WorldType::Flat => return FLAT_SURFACE,
+            WorldType::Debug => return DEBUG_GRID_Y,
+            WorldType::Standard => {}
         }
         let (x, z) = (x as f32, z as f32);
         let hills = smoothstep(-0.2, 0.4, self.hilliness.get_noise_2d(x, z));
@@ -187,6 +195,9 @@ impl Terrain {
     }
 
     pub fn generate(&self, key: ColumnPos) -> Column {
+        if self.world_type == WorldType::Debug {
+            return Self::generate_debug(key);
+        }
         let mut column = self.generate_trees(key);
         plants::plant(self, key, &mut column);
         column
@@ -203,7 +214,7 @@ impl Terrain {
     #[doc(hidden)]
     pub fn generate_carved(&self, key: ColumnPos) -> Column {
         let mut column = self.generate_ground(key);
-        if self.world_type == WorldType::Flat {
+        if self.world_type != WorldType::Standard {
             return column;
         }
         self.caves.carve(
@@ -217,8 +228,10 @@ impl Terrain {
 
     #[doc(hidden)]
     pub fn generate_ground(&self, key: ColumnPos) -> Column {
-        if self.world_type == WorldType::Flat {
-            return Self::generate_flat();
+        match self.world_type {
+            WorldType::Flat => return Self::generate_flat(),
+            WorldType::Debug => return Self::generate_debug(key),
+            WorldType::Standard => {}
         }
         let mut column = Column::new();
         let origin = key.origin();
@@ -287,6 +300,26 @@ impl Terrain {
         }
     }
 
+    fn generate_debug(key: ColumnPos) -> Column {
+        let mut column = Column::new();
+        let origin = key.origin();
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                column.set(IVec3::new(x, DEBUG_FLOOR_Y, z), Block::Barrier);
+            }
+        }
+        let states = debug_states();
+        let side = debug_grid_side(states.len());
+        for (cell, (block, data)) in states.into_iter().enumerate() {
+            let (wx, wz) = debug_cell_origin(cell, side);
+            let (x, z) = (wx - origin.x, wz - origin.z);
+            if (0..SECTION_SIZE).contains(&x) && (0..SECTION_SIZE).contains(&z) {
+                column.set_with_data(IVec3::new(x, DEBUG_GRID_Y, z), block, data);
+            }
+        }
+        column
+    }
+
     fn generate_flat() -> Column {
         let mut column = Column::new();
         for z in 0..SECTION_SIZE {
@@ -304,6 +337,23 @@ impl Terrain {
         }
         column
     }
+}
+
+pub fn debug_states() -> Vec<(Block, u8)> {
+    Block::ALL
+        .into_iter()
+        .skip(1)
+        .flat_map(|block| block.states().map(move |data| (block, data)))
+        .collect()
+}
+
+pub fn debug_grid_side(cells: usize) -> i32 {
+    (cells as f64).sqrt().ceil() as i32
+}
+
+fn debug_cell_origin(cell: usize, side: i32) -> (i32, i32) {
+    let cell = cell as i32;
+    (cell % side * DEBUG_STEP, cell / side * DEBUG_STEP)
 }
 
 pub(crate) fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
