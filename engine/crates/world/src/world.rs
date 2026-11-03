@@ -4,7 +4,7 @@ use glam::{IVec2, IVec3};
 
 use crate::pos::{ColumnPos, SectionPos};
 
-use crate::block::{Block, FluidKind, VINE_SIDES, VINE_TOP, fluid_height};
+use crate::block::{Block, FLUID_SOURCE, FluidKind, VINE_SIDES, VINE_TOP, fluid_height};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::mob::MobRecord;
 use crate::section::SECTION_SIZE;
@@ -114,7 +114,11 @@ impl World {
         if block.checks_sides() && self.has_solid_side(pos) {
             return false;
         }
-        block != Block::Reeds || support == Block::Reeds || self.water_beside(pos + dir)
+        match block {
+            Block::Reeds => support == Block::Reeds || self.water_beside(pos + dir),
+            Block::Waterlily => self.block_data(pos + dir) == FLUID_SOURCE,
+            _ => true,
+        }
     }
 
     fn has_solid_side(&self, pos: IVec3) -> bool {

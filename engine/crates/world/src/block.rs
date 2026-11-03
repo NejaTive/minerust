@@ -57,6 +57,11 @@ pub enum Block {
     BrownMushroomBlock,
     RedMushroomBlock,
     MushroomStem,
+    Waterlily,
+    Mycelium,
+    BrownMushroom,
+    RedMushroom,
+    Clay,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -80,6 +85,8 @@ pub const SNOW_HEIGHT: f32 = SNOW_UNITS as f32 / 16.0;
 pub const CACTUS_INSET_UNITS: u8 = 1;
 pub const CACTUS_INSET: f32 = CACTUS_INSET_UNITS as f32 / 16.0;
 pub const CACTUS_HEIGHT: f32 = 15.0 / 16.0;
+pub const LILY_UNITS: u8 = 1;
+pub const LILY_HEIGHT: f32 = LILY_UNITS as f32 / 16.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RenderLayer {
@@ -96,6 +103,7 @@ pub enum Shape {
     Layer,
     Cactus,
     Vine,
+    Lily,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -252,7 +260,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 50] = [
+pub const BLOCKS: [BlockDef; 55] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -485,10 +493,24 @@ pub const BLOCKS: [BlockDef; 50] = [
         bottom: Some(Tile::MushroomInside),
         ..BlockDef::uniform("mushroom_stem", "ножка гриба", Tile::MushroomStem)
     },
+    BlockDef {
+        shape: Shape::Lily,
+        ..BlockDef::plant("waterlily", "кувшинка", Tile::Waterlily)
+    },
+    BlockDef {
+        top: Some(Tile::MyceliumTop),
+        side: Some(Tile::MyceliumSide),
+        bottom: Some(Tile::Dirt),
+        random_ticks: true,
+        ..BlockDef::uniform("mycelium", "мицелий", Tile::MyceliumSide)
+    },
+    BlockDef::plant("brown_mushroom", "коричневый гриб", Tile::BrownMushroom),
+    BlockDef::plant("red_mushroom", "красный гриб", Tile::RedMushroom),
+    BlockDef::uniform("clay", "глина", Tile::Clay),
 ];
 
 impl Block {
-    pub const ALL: [Block; 50] = [
+    pub const ALL: [Block; 55] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -539,6 +561,11 @@ impl Block {
         Block::BrownMushroomBlock,
         Block::RedMushroomBlock,
         Block::MushroomStem,
+        Block::Waterlily,
+        Block::Mycelium,
+        Block::BrownMushroom,
+        Block::RedMushroom,
+        Block::Clay,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -608,6 +635,7 @@ impl Block {
                 (a.min(b), a.max(b))
             }
             Shape::Layer => (Vec3::ZERO, Vec3::new(1.0, SNOW_HEIGHT, 1.0)),
+            Shape::Lily => (Vec3::ZERO, Vec3::new(1.0, LILY_HEIGHT, 1.0)),
             Shape::Cactus => (
                 Vec3::new(CACTUS_INSET, 0.0, CACTUS_INSET),
                 Vec3::new(1.0 - CACTUS_INSET, CACTUS_HEIGHT, 1.0 - CACTUS_INSET),
@@ -754,6 +782,10 @@ impl Block {
         self.is_solid() && (self.is_opaque() || self.is_leaves())
     }
 
+    pub fn is_mushroom(self) -> bool {
+        matches!(self, Block::BrownMushroom | Block::RedMushroom)
+    }
+
     pub fn is_stackable_plant(self) -> bool {
         matches!(self, Block::Cactus | Block::Reeds)
     }
@@ -773,6 +805,7 @@ impl Block {
                     || support == Block::Reeds
                     || matches!(support, Block::Dirt | Block::Grass)
             }
+            Block::Waterlily => support == Block::Water,
             _ => support.is_solid(),
         }
     }

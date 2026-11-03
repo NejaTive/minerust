@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn tile_count_and_slots_follow_tile_order() {
-    assert_eq!(TILE_COUNT, 63);
+    assert_eq!(TILE_COUNT, 69);
     for (i, tile) in Tile::ALL.iter().enumerate() {
         assert_eq!(tile.layer() as usize, i, "{tile:?}");
     }
@@ -25,4 +25,13 @@ fn new_leaves_sway_and_all_cutout_tiles_are_marked() {
     assert!(Tile::Vine.is_cutout());
     assert_eq!(Tile::Vine.sway(), 0.0);
     assert!(!Tile::JungleLogSide.is_cutout() && !Tile::MelonTop.is_cutout());
+}
+
+#[test]
+fn lily_and_mushrooms_are_cutout_and_do_not_sway() {
+    for tile in [Tile::Waterlily, Tile::BrownMushroom, Tile::RedMushroom] {
+        assert!(tile.is_cutout(), "{tile:?}");
+        assert_eq!(tile.sway(), 0.0);
+    }
+    assert!(!Tile::MyceliumTop.is_cutout() && !Tile::Clay.is_cutout());
 }

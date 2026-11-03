@@ -2,6 +2,7 @@ use super::*;
 
 const SEED: i32 = 1337;
 const MESA_SEED: i32 = 99;
+const ISLAND_SEED: i32 = 7;
 
 fn columns_of(terrain: &Terrain, biome: Biome, count: usize) -> Vec<ColumnPos> {
     (-200..200)
@@ -292,5 +293,182 @@ fn melons_lie_on_grass_in_the_jungle_only() {
         let column = plains.generate(key);
         assert!(find(&column, Block::Melon).is_empty());
         assert!(find(&column, Block::Vine).is_empty());
+    }
+}
+
+fn swamp_columns(terrain: &Terrain) -> Vec<(ColumnPos, Column)> {
+    columns_of(terrain, Biome::Swampland, 24)
+        .into_iter()
+        .map(|key| (key, terrain.generate(key)))
+        .collect()
+}
+
+#[test]
+fn lilies_float_only_on_water_and_swamps_have_them() {
+    let terrain = Terrain::new(SEED);
+    let mut total = 0;
+    for (_, column) in swamp_columns(&terrain) {
+        for pos in find(&column, Block::Waterlily) {
+            total += 1;
+            assert_eq!(column.get(pos - IVec3::Y), Block::Water, "{pos}");
+            assert_eq!(pos.y, WATER_LEVEL + 1);
+        }
+    }
+    assert!(total > 40, "only {total} lilies");
+    for key in columns_of(&terrain, Biome::Plains, 12) {
+        assert!(find(&terrain.generate(key), Block::Waterlily).is_empty());
+    }
+}
+
+#[test]
+fn swamp_puddles_replace_the_sea_level_top_with_water() {
+    let terrain = Terrain::new(SEED);
+    let mut puddles = 0;
+    for (key, column) in swamp_columns(&terrain) {
+        let origin = key.origin();
+        for z in 0..16 {
+            for x in 0..16 {
+                let (wx, wz) = (origin.x + x, origin.z + z);
+                let at = IVec3::new(x, WATER_LEVEL, z);
+                let dry = terrain.surface_height(wx, wz) == WATER_LEVEL;
+                if dry && terrain.is_puddle(wx, wz) {
+                    puddles += 1;
+                    assert_eq!(column.get(at), Block::Water);
+                    assert_eq!(column.get(at - IVec3::Y), Block::Dirt);
+                } else if dry {
+                    assert!(matches!(column.get(at), Block::Grass), "{wx}, {wz}");
+                }
+            }
+        }
+    }
+    assert!(puddles > 20, "only {puddles} puddles");
+}
+
+#[test]
+fn swamp_oaks_stand_in_shallow_water_and_hang_vines() {
+    let terrain = Terrain::new(SEED);
+    let mut oaks = 0;
+    let mut vines = 0;
+    for (key, column) in swamp_columns(&terrain) {
+        vines += find(&column, Block::Vine).len();
+        let origin = key.origin();
+        for z in 0..16 {
+            for x in 0..16 {
+                let Some(tree) = trees::tree_at(&terrain, origin.x + x, origin.z + z) else {
+                    continue;
+                };
+                if tree.kind != trees::TreeKind::SwampOak {
+                    continue;
+                }
+                oaks += 1;
+                let ground = tree.base - IVec3::Y;
+                assert!(matches!(
+                    terrain.surface_height(tree.base.x, tree.base.z) - ground.y,
+                    0 | 1
+                ));
+                let below = column.get(IVec3::new(x, ground.y, z));
+                assert!(matches!(below, Block::Grass | Block::Dirt), "{below:?}");
+                assert_eq!(column.get(IVec3::new(x, tree.base.y, z)), Block::Log);
+            }
+        }
+    }
+    assert!(oaks > 3, "only {oaks} swamp oaks");
+    assert!(vines > 50, "only {vines} vines");
+}
+
+#[test]
+fn swamp_mushrooms_and_reeds_grow() {
+    let terrain = Terrain::new(SEED);
+    let columns = swamp_columns(&terrain);
+    let mushrooms: usize = columns
+        .iter()
+        .map(|(_, c)| find(c, Block::BrownMushroom).len() + find(c, Block::RedMushroom).len())
+        .sum();
+    assert!(mushrooms > 8, "only {mushrooms} mushrooms");
+    let reeds: usize = columns_of(&terrain, Biome::Swampland, 150)
+        .into_iter()
+        .map(|key| find(&terrain.generate(key), Block::Reeds).len())
+        .sum();
+    assert!(reeds > 0, "only {reeds} reeds");
+}
+
+#[test]
+fn mushrooms_have_support_and_stand_in_the_dark_or_on_mycelium() {
+    let terrain = Terrain::new(SEED);
+    let mut seen = 0;
+    for key in columns_of(&terrain, Biome::Forest, 40) {
+        let column = terrain.generate(key);
+        for block in [Block::BrownMushroom, Block::RedMushroom] {
+            for pos in find(&column, block) {
+                seen += 1;
+                let below = column.get(pos - IVec3::Y);
+                assert!(below.is_solid(), "{pos} on {below:?}");
+                let origin = key.origin();
+                let surface = terrain.surface_height(origin.x + pos.x, origin.z + pos.z);
+                assert!(pos.y <= surface || shaded(&column, pos), "{pos}");
+            }
+        }
+    }
+    assert!(seen > 0);
+}
+
+#[test]
+fn mushroom_island_is_mycelium_with_giant_and_small_mushrooms() {
+    let terrain = Terrain::new(ISLAND_SEED);
+    let (mut giant, mut small) = (0, 0);
+    for key in columns_of(&terrain, Biome::MushroomIsland, 40) {
+        let column = terrain.generate(key);
+        let origin = key.origin();
+        for z in 0..16 {
+            for x in 0..16 {
+                let top = terrain.surface_height(origin.x + x, origin.z + z);
+                if top > WATER_LEVEL
+                    && terrain
+                        .biome_at(origin.x + x, origin.z + z)
+                        .is_mushroom_island()
+                {
+                    assert_eq!(column.get(IVec3::new(x, top, z)), Block::Mycelium);
+                    assert_eq!(column.get(IVec3::new(x, top - 1, z)), Block::Dirt);
+                }
+            }
+        }
+        giant += find(&column, Block::MushroomStem).len();
+        for block in [Block::BrownMushroom, Block::RedMushroom] {
+            small += find(&column, block).len();
+        }
+        assert!(find(&column, Block::Log).is_empty());
+        assert!(find(&column, Block::TallGrass).is_empty());
+    }
+    assert!(giant > 0, "no giant mushrooms");
+    assert!(small > 0, "no small mushrooms");
+}
+
+#[test]
+fn clay_lies_on_dirt_floors_under_water() {
+    let terrain = Terrain::new(SEED);
+    let mut clay = 0;
+    for key in columns_of(&terrain, Biome::Swampland, 60)
+        .into_iter()
+        .chain(columns_of(&terrain, Biome::Forest, 60))
+    {
+        let column = terrain.generate(key);
+        for pos in find(&column, Block::Clay) {
+            clay += 1;
+            let origin = key.origin();
+            assert!(terrain.surface_height(origin.x + pos.x, origin.z + pos.z) < WATER_LEVEL + 4);
+        }
+    }
+    assert!(clay > 0, "no clay");
+}
+
+#[test]
+fn swamp_and_island_decoration_is_deterministic() {
+    let (a, b) = (Terrain::new(SEED), Terrain::new(SEED));
+    for key in columns_of(&a, Biome::Swampland, 4) {
+        assert!(same_columns(&a.generate(key), &b.generate(key)));
+    }
+    let (a, b) = (Terrain::new(ISLAND_SEED), Terrain::new(ISLAND_SEED));
+    for key in columns_of(&a, Biome::MushroomIsland, 4) {
+        assert!(same_columns(&a.generate(key), &b.generate(key)));
     }
 }

@@ -58,7 +58,7 @@ const COMMANDS: [Spec; 6] = [
     },
     Spec {
         name: "locate",
-        usage: "/locate biome <plains|desert|forest|taiga|tundra>",
+        usage: "/locate biome <биом>",
         about: "Находит ближайший биом",
     },
     Spec {

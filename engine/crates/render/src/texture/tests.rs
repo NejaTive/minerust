@@ -3,7 +3,7 @@ use world::textures::{TextureSet, TileTexture};
 
 const TILE_SIZE: u32 = 32;
 const MIP_LEVELS: u32 = 6;
-const LAYER_COUNT: u32 = 132;
+const LAYER_COUNT: u32 = 138;
 
 fn standard() -> TextureSet {
     TextureSet::standard()
@@ -254,8 +254,8 @@ fn builtin_set_output_matches_golden() {
     let hash = data.iter().fold(0xcbf29ce484222325_u64, |h, &b| {
         (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
     });
-    assert_eq!(data.len(), 720720);
-    assert_eq!(format!("{hash:016x}"), "b35ff35de5a4c1d4");
+    assert_eq!(data.len(), 753480);
+    assert_eq!(format!("{hash:016x}"), "ba3d095a59fbbba1");
 }
 
 #[test]

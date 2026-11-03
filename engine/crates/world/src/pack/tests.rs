@@ -112,6 +112,8 @@ fn fixed_tints_and_biome_kinds() {
         assert_eq!(set.tile(tile).biome, BiomeTint::Foliage, "{tile:?}");
     }
     assert_eq!(set.tile(Tile::MelonSide).biome, BiomeTint::None);
+    assert_eq!(set.tile(Tile::Waterlily).biome, BiomeTint::None);
+    assert_eq!(hex(set.tile(Tile::Waterlily).tint), [0x20, 0x80, 0x30]);
     assert_eq!(hex(set.tile(Tile::Water).tint), [0x3F, 0x76, 0xE4]);
     assert_eq!(&set.tile_pixels(Tile::Water)[3..4], [WATER_MAX_ALPHA]);
     let plains = BiomePalette::constants().plains(BiomeTint::Grass);

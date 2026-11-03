@@ -35,12 +35,13 @@ pub enum TreeKind {
     DarkOak,
     BrownMushroom,
     RedMushroom,
+    SwampOak,
 }
 
 impl TreeKind {
     pub fn log(self) -> Block {
         match self {
-            TreeKind::Oak | TreeKind::BigOak => Block::Log,
+            TreeKind::Oak | TreeKind::BigOak | TreeKind::SwampOak => Block::Log,
             TreeKind::Birch => Block::BirchLog,
             TreeKind::Spruce => Block::SpruceLog,
             TreeKind::JungleTree | TreeKind::MegaJungle | TreeKind::Shrub => Block::JungleLog,
@@ -52,7 +53,9 @@ impl TreeKind {
 
     pub fn leaves(self) -> Block {
         match self {
-            TreeKind::Oak | TreeKind::BigOak | TreeKind::Shrub => Block::Leaves,
+            TreeKind::Oak | TreeKind::BigOak | TreeKind::Shrub | TreeKind::SwampOak => {
+                Block::Leaves
+            }
             TreeKind::Birch => Block::BirchLeaves,
             TreeKind::Spruce => Block::SpruceLeaves,
             TreeKind::JungleTree | TreeKind::MegaJungle => Block::JungleLeaves,
@@ -79,6 +82,7 @@ impl TreeKind {
             TreeKind::Acacia => (5, 9),
             TreeKind::DarkOak => (6, 9),
             TreeKind::BrownMushroom | TreeKind::RedMushroom => (4, 6),
+            TreeKind::SwampOak => (5, 8),
         }
     }
 
@@ -148,6 +152,7 @@ impl Tree {
             TreeKind::DarkOak => shapes::dark_oak(self.base, self.height, self.shape),
             TreeKind::BrownMushroom => shapes::mushroom(self.base, self.height, false),
             TreeKind::RedMushroom => shapes::mushroom(self.base, self.height, true),
+            TreeKind::SwampOak => shapes::swamp_oak(self.base, self.height, self.shape),
             _ => return None,
         })
     }
@@ -360,11 +365,15 @@ pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
         height *= 2;
     }
     Some(Tree {
-        base: IVec3::new(x, terrain.surface_height(x, z) + 1, z),
+        base: IVec3::new(x, ground(terrain, x, z) + 1, z),
         height,
         kind: own.kind,
         shape,
     })
+}
+
+fn ground(terrain: &Terrain, x: i32, z: i32) -> i32 {
+    terrain.surface_height(x, z) - i32::from(terrain.is_puddle(x, z))
 }
 
 fn grid_spot(seed: i32, cell_x: i32, cell_z: i32) -> (i32, i32, u32) {
@@ -422,7 +431,12 @@ fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<Candidate> {
     if roll >= trees_per_chunk(biome) / BLOCKS_PER_CHUNK || biome.is_roofed() {
         return None;
     }
-    if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
+    let lowest = if biome.is_swamp() {
+        WATER_LEVEL - 1
+    } else {
+        WATER_LEVEL + 2
+    };
+    if ground(terrain, x, z) < lowest {
         return None;
     }
     let kind = pick_kind(biome, hash(terrain.seed(), x, z, SALT_KIND));
@@ -445,6 +459,7 @@ fn trees_per_chunk(biome: Biome) -> f32 {
         ExtremeHillsPlus | ExtremeHillsPlusM => 3.0,
         MesaPlateauF | MesaPlateauFM => 5.0,
         Plains | SunflowerPlains => 0.5,
+        MushroomIsland => 1.0,
         IcePlains | IceMountains => 0.1,
         _ => 0.0,
     }
@@ -486,6 +501,14 @@ fn pick_kind(biome: Biome, bits: u32) -> TreeKind {
         Taiga | TaigaHills | TaigaM | ColdTaiga | ColdTaigaHills | ColdTaigaM | MegaTaiga
         | MegaTaigaHills | MegaSpruceTaiga | MegaSpruceTaigaHills | ExtremeHillsPlus
         | ExtremeHillsPlusM | IcePlains | IceMountains => TreeKind::Spruce,
+        Swampland | SwamplandM => TreeKind::SwampOak,
+        MushroomIsland => {
+            if bits & 1 == 0 {
+                TreeKind::BrownMushroom
+            } else {
+                TreeKind::RedMushroom
+            }
+        }
         _ => TreeKind::Oak,
     }
 }

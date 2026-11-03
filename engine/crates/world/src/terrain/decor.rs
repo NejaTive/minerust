@@ -18,6 +18,20 @@ const MELON_VERTICAL_SPREAD: u32 = 4;
 const VINE_ATTEMPTS: u32 = 50;
 const VINE_SPREAD: u32 = 4;
 const VINE_CEILING: i32 = 128;
+const LILY_TRIES: u32 = 10;
+const LILY_SPREAD: u32 = 8;
+const LILY_VERTICAL_SPREAD: u32 = 4;
+const MUSHROOM_TRIES: u32 = 64;
+const MUSHROOM_SPREAD: u32 = 8;
+const MUSHROOM_VERTICAL_SPREAD: u32 = 4;
+const CAVE_MUSHROOM_CEILING: u32 = 128;
+const BROWN_MUSHROOM_ONE_IN: u32 = 4;
+const RED_MUSHROOM_ONE_IN: u32 = 8;
+const SHADE_REACH: i32 = 8;
+const SHADE_BLOCKS: i32 = 3;
+const CLAY_RADIUS_MIN: u32 = 2;
+const CLAY_RADIUS_SPAN: u32 = 2;
+const CLAY_DEPTH: i32 = 2;
 const CENTER: i32 = 8;
 
 const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
@@ -28,6 +42,8 @@ struct Counts {
     reeds: u32,
     melons: u32,
     vines: u32,
+    lilies: u32,
+    mushrooms: u32,
 }
 
 fn counts(biome: Biome) -> Counts {
@@ -51,6 +67,18 @@ fn counts(biome: Biome) -> Counts {
             vines: VINE_ATTEMPTS,
             ..Counts::NONE
         }
+    } else if biome.is_swamp() {
+        Counts {
+            reeds: 10,
+            lilies: 4,
+            mushrooms: 8,
+            ..Counts::NONE
+        }
+    } else if biome.is_mushroom_island() {
+        Counts {
+            mushrooms: 1,
+            ..Counts::NONE
+        }
     } else {
         Counts::NONE
     }
@@ -63,6 +91,8 @@ impl Counts {
         reeds: 0,
         melons: 0,
         vines: 0,
+        lilies: 0,
+        mushrooms: 0,
     };
 }
 
@@ -162,6 +192,111 @@ impl Terrain {
         for _ in 0..counts.vines {
             let spot = pick(&mut rng);
             self.grow_vines(&mut rng, column, IVec3::new(spot.x, WATER_LEVEL, spot.z));
+        }
+        for _ in 0..counts.lilies {
+            let spot = pick(&mut rng);
+            let mut y = (rng.below(2 * surface(&spot) as u32) as i32).min(WORLD_HEIGHT - 1);
+            while y > 0 && column.get(IVec3::new(spot.x, y - 1, spot.z)) == Block::Air {
+                y -= 1;
+            }
+            self.grow_lilies(&mut rng, column, IVec3::new(spot.x, y, spot.z));
+        }
+        for _ in 0..counts.mushrooms {
+            if rng.below(BROWN_MUSHROOM_ONE_IN) == 0 {
+                let spot = pick(&mut rng);
+                let start = IVec3::new(spot.x, surface(&spot) + 1, spot.z);
+                self.grow_mushrooms(&mut rng, column, &climate, Block::BrownMushroom, start);
+            }
+            if rng.below(RED_MUSHROOM_ONE_IN) == 0 {
+                let spot = pick(&mut rng);
+                let y = rng.below(2 * surface(&spot) as u32) as i32;
+                let start = IVec3::new(spot.x, y, spot.z);
+                self.grow_mushrooms(&mut rng, column, &climate, Block::RedMushroom, start);
+            }
+        }
+        for (block, one_in) in [
+            (Block::BrownMushroom, BROWN_MUSHROOM_ONE_IN),
+            (Block::RedMushroom, RED_MUSHROOM_ONE_IN),
+        ] {
+            if rng.below(one_in) == 0 {
+                let spot = pick(&mut rng);
+                let y = rng.below(CAVE_MUSHROOM_CEILING) as i32;
+                let start = IVec3::new(spot.x, y, spot.z);
+                self.grow_mushrooms(&mut rng, column, &climate, block, start);
+            }
+        }
+        let spot = pick(&mut rng);
+        self.grow_clay(&mut rng, column, &climate, &spot);
+    }
+
+    fn grow_lilies(&self, rng: &mut Stream, column: &mut Column, start: IVec3) {
+        for _ in 0..LILY_TRIES {
+            let at = start
+                + IVec3::new(
+                    rng.spread(LILY_SPREAD),
+                    rng.spread(LILY_VERTICAL_SPREAD),
+                    rng.spread(LILY_SPREAD),
+                );
+            if Column::contains(at)
+                && column.get(at) == Block::Air
+                && Column::contains(at - IVec3::Y)
+                && column.get(at - IVec3::Y) == Block::Water
+            {
+                column.set(at, Block::Waterlily);
+            }
+        }
+    }
+
+    fn grow_mushrooms(
+        &self,
+        rng: &mut Stream,
+        column: &mut Column,
+        climate: &ColumnClimate,
+        block: Block,
+        start: IVec3,
+    ) {
+        for _ in 0..MUSHROOM_TRIES {
+            let at = start
+                + IVec3::new(
+                    rng.spread(MUSHROOM_SPREAD),
+                    rng.spread(MUSHROOM_VERTICAL_SPREAD),
+                    rng.spread(MUSHROOM_SPREAD),
+                );
+            if Column::contains(at)
+                && Column::contains(at - IVec3::Y)
+                && column.get(at) == Block::Air
+                && mushroom_stays(column, climate, at)
+            {
+                column.set(at, block);
+            }
+        }
+    }
+
+    fn grow_clay(
+        &self,
+        rng: &mut Stream,
+        column: &mut Column,
+        climate: &ColumnClimate,
+        spot: &Spot,
+    ) {
+        let floor = climate.surface[ColumnClimate::index(spot.x, spot.z)];
+        let center = IVec3::new(spot.x, floor + 1, spot.z);
+        if floor >= WATER_LEVEL || column.get(center) != Block::Water {
+            return;
+        }
+        let radius = (rng.below(CLAY_RADIUS_SPAN) + CLAY_RADIUS_MIN) as i32;
+        for dz in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dz * dz > radius * radius {
+                    continue;
+                }
+                for y in center.y - CLAY_DEPTH..=center.y + CLAY_DEPTH {
+                    let at = IVec3::new(center.x + dx, y, center.z + dz);
+                    if Column::contains(at) && column.get(at) == Block::Dirt {
+                        column.set(at, Block::Clay);
+                    }
+                }
+            }
         }
     }
 
@@ -263,6 +398,28 @@ impl Terrain {
             self.surface_height(x, z) < WATER_LEVEL && !self.biome_at(x, z).is_snowy()
         })
     }
+}
+
+fn mushroom_stays(column: &Column, climate: &ColumnClimate, at: IVec3) -> bool {
+    let below = column.get(at - IVec3::Y);
+    if below == Block::Mycelium {
+        return true;
+    }
+    if !below.is_solid() {
+        return false;
+    }
+    let surface = climate.surface[ColumnClimate::index(at.x, at.z)];
+    at.y <= surface || shaded(column, at)
+}
+
+fn shaded(column: &Column, at: IVec3) -> bool {
+    let covering = (1..=SHADE_REACH)
+        .filter(|&dy| {
+            let above = at + IVec3::Y * dy;
+            Column::contains(above) && column.get(above) != Block::Air
+        })
+        .count() as i32;
+    covering >= SHADE_BLOCKS
 }
 
 #[cfg(test)]

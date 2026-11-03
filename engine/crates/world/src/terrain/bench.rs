@@ -33,6 +33,23 @@ fn generate_timing_jungle() {
 
 #[test]
 #[ignore]
+fn generate_timing_swamp() {
+    let terrain = Terrain::new(1337);
+    let keys: Vec<ColumnPos> = (-200..200)
+        .flat_map(|z| (-200..200).map(move |x| ColumnPos::new(x, z)))
+        .filter(|k| terrain.sample_biome(k.origin().x + 8, k.origin().z + 8) == Biome::Swampland)
+        .take(64)
+        .collect();
+    let start = std::time::Instant::now();
+    for &key in &keys {
+        std::hint::black_box(terrain.generate(key));
+    }
+    let per_column = start.elapsed() / keys.len() as u32;
+    println!("generate swamp: {per_column:?} per column");
+}
+
+#[test]
+#[ignore]
 fn tint_timing() {
     let terrain = Terrain::new(1337);
     let palette = BiomePalette::constants();

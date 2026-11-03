@@ -78,7 +78,7 @@ impl RandomTicks {
         let covered = covers(world.block(above));
         let old = world.block(pos);
         let new = match old {
-            Block::Grass | Block::SnowyGrass if covered => Block::Dirt,
+            Block::Grass | Block::SnowyGrass | Block::Mycelium if covered => Block::Dirt,
             Block::Dirt if !covered && lit(light, above) => match self.spread_source(world, pos) {
                 Some(grass) => grass,
                 None => return,
@@ -135,7 +135,9 @@ impl RandomTicks {
         (0..SPREAD_ATTEMPTS).find_map(|_| {
             let source = pos + self.offset();
             let block = world.block(source);
-            (block.is_grass() && !covers(world.block(source + IVec3::Y))).then_some(block)
+            ((block.is_grass() || block == Block::Mycelium)
+                && !covers(world.block(source + IVec3::Y)))
+            .then_some(block)
         })
     }
 

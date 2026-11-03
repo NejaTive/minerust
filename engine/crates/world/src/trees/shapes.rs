@@ -90,6 +90,30 @@ pub(super) fn jungle_tree(base: IVec3, height: i32, shape: u32, leaves: Vec<IVec
     }
 }
 
+pub(super) fn swamp_oak(base: IVec3, height: i32, shape: u32) -> Parts {
+    let mut rng = Rng(u64::from(shape) ^ 0x7c_41);
+    let top = base.y + height;
+    let mut leaves = Vec::new();
+    for y in top - 3..=top {
+        let layer = y - top;
+        let reach = 2 - layer / 2;
+        for dz in -reach..=reach {
+            for dx in -reach..=reach {
+                let corner = dx.abs() == reach && dz.abs() == reach;
+                if !corner || (layer != 0 && rng.below(2) != 0) {
+                    leaves.push(IVec3::new(base.x + dx, y, base.z + dz));
+                }
+            }
+        }
+    }
+    let vines = leaf_vines(&mut rng, &leaves);
+    Parts {
+        logs: column(base, height),
+        leaves,
+        vines,
+    }
+}
+
 pub(super) fn shrub(base: IVec3, shape: u32) -> Parts {
     let mut rng = Rng(u64::from(shape) ^ 0x5b_2b);
     let mut leaves = Vec::new();
