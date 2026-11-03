@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 // Копия `blocks()` движка; её сверяет Rust-тест `js_fixture_matches_blocks`.
 import blocks from './blocks.fixture.json'
+// Копия `items()` движка; её сверяет Rust-тест `js_fixture_matches_items`.
+import items from './items.fixture.json'
 import {
   DEFAULT_HOTBAR,
   HOTBAR_SIZE,
@@ -12,7 +14,7 @@ import {
   swapHotbarSlots,
 } from './hotbar'
 
-const known = new Set(blocks.map((b) => b.name))
+const known = new Set([...blocks, ...items].map((entry) => entry.name))
 const placeable = new Set(blocks.filter((b) => b.placeable).map((b) => b.name))
 
 const SAMPLE: (string | null)[] = [
@@ -136,5 +138,24 @@ describe('операции со слотами', () => {
     const slots = [...SAMPLE]
     clearHotbar(slots)
     expect(slots).toEqual(Array.from({ length: HOTBAR_SIZE }, () => null))
+  })
+})
+
+describe('предметы в хотбаре', () => {
+  it('яйцо призыва свиньи — известное имя', () => {
+    expect(known).toContain('pig_spawn_egg')
+    expect(placeable).not.toContain('pig_spawn_egg')
+  })
+
+  it('слот хранит предмет наравне с блоком', () => {
+    const slots = [...SAMPLE]
+    slots[3] = 'pig_spawn_egg'
+    expect(parseHotbarContents(slots, known)).toEqual(slots)
+  })
+
+  it('неизвестный предмет сбрасывает хотбар', () => {
+    const slots = [...SAMPLE]
+    slots[3] = 'zombie_spawn_egg'
+    expect(parseHotbarContents(slots, known)).toEqual([...DEFAULT_HOTBAR])
   })
 })

@@ -52,6 +52,10 @@ Composables без Pinia — модульные синглтоны: `useSettings
 
 **Новый блок.** Вариант в `Block` и запись в `Block::ALL` и `BLOCKS` — в конец (номера блока — часть формата сохранения), тайл (см. ниже). Обновить фикстуру. Размещаемые блоки попадают в креатив-инвентарь по `placeable`; умолчание хотбара (`DEFAULT_HOTBAR` в `settings/hotbar.ts`) — пустые слоты. Подпись для HUD берётся из `BlockDef.label`.
 
+**Новый моб.** Вариант в `MobKind` (`world/src/mob.rs`, номер — часть формата сохранения: `FORMAT_VERSION`, `save.rs`). Тело — `Player::sized` из `game/src/physics.rs`, ИИ и анимация — `game/src/mob.rs` (`Mob::tick`); `Game` тикает мобов только в загруженных колонках и пишет их в `Column.mobs` (`sync_mobs`). Текстура — в `world/assets/textures/entity/…` и в `EntityImages` (`world/src/pack.rs`); коробочная модель — в `render/src/entity.rs` (`pig_parts`, `ModelKind`), данные уходят в рендер через `FrameParams.mobs` (`web/src/frame.rs`). Яйцо призыва — новый предмет.
+
+**Новый предмет.** Вариант в `Item` и запись в `ITEMS` (`world/src/item.rs`; имя не должно совпадать с именем блока). Слот хотбара хранит строковое имя блока или предмета; `Game::select_block` принимает оба, список для UI — `items()` в `web/src/api.rs` (фикстура `src/settings/items.fixture.json`, обновляется `UPDATE_FIXTURES=1 cargo test`). Иконка — `item_icon` (`web/src/engine.rs`), пока считается только для яиц призыва из `spawn_egg.png` и `spawn_egg_overlay.png`, с цветами из `ItemDef`. Действие по ПКМ — `Game::use_item`.
+
 **Новый тайл.** PNG 16×16 в `engine/crates/world/assets/textures/<имя_в_snake_case>.png`, вариант в `Tile` и в `ALL` (`world/src/tile.rs`); блок ссылается на него в `BLOCKS`. Атлас и иконки хотбара подхватят тайл сами.
 
 **Новая настройка.**

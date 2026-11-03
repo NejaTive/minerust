@@ -16,7 +16,7 @@ let shared: ReturnType<typeof create> | undefined
 
 function create() {
   for (const key of ['minerust.hotbar', 'minerust.hotbarSlot']) localStore.remove(key)
-  const { limits, defaults, blocks } = engineInfo()
+  const { limits, defaults, blocks, items } = engineInfo()
   const settings = reactive<Settings>(loadSettings(localStore, limits, defaultSettings(defaults)))
   if (BENCH) {
     Object.assign(settings, {
@@ -33,7 +33,7 @@ function create() {
   })
 
   const slot = ref(0)
-  const knownNames = new Set(blocks.map((b) => b.name))
+  const knownNames = new Set([...blocks, ...items].map((entry) => entry.name))
   const slots = reactive(parseHotbarContents(undefined, knownNames))
 
   const block = computed(() => slots[slot.value] ?? null)
