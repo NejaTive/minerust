@@ -1,6 +1,7 @@
 use std::io::Write;
 
 use super::*;
+use crate::biome::Biome;
 
 const PREFIX: &str = "assets/minecraft/textures/blocks/";
 
@@ -104,10 +105,10 @@ fn fixed_tints_and_biome_kinds() {
     assert_eq!(hex(set.tile(Tile::BirchLeaves).tint), [0x80, 0xA7, 0x55]);
     assert_eq!(hex(set.tile(Tile::Water).tint), [0x3F, 0x76, 0xE4]);
     assert_eq!(&set.tile_pixels(Tile::Water)[3..4], [WATER_MAX_ALPHA]);
-    let plains = BiomePalette::constants().grass[0];
+    let plains = BiomePalette::constants().plains(BiomeTint::Grass);
     let icon = set.icon_pixels(Tile::GrassTop);
     for c in 0..3 {
-        assert_eq!(icon[c], (200.0 * plains[c]).round() as u8);
+        assert_eq!(icon[c], (200.0_f32 * plains[c]).round() as u8);
     }
 }
 
@@ -127,10 +128,10 @@ fn grass_side_overlay_is_a_separate_layer() {
     assert_eq!(side.layers.len(), 2 * set.frame_bytes());
     assert_eq!(&set.tile_pixels(Tile::GrassSide)[..3], [100, 100, 100]);
     assert_eq!(side.biome, BiomeTint::None);
-    let plains = BiomePalette::constants().grass[0];
+    let plains = BiomePalette::constants().plains(BiomeTint::Grass);
     let icon = set.icon_pixels(Tile::GrassSide);
     for c in 0..3 {
-        assert_eq!(icon[c], (255.0 * plains[c]).round() as u8);
+        assert_eq!(icon[c], (255.0_f32 * plains[c]).round() as u8);
     }
     let table = set.animation_table();
     let entry = table[Tile::GrassSide.layer() as usize];
@@ -157,10 +158,14 @@ fn colormaps_override_constants_and_default_without_them() {
         (&block("dirt.png"), png(16, 16, [1, 2, 3, 255])),
         (&grass_name, grass),
     ]);
-    let palette = *load(&with).unwrap().textures.palette();
+    let palette = load(&with).unwrap().textures.palette().clone();
     let expected = [10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0];
-    assert_eq!(palette.grass, [expected; 4]);
-    assert_eq!(palette.foliage, BiomePalette::constants().foliage);
+    assert_eq!(palette.grass(Biome::Forest), expected);
+    assert_eq!(palette.grass(Biome::Plains), expected);
+    assert_eq!(
+        palette.foliage(Biome::Forest),
+        BiomePalette::constants().foliage(Biome::Forest)
+    );
 }
 
 #[test]

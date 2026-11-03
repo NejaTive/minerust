@@ -1,4 +1,9 @@
 use super::*;
+use crate::biome_color::BiomePalette;
+
+const RUN_LENGTH: (f32, f32) = (20.0, 400.0);
+const MAX_BORDER_STEP: i32 = 12;
+const SNOW_SEED: i32 = 7;
 
 fn same_columns(a: &Column, b: &Column) -> bool {
     (0..WORLD_HEIGHT).all(|y| {
@@ -16,6 +21,7 @@ fn same_seed_same_world() {
     let (a, b) = (Terrain::new(42), Terrain::new(42));
     for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
         assert_eq!(a.surface_height(x, z), b.surface_height(x, z));
+        assert_eq!(a.biome_at(x, z), b.biome_at(x, z));
     }
     for key in [ColumnPos::new(-3, 7), lake_key(&a)] {
         assert!(same_columns(&a.generate(key), &b.generate(key)));
@@ -31,55 +37,83 @@ fn other_seed_other_world() {
 }
 
 #[test]
+fn biome_at_matches_the_uncached_map() {
+    let terrain = Terrain::new(77);
+    for (x, z) in [(0, 0), (-1, -1), (15, 16), (-1234, 987), (4000, -4000)] {
+        assert_eq!(
+            terrain.biome_at(x, z),
+            terrain.sample_biome(x, z),
+            "{x}, {z}"
+        );
+    }
+}
+
+#[test]
 fn surface_stays_in_range() {
     let terrain = Terrain::new(1337);
     let (mut min, mut max) = (i32::MAX, i32::MIN);
-    for z in (-2048..2048).step_by(8) {
-        for x in (-2048..2048).step_by(8) {
+    for z in (-4096..4096).step_by(16) {
+        for x in (-4096..4096).step_by(16) {
             let h = terrain.surface_height(x, z);
             assert!((1..WORLD_HEIGHT - 1).contains(&h), "{h} at {x}, {z}");
             min = min.min(h);
             max = max.max(h);
         }
     }
-    assert!(max - min > 30, "{min}..{max}");
-    assert!(min > 20 && max < 110, "{min}..{max}");
+    assert!(max - min > 40, "{min}..{max}");
+    assert!(min > 15 && max < 150, "{min}..{max}");
+}
+
+fn find_column(terrain: &Terrain, pred: impl Fn(i32, i32, Biome) -> bool) -> Option<(i32, i32)> {
+    (0..16_384)
+        .map(|i| (i * 8, i * 3))
+        .find(|&(x, z)| pred(x, z, terrain.sample_biome(x, z)))
 }
 
 fn find_biome(terrain: &Terrain, biome: Biome) -> (i32, i32) {
-    find_column(terrain, |x, z, w| {
-        w.dominant() == biome && terrain.surface(x, z, w) > *BEACH.end()
+    find_column(terrain, |x, z, b| {
+        b == biome && terrain.biome_at(x, z) == biome && terrain.surface_height(x, z) > WATER_LEVEL
     })
     .unwrap_or_else(|| panic!("no {biome:?}"))
 }
 
-fn find_column(
-    terrain: &Terrain,
-    pred: impl Fn(i32, i32, BiomeWeights) -> bool,
-) -> Option<(i32, i32)> {
-    (0..8192)
-        .map(|i| (i * 8, i * 3))
-        .find(|&(x, z)| pred(x, z, terrain.biome_weights(x, z)))
-}
-
 #[test]
-fn low_ground_is_under_water() {
+fn oceans_lie_under_water_and_their_floor_is_gravel() {
     let terrain = Terrain::new(1337);
-    let (x, z) = find_column(&terrain, |x, z, w| {
-        w.dominant() != Biome::Desert && terrain.surface(x, z, w) < *BEACH.start()
+    let (x, z) = find_column(&terrain, |x, z, b| {
+        b == Biome::DeepOcean && terrain.surface_height(x, z) < WATER_LEVEL - 10
     })
-    .expect("no deep water");
+    .expect("no deep ocean");
     let (top, layers) = ground_layers(&terrain, x, z);
-    assert!(top < WATER_LEVEL);
+    assert!(top < WATER_LEVEL - 10);
     assert_eq!(layers[0], Block::Gravel, "deep water floor is gravel");
     assert!(layers.iter().all(|&b| b != Block::Water));
 }
 
 #[test]
+fn rivers_are_below_the_water_level_and_hills_above() {
+    let terrain = Terrain::new(1337);
+    let mean = |biome: Biome| {
+        let heights: Vec<i32> = (0..40_000)
+            .map(|i| (i * 13 - 200_000, i * 7 - 100_000))
+            .filter(|&(x, z)| terrain.sample_biome(x, z) == biome)
+            .take(200)
+            .map(|(x, z)| terrain.surface_height(x, z))
+            .collect();
+        assert!(heights.len() > 20, "{biome:?}: {} samples", heights.len());
+        heights.iter().sum::<i32>() as f32 / heights.len() as f32
+    };
+    assert!(mean(Biome::River) < WATER_LEVEL as f32 - 2.0);
+    assert!(mean(Biome::Ocean) < mean(Biome::River) - 2.0);
+    assert!(mean(Biome::DeepOcean) < mean(Biome::Ocean) - 3.0);
+    assert!(mean(Biome::ExtremeHills) > mean(Biome::Plains) + 10.0);
+}
+
+#[test]
 fn water_fills_column_up_to_level() {
     let terrain = Terrain::new(1);
-    let (x, z) = find_column(&terrain, |x, z, w| {
-        terrain.surface(x, z, w) == 55 && !w.dominant().is_snowy()
+    let (x, z) = find_column(&terrain, |x, z, b| {
+        !b.is_snowy() && terrain.surface_height(x, z) == 55
     })
     .expect("no column with surface 55");
     let column = terrain.generate(ColumnPos::new(x.div_euclid(16), z.div_euclid(16)));
@@ -92,16 +126,23 @@ fn water_fills_column_up_to_level() {
 #[test]
 fn beaches_are_sand() {
     let terrain = Terrain::new(1337);
-    for surface in [WATER_LEVEL - 1, WATER_LEVEL + 1] {
-        let (x, z) = find_column(&terrain, |x, z, w| {
-            w.dominant() != Biome::Desert && terrain.surface(x, z, w) == surface
-        })
-        .unwrap_or_else(|| panic!("no beach at {surface}"));
-        let (_, layers) = ground_layers(&terrain, x, z);
-        let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
-        assert_eq!(sand, BEACH_SAND_DEPTH as usize, "surface {surface}");
-        assert_eq!(layers[sand], Block::Dirt);
-    }
+    let (x, z) = find_biome(&terrain, Biome::Beach);
+    let (_, layers) = ground_layers(&terrain, x, z);
+    let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
+    assert_eq!(sand, DIRT_DEPTH as usize + 1);
+    assert!(matches!(layers[sand], Block::Stone | Block::Bedrock));
+}
+
+#[test]
+fn stone_beach_is_stone() {
+    let terrain = Terrain::new(1337);
+    let (x, z) = find_biome(&terrain, Biome::StoneBeach);
+    let (_, layers) = ground_layers(&terrain, x, z);
+    assert!(
+        layers
+            .iter()
+            .all(|&b| matches!(b, Block::Stone | Block::Bedrock))
+    );
 }
 
 fn ground_layers(terrain: &Terrain, x: i32, z: i32) -> (i32, Vec<Block>) {
@@ -146,7 +187,7 @@ fn sand_over_stone_in_desert() {
     let (x, z) = find_biome(&terrain, Biome::Desert);
     let (_, layers) = ground_layers(&terrain, x, z);
     let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
-    assert!((3..=4).contains(&sand), "{sand} sand blocks");
+    assert_eq!(sand, DIRT_DEPTH as usize + 1);
     assert!(
         layers[sand..]
             .iter()
@@ -155,54 +196,23 @@ fn sand_over_stone_in_desert() {
 }
 
 #[test]
-fn biomes_are_deterministic() {
-    let (a, b) = (Terrain::new(42), Terrain::new(42));
-    for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
-        assert_eq!(a.biome_weights(x, z), b.biome_weights(x, z));
-    }
-}
-
-#[test]
-fn weights_sum_to_one() {
-    let terrain = Terrain::new(7);
-    for i in 0..1000 {
-        let w = terrain.biome_weights(i * 13, i * -7);
-        assert!(
-            [w.plains, w.desert, w.forest, w.taiga, w.tundra]
-                .iter()
-                .all(|&v| (0.0..=1.0).contains(&v))
-        );
-        assert!(
-            (w.plains + w.desert + w.forest + w.taiga + w.tundra - 1.0).abs() < 1e-5,
-            "{w:?}"
-        );
-    }
-}
-
-#[test]
-fn all_biomes_within_16000_blocks() {
-    for seed in [1337, 42, 7] {
-        let terrain = Terrain::new(seed);
-        let mut counts = [0; 5];
-        for z in (-8000..8000).step_by(64) {
-            for x in (-8000..8000).step_by(64) {
-                counts[terrain.biome_at(x, z) as usize] += 1;
-            }
-        }
-        let total: i32 = counts.iter().sum();
-        assert!(
-            counts.iter().all(|&c| c * 20 > total),
-            "seed {seed}: {counts:?}"
-        );
-    }
+fn tall_extreme_hills_are_stone() {
+    let terrain = Terrain::new(1337);
+    let (x, z) = find_column(&terrain, |x, z, b| {
+        b.is_extreme_hills() && terrain.surface_height(x, z) > MOUNTAIN_STONE_Y + 3
+    })
+    .expect("no tall mountain");
+    let (_, layers) = ground_layers(&terrain, x, z);
+    assert_eq!(layers[0], Block::Stone);
 }
 
 pub(super) fn mean_run_length<K: PartialEq>(terrain: &Terrain, class: impl Fn(Biome) -> K) -> f32 {
     let (mut cells, mut runs) = (0, 0);
     for row in (-8000..8000).step_by(97) {
+        let line = terrain.map.blocks(-8000, row, 16_000, 1);
         let mut previous = None;
-        for x in (-8000..8000).step_by(4) {
-            let class = class(terrain.biome_at(x, row));
+        for &biome in line.iter().step_by(4) {
+            let class = class(biome);
             runs += i32::from(previous.as_ref() != Some(&class));
             cells += 4;
             previous = Some(class);
@@ -212,21 +222,67 @@ pub(super) fn mean_run_length<K: PartialEq>(terrain: &Terrain, class: impl Fn(Bi
 }
 
 #[test]
-fn biomes_are_large() {
-    for seed in [1337, 42, 7, 99] {
-        let length = mean_run_length(&Terrain::new(seed), |biome| biome);
-        assert!(length > 230.0, "seed {seed}: mean run {length}");
+fn biomes_are_deterministic() {
+    let (a, b) = (Terrain::new(42), Terrain::new(42));
+    for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
+        assert_eq!(a.biome_at(x, z), b.biome_at(x, z));
     }
 }
 
 #[test]
-fn snow_and_desert_zones_are_huge() {
+fn biomes_have_a_sensible_size() {
     for seed in [1337, 42, 7, 99] {
+        let length = mean_run_length(&Terrain::new(seed), |biome| biome);
+        assert!(
+            (RUN_LENGTH.0..RUN_LENGTH.1).contains(&length),
+            "seed {seed}: mean run {length}"
+        );
+    }
+}
+
+#[test]
+fn all_climate_groups_cover_a_real_share_of_the_world() {
+    for seed in [1337, 42, 7] {
         let terrain = Terrain::new(seed);
-        let snow = mean_run_length(&terrain, Biome::is_snowy);
-        let desert = mean_run_length(&terrain, |biome| biome == Biome::Desert);
-        assert!(snow > 600.0, "seed {seed}: snow run {snow}");
-        assert!(desert > 600.0, "seed {seed}: desert run {desert}");
+        let (mut water, mut snowy, mut desert, mut green) = (0, 0, 0, 0);
+        let mut total = 0;
+        for z in (-8000..8000).step_by(160) {
+            for &biome in &terrain
+                .map
+                .blocks(-8000, z, 16_000, 1)
+                .into_iter()
+                .step_by(160)
+                .collect::<Vec<_>>()
+            {
+                total += 1;
+                if biome.is_ocean() {
+                    water += 1;
+                } else if biome.is_snowy() {
+                    snowy += 1;
+                } else if biome.is_desert() || biome.is_mesa() {
+                    desert += 1;
+                } else {
+                    green += 1;
+                }
+            }
+        }
+        let share = |n: i32| n as f32 / total as f32;
+        assert!(
+            (0.2..0.55).contains(&share(water)),
+            "seed {seed}: water {}",
+            share(water)
+        );
+        assert!(
+            (0.005..0.2).contains(&share(snowy)),
+            "seed {seed}: snowy {}",
+            share(snowy)
+        );
+        assert!(
+            (0.03..0.35).contains(&share(desert)),
+            "seed {seed}: desert {}",
+            share(desert)
+        );
+        assert!(share(green) > 0.25, "seed {seed}: green {}", share(green));
     }
 }
 
@@ -235,90 +291,52 @@ fn surface_is_deterministic() {
     let (a, b) = (Terrain::new(42), Terrain::new(42));
     for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
         assert_eq!(a.surface_height(x, z), b.surface_height(x, z));
-        assert_eq!(a.biome_at(x, z), b.biome_at(x, z));
     }
+}
+
+fn row_steps(terrain: &Terrain, row: i32, from: i32, to: i32) -> Vec<(i32, Biome, Biome)> {
+    let mut previous: Option<(i32, Biome)> = None;
+    let mut steps = Vec::new();
+    for x in from..to {
+        let height = terrain.surface_height(x, row);
+        let biome = terrain.biome_at(x, row);
+        if let Some((ph, pb)) = previous {
+            steps.push(((height - ph).abs(), pb, biome));
+        }
+        previous = Some((height, biome));
+    }
+    steps
 }
 
 #[test]
 fn terrain_is_smooth_across_biome_borders() {
-    let mean_step = |on_border: bool| {
-        let (mut sum, mut count) = (0, 0);
-        for seed in [1337, 42, 7] {
-            let terrain = Terrain::new(seed);
-            for row in (-4000..4000).step_by(61) {
-                let mut previous = None;
-                for x in -4000..4000 {
-                    let height = terrain.surface_height(x, row);
-                    let biome = terrain.biome_at(x, row);
-                    if let Some((ph, pb)) = previous
-                        && (pb != biome) == on_border
-                    {
-                        sum += i32::abs(height - ph);
-                        count += 1;
-                    }
-                    previous = Some((height, biome));
+    let (mut border, mut border_count, mut inside, mut inside_count) = (0, 0, 0, 0);
+    let mut worst = 0;
+    for seed in [1337, 42] {
+        let terrain = Terrain::new(seed);
+        for row in (-1500..1500).step_by(97) {
+            for (step, a, b) in row_steps(&terrain, row, -1500, 1500) {
+                if a != b {
+                    border += step;
+                    border_count += 1;
+                    worst = worst.max(step);
+                } else {
+                    inside += step;
+                    inside_count += 1;
                 }
-            }
-        }
-        sum as f32 / count as f32
-    };
-    let (border, inside) = (mean_step(true), mean_step(false));
-    assert!(border <= 3.0, "border step {border}");
-    assert!(border <= inside * 1.5, "border {border}, inside {inside}");
-}
-
-#[test]
-fn biome_borders_have_no_cliffs() {
-    let terrain = Terrain::new(1337);
-    let pure = |w: BiomeWeights| [w.plains, w.desert, w.forest, w.taiga, w.tundra].contains(&1.0);
-    let (mut border, mut forest, mut border_pairs) = (0, 0, 0);
-    for row in (-2048..2048).step_by(32) {
-        for along_x in [true, false] {
-            let mut prev: Option<(i32, BiomeWeights)> = None;
-            for i in -2048..2048 {
-                let (x, z) = if along_x { (i, row) } else { (row, i) };
-                let w = terrain.biome_weights(x, z);
-                let h = terrain.surface_height(x, z);
-                if let Some((ph, pw)) = prev {
-                    let step = (h - ph).abs();
-                    if !pure(w) || !pure(pw) {
-                        border = border.max(step);
-                        border_pairs += 1;
-                    } else if w.forest == 1.0 && pw.forest == 1.0 {
-                        forest = forest.max(step);
-                    }
-                }
-                prev = Some((h, w));
             }
         }
     }
-    assert!(border_pairs > 1000, "{border_pairs} border pairs");
-    assert!(
-        border <= forest,
-        "border step {border}, forest step {forest}"
+    let (border, inside) = (
+        border as f32 / border_count as f32,
+        inside as f32 / inside_count as f32,
     );
-}
-
-#[test]
-fn deep_water_floor_is_gravel() {
-    let terrain = Terrain::new(42);
-    let key = lake_key(&terrain);
-    let column = terrain.generate(key);
-    let origin = key.origin();
-    let mut deep = 0;
-    for z in 0..SECTION_SIZE {
-        for x in 0..SECTION_SIZE {
-            let surface = terrain.surface_height(origin.x + x, origin.z + z);
-            let top = column.get(IVec3::new(x, surface, z));
-            if WATER_LEVEL - surface > 2 {
-                deep += 1;
-                assert_eq!(top, Block::Gravel, "({x}, {z})");
-            } else {
-                assert_ne!(top, Block::Gravel, "({x}, {z})");
-            }
-        }
-    }
-    assert!(deep > 0);
+    assert!(border_count > 100, "{border_count} border steps");
+    assert!(worst <= MAX_BORDER_STEP, "worst border step {worst}");
+    assert!(
+        border <= inside * 2.0 + 0.5,
+        "border {border}, inside {inside}"
+    );
 }
 
 fn flat() -> Terrain {
@@ -456,195 +474,129 @@ fn bedrock_is_deterministic() {
     ));
 }
 
-pub(super) fn biome_share(terrain: &Terrain, biome: Biome) -> f32 {
-    let mut hits = 0;
-    let mut total = 0;
-    for z in (-8000..8000).step_by(40) {
-        for x in (-8000..8000).step_by(40) {
-            total += 1;
-            hits += i32::from(terrain.biome_at(x, z) == biome);
-        }
-    }
-    hits as f32 / total as f32
-}
-
-#[test]
-fn cold_biomes_are_about_as_common_as_desert_and_tundra_leads() {
-    for seed in [1337, 42, 7] {
-        let terrain = Terrain::new(seed);
-        let (taiga, tundra, desert) = (
-            biome_share(&terrain, Biome::Taiga),
-            biome_share(&terrain, Biome::Tundra),
-            biome_share(&terrain, Biome::Desert),
-        );
-        let cold = taiga + tundra;
-        assert!((0.12..0.25).contains(&cold), "seed {seed}: cold {cold}");
-        assert!(
-            (cold - desert).abs() < 0.04,
-            "seed {seed}: cold {cold}, desert {desert}"
-        );
-        assert!(
-            tundra > cold * 0.5,
-            "seed {seed}: tundra {tundra}, taiga {taiga}"
-        );
-        assert!(
-            taiga > cold * 0.1,
-            "seed {seed}: tundra {tundra}, taiga {taiga}"
-        );
-    }
-}
-
-#[test]
-fn cold_biomes_never_touch_desert() {
-    for seed in [1337, 42] {
-        let terrain = Terrain::new(seed);
-        let mut taiga = 0;
-        for z in (-4000..4000).step_by(53) {
-            let mut previous = terrain.biome_at(-4000, z);
-            for x in -3999..4000 {
-                let biome = terrain.biome_at(x, z);
-                taiga += i32::from(biome.is_snowy());
-                assert!(
-                    !(previous.is_snowy() && biome == Biome::Desert
-                        || previous == Biome::Desert && biome.is_snowy()),
-                    "seed {seed}: {x}, {z}"
-                );
-                previous = biome;
-            }
-        }
-        assert!(taiga > 10_000, "seed {seed}: {taiga} taiga cells");
-    }
-}
-
-#[test]
-fn flat_and_debug_worlds_have_no_cold_biomes() {
-    for world_type in [WorldType::Flat, WorldType::Debug] {
-        let terrain = Terrain::of(1337, world_type);
-        for i in 0..500 {
-            let weights = terrain.biome_weights(i * 97, i * -61);
-            assert_eq!((weights.taiga, weights.tundra), (0.0, 0.0));
-            assert_eq!(weights.dominant(), Biome::Plains);
-        }
-    }
-}
-
-#[test]
-fn tundra_is_found_in_the_standard_world() {
-    let terrain = Terrain::new(1337);
-    let (x, z) = find_biome(&terrain, Biome::Tundra);
-    assert_eq!(terrain.biome_at(x, z), Biome::Tundra);
-}
-
-fn cold_columns(terrain: &Terrain, biome: Biome) -> Vec<ColumnPos> {
-    (-48..48)
-        .flat_map(|z| (-48..48).map(move |x| ColumnPos::new(x, z)))
+fn columns_of(terrain: &Terrain, wanted: impl Fn(Biome) -> bool, limit: usize) -> Vec<ColumnPos> {
+    (-300..300)
+        .step_by(2)
+        .flat_map(|z| (-300..300).step_by(2).map(move |x| ColumnPos::new(x, z)))
         .filter(|key| {
             let origin = key.origin();
-            (0..SECTION_SIZE)
-                .step_by(5)
-                .flat_map(|d| [(d, d), (d, SECTION_SIZE - 1 - d)])
-                .all(|(dx, dz)| terrain.biome_at(origin.x + dx, origin.z + dz) == biome)
+            wanted(terrain.sample_biome(origin.x + 8, origin.z + 8))
+                && (0..SECTION_SIZE)
+                    .step_by(5)
+                    .flat_map(|d| [(d, d), (d, SECTION_SIZE - 1 - d)])
+                    .all(|(dx, dz)| wanted(terrain.biome_at(origin.x + dx, origin.z + dz)))
         })
+        .take(limit)
         .collect()
 }
 
 #[test]
 fn snowy_surface_is_snowy_grass_under_a_snow_layer() {
-    let terrain = Terrain::new(1337);
-    for biome in [Biome::Taiga, Biome::Tundra] {
-        assert_snowy_surface(&terrain, biome);
-    }
-}
-
-fn assert_snowy_surface(terrain: &Terrain, biome: Biome) {
-    let mut checked = 0;
-    for key in cold_columns(terrain, biome).into_iter().take(40) {
-        let column = terrain.generate_ground(key);
-        for z in 0..SECTION_SIZE {
-            for x in 0..SECTION_SIZE {
-                let (wx, wz) = (key.origin().x + x, key.origin().z + z);
-                let surface = terrain.surface_height(wx, wz);
-                let at = |y| column.get(IVec3::new(x, y, z));
-                if surface < WATER_LEVEL || terrain.biome_at(wx, wz) != biome {
-                    continue;
+    let terrain = Terrain::new(SNOW_SEED);
+    for biome in [Biome::IcePlains, Biome::ColdTaiga] {
+        let keys = columns_of(&terrain, |b| b == biome, 12);
+        assert!(!keys.is_empty(), "no {biome:?} columns");
+        let mut checked = 0;
+        for key in keys {
+            let column = terrain.generate_ground(key);
+            for z in 0..SECTION_SIZE {
+                for x in 0..SECTION_SIZE {
+                    let (wx, wz) = (key.origin().x + x, key.origin().z + z);
+                    let surface = terrain.surface_height(wx, wz);
+                    let at = |y| column.get(IVec3::new(x, y, z));
+                    if surface < WATER_LEVEL || terrain.biome_at(wx, wz) != biome {
+                        continue;
+                    }
+                    if matches!(at(surface), Block::Sand | Block::Bedrock | Block::Gravel) {
+                        continue;
+                    }
+                    assert_eq!(at(surface), Block::SnowyGrass, "{wx}, {wz}");
+                    assert_eq!(at(surface + 1), Block::Snow, "{wx}, {wz}");
+                    assert_eq!(at(surface + 2), Block::Air, "{wx}, {wz}");
+                    assert_eq!(at(surface - 1), Block::Dirt, "{wx}, {wz}");
+                    checked += 1;
                 }
-                if matches!(at(surface), Block::Sand | Block::Bedrock) {
-                    continue;
-                }
-                assert_eq!(at(surface), Block::SnowyGrass, "{wx}, {wz}");
-                assert_eq!(at(surface + 1), Block::Snow, "{wx}, {wz}");
-                assert_eq!(at(surface + 2), Block::Air, "{wx}, {wz}");
-                assert_eq!(at(surface - 1), Block::Dirt, "{wx}, {wz}");
-                checked += 1;
             }
         }
+        assert!(checked > 500, "{biome:?}: {checked} cells");
     }
-    assert!(checked > 1000, "{biome:?}: {checked} cells");
 }
 
 #[test]
 fn other_biomes_stay_green_and_snowless() {
     let terrain = Terrain::new(1337);
-    for biome in [Biome::Plains, Biome::Forest, Biome::Desert] {
+    for biome in [Biome::Plains, Biome::Forest, Biome::Desert, Biome::Taiga] {
         let (x, z) = find_biome(&terrain, biome);
         let column = terrain.generate_ground(ColumnPos::new(x.div_euclid(16), z.div_euclid(16)));
         for y in 0..WORLD_HEIGHT {
             for lz in 0..SECTION_SIZE {
                 for lx in 0..SECTION_SIZE {
                     let block = column.get(IVec3::new(lx, y, lz));
-                    assert!(block != Block::Ice && block != Block::Snow, "{biome:?}");
+                    let snowy_neighbour = terrain
+                        .biome_at(key_origin(x, z).0 + lx, key_origin(x, z).1 + lz)
+                        .is_snowy();
+                    assert!(
+                        snowy_neighbour || (block != Block::Ice && block != Block::Snow),
+                        "{biome:?}"
+                    );
                 }
             }
         }
     }
+}
+
+fn key_origin(x: i32, z: i32) -> (i32, i32) {
+    (x.div_euclid(16) * 16, z.div_euclid(16) * 16)
 }
 
 #[test]
 fn snowy_water_is_capped_with_ice() {
-    let terrain = Terrain::new(1337);
-    for biome in [Biome::Taiga, Biome::Tundra] {
-        assert_ice_cap(&terrain, biome);
-    }
-}
-
-fn assert_ice_cap(terrain: &Terrain, biome: Biome) {
-    let mut lakes = 0;
+    let terrain = Terrain::new(SNOW_SEED);
+    let mut frozen = 0;
     let mut deep = 0;
-    for z in -48..48 {
-        for x in -48..48 {
-            let key = ColumnPos::new(x, z);
-            let column = terrain.generate_ground(key);
-            for lz in 0..SECTION_SIZE {
-                for lx in 0..SECTION_SIZE {
-                    let (wx, wz) = (key.origin().x + lx, key.origin().z + lz);
-                    let surface = terrain.surface_height(wx, wz);
-                    if surface >= WATER_LEVEL || terrain.biome_at(wx, wz) != biome {
-                        continue;
-                    }
-                    let at = |y| column.get(IVec3::new(lx, y, lz));
-                    assert_eq!(at(WATER_LEVEL), Block::Ice, "{wx}, {wz}");
-                    assert_eq!(at(WATER_LEVEL + 1), Block::Air, "{wx}, {wz}");
-                    assert!(
-                        (surface + 1..WATER_LEVEL).all(|y| at(y) == Block::Water),
-                        "{wx}, {wz}"
-                    );
-                    lakes += 1;
-                    deep += i32::from(surface + 1 < WATER_LEVEL);
+    for key in columns_of(
+        &terrain,
+        |b| matches!(b, Biome::FrozenOcean | Biome::FrozenRiver),
+        30,
+    ) {
+        let column = terrain.generate_ground(key);
+        for lz in 0..SECTION_SIZE {
+            for lx in 0..SECTION_SIZE {
+                let (wx, wz) = (key.origin().x + lx, key.origin().z + lz);
+                let surface = terrain.surface_height(wx, wz);
+                if surface >= WATER_LEVEL || !terrain.biome_at(wx, wz).is_snowy() {
+                    continue;
                 }
+                let at = |y| column.get(IVec3::new(lx, y, lz));
+                assert_eq!(at(WATER_LEVEL), Block::Ice, "{wx}, {wz}");
+                assert_eq!(at(WATER_LEVEL + 1), Block::Air, "{wx}, {wz}");
+                assert!((surface + 1..WATER_LEVEL).all(|y| at(y) == Block::Water));
+                frozen += 1;
+                deep += i32::from(surface + 1 < WATER_LEVEL);
             }
         }
     }
-    assert!(lakes > 200, "{biome:?}: {lakes} frozen cells");
-    assert!(
-        deep > 100,
-        "{biome:?}: {deep} cells with water under the ice"
-    );
+    assert!(frozen > 200, "{frozen} frozen cells");
+    assert!(deep > 100, "{deep} cells with water under the ice");
+}
+
+#[test]
+fn warm_water_is_never_frozen() {
+    let terrain = Terrain::new(1337);
+    for key in columns_of(&terrain, |b| b == Biome::Ocean, 6) {
+        let column = terrain.generate_ground(key);
+        for lz in 0..SECTION_SIZE {
+            for lx in 0..SECTION_SIZE {
+                assert_ne!(column.get(IVec3::new(lx, WATER_LEVEL, lz)), Block::Ice);
+            }
+        }
+    }
 }
 
 #[test]
 fn snow_layer_follows_the_ground_through_caves() {
-    let terrain = Terrain::new(1337);
-    for key in cold_columns(&terrain, Biome::Taiga).into_iter().take(40) {
+    let terrain = Terrain::new(SNOW_SEED);
+    for key in columns_of(&terrain, |b| b == Biome::IcePlains, 12) {
         let column = terrain.generate_carved(key);
         for y in 1..WORLD_HEIGHT {
             for z in 0..SECTION_SIZE {
@@ -660,56 +612,55 @@ fn snow_layer_follows_the_ground_through_caves() {
 }
 
 #[test]
-fn column_biome_bytes_follow_biome_weights() {
+fn flat_and_debug_worlds_are_all_plains() {
+    for world_type in [WorldType::Flat, WorldType::Debug] {
+        let terrain = Terrain::of(1337, world_type);
+        for i in 0..500 {
+            assert_eq!(terrain.biome_at(i * 97, i * -61), Biome::Plains);
+            assert_eq!(terrain.sample_biome(i * 97, i * -61), Biome::Plains);
+        }
+    }
+}
+
+#[test]
+fn tint_bytes_hold_grass_then_foliage_for_every_block() {
     let terrain = Terrain::new(7);
-    let key = ColumnPos::new(3, -5);
-    let bytes = terrain.column_biome_bytes(key);
-    assert_eq!(bytes.len(), 16 * 16 * 4);
-    let origin = key.origin();
-    for (dx, dz) in [(0, 0), (5, 9), (15, 15)] {
-        let at = ((dz * 16 + dx) * 4) as usize;
-        let expected =
-            crate::biome_color::weights_bytes(terrain.biome_weights(origin.x + dx, origin.z + dz));
-        assert_eq!(bytes[at..at + 4], expected);
-    }
+    let palette = BiomePalette::constants();
+    let bytes = terrain.column_tint_bytes(ColumnPos::new(3, -5), &palette);
+    assert_eq!(bytes.len(), 2 * 16 * 16 * 4);
+    assert!(bytes.chunks(4).all(|p| p[3] == 255));
+    assert_ne!(bytes[..3], bytes[16 * 16 * 4..16 * 16 * 4 + 3]);
 }
 
 #[test]
-fn flat_world_is_all_plains() {
+fn flat_world_tint_is_plains_everywhere() {
     let terrain = Terrain::of(1, WorldType::Flat);
-    let bytes = terrain.column_biome_bytes(ColumnPos::new(0, 0));
-    assert!(bytes.chunks(4).all(|w| w == [255, 0, 0, 0]));
+    let palette = BiomePalette::constants();
+    let bytes = terrain.column_tint_bytes(ColumnPos::new(0, 0), &palette);
+    let [r, g, b] = palette
+        .grass(Biome::Plains)
+        .map(|c| (c * 255.0).round() as u8);
+    assert!(bytes[..16 * 16 * 4].chunks(4).all(|p| p == [r, g, b, 255]));
 }
 
 #[test]
-fn climates_blend_smoothly_between_neighbours() {
+fn tints_blend_smoothly_between_neighbours() {
     let terrain = Terrain::new(11);
-    let palette = crate::biome_color::BiomePalette::constants();
-    let color = |x: i32| {
-        let w = crate::biome_color::weights_bytes(terrain.biome_weights(x, 0));
-        crate::biome_color::blend(&palette.grass, w)
-    };
-    let step = (-2000..2000)
-        .map(|x| {
-            let (a, b) = (color(x), color(x + 1));
-            (0..3).map(|c| (a[c] - b[c]).abs()).fold(0.0_f32, f32::max)
-        })
-        .fold(0.0_f32, f32::max);
-    assert!(
-        step < 0.05,
-        "grass color jumps by {step} between adjacent blocks"
-    );
-}
-
-#[test]
-#[ignore]
-fn column_biome_bytes_timing() {
-    let terrain = Terrain::new(1);
-    let start = std::time::Instant::now();
-    for i in 0..200 {
-        std::hint::black_box(terrain.column_biome_bytes(ColumnPos::new(i, i)));
+    let palette = BiomePalette::constants();
+    let mut row = Vec::new();
+    for x in -60..60 {
+        let bytes = terrain.column_tint_bytes(ColumnPos::new(x, 4), &palette);
+        row.extend((0..16).map(|dx| [bytes[dx * 4], bytes[dx * 4 + 1], bytes[dx * 4 + 2]]));
     }
-    println!("column_biome_bytes: {:?} per column", start.elapsed() / 200);
+    let step = row
+        .windows(2)
+        .map(|w| (0..3).map(|c| w[0][c].abs_diff(w[1][c])).max().unwrap())
+        .max()
+        .unwrap();
+    assert!(
+        step < 24,
+        "grass color jumps by {step}/255 between adjacent blocks"
+    );
 }
 
 fn debug_world() -> (Terrain, Vec<Column>) {

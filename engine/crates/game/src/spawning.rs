@@ -25,10 +25,19 @@ const FARM_ANIMALS: [(MobKind, u32); 4] = [
 ];
 
 pub fn animals(biome: Biome) -> &'static [(MobKind, u32)] {
-    match biome {
-        Biome::Plains | Biome::Forest | Biome::Taiga => &FARM_ANIMALS,
-        Biome::Desert | Biome::Tundra => &[],
-    }
+    let barren = biome.is_ocean()
+        || biome.is_river()
+        || biome.is_desert()
+        || biome.is_mesa()
+        || matches!(
+            biome,
+            Biome::Beach
+                | Biome::StoneBeach
+                | Biome::ColdBeach
+                | Biome::MushroomIsland
+                | Biome::MushroomIslandShore
+        );
+    if barren { &[] } else { &FARM_ANIMALS }
 }
 
 pub fn pick(rng: &mut Rng, list: &[(MobKind, u32)]) -> Option<MobKind> {

@@ -1,4 +1,6 @@
+pub mod biome;
 pub mod biome_color;
+pub mod biome_map;
 pub mod block;
 mod caves;
 pub mod clouds;

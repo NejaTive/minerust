@@ -23,14 +23,6 @@ const TIME_NAMES: [(&str, i64); 4] = [
     ("midnight", MIDNIGHT_TICKS),
 ];
 
-const BIOMES: [(&str, &str, Biome); 5] = [
-    ("plains", "равнины", Biome::Plains),
-    ("desert", "пустыня", Biome::Desert),
-    ("forest", "лес", Biome::Forest),
-    ("taiga", "тайга", Biome::Taiga),
-    ("tundra", "тундра", Biome::Tundra),
-];
-
 const WEATHERS: [(&str, Weather); 3] = [
     ("clear", Weather::Clear),
     ("rain", Weather::Rain),
@@ -142,8 +134,76 @@ fn parse_ticks(spec: &Spec, text: &str) -> Result<i64, String> {
         .map_err(|_| usage_error(spec, &format!("Некорректное число тиков «{text}»")))
 }
 
-fn biome_entry(name: &str) -> Option<&'static (&'static str, &'static str, Biome)> {
-    BIOMES.iter().find(|(id, _, _)| *id == name)
+fn biome_entry(name: &str) -> Option<Biome> {
+    Biome::ALL
+        .iter()
+        .copied()
+        .find(|biome| biome.name() == name)
+}
+
+fn biome_label(biome: Biome) -> &'static str {
+    use Biome::*;
+    match biome {
+        Ocean => "океан",
+        DeepOcean => "глубокий океан",
+        FrozenOcean => "замёрзший океан",
+        River => "река",
+        FrozenRiver => "замёрзшая река",
+        Beach => "пляж",
+        StoneBeach => "каменистый берег",
+        ColdBeach => "холодный пляж",
+        Plains => "равнины",
+        SunflowerPlains => "подсолнечные равнины",
+        Desert => "пустыня",
+        DesertHills => "холмы пустыни",
+        DesertM => "пустыня M",
+        ExtremeHills => "горы",
+        ExtremeHillsPlus => "лесистые горы",
+        ExtremeHillsM => "горы M",
+        ExtremeHillsPlusM => "лесистые горы M",
+        ExtremeHillsEdge => "край гор",
+        Forest => "лес",
+        ForestHills => "лесистые холмы",
+        FlowerForest => "цветочный лес",
+        BirchForest => "берёзовый лес",
+        BirchForestHills => "холмы берёзового леса",
+        BirchForestM => "высокий берёзовый лес",
+        BirchForestHillsM => "высокие холмы берёзового леса",
+        RoofedForest => "тёмный лес",
+        RoofedForestM => "тёмный лес M",
+        Taiga => "тайга",
+        TaigaHills => "холмы тайги",
+        TaigaM => "тайга M",
+        ColdTaiga => "холодная тайга",
+        ColdTaigaHills => "холмы холодной тайги",
+        ColdTaigaM => "холодная тайга M",
+        MegaTaiga => "мегатайга",
+        MegaTaigaHills => "холмы мегатайги",
+        MegaSpruceTaiga => "мегаельник",
+        MegaSpruceTaigaHills => "холмы мегаельника",
+        Swampland => "болото",
+        SwamplandM => "болото M",
+        IcePlains => "снежные равнины",
+        IceSpikes => "ледяные шипы",
+        IceMountains => "снежные горы",
+        MushroomIsland => "грибной остров",
+        MushroomIslandShore => "берег грибного острова",
+        Jungle => "джунгли",
+        JungleHills => "холмы джунглей",
+        JungleEdge => "край джунглей",
+        JungleM => "джунгли M",
+        JungleEdgeM => "край джунглей M",
+        Savanna => "саванна",
+        SavannaPlateau => "плато саванны",
+        SavannaM => "саванна M",
+        SavannaPlateauM => "плато саванны M",
+        Mesa => "бесплодные земли",
+        MesaPlateauF => "лесистое плато бесплодных земель",
+        MesaPlateau => "плато бесплодных земель",
+        MesaBryce => "бесплодные земли Брайс",
+        MesaPlateauFM => "лесистое плато бесплодных земель M",
+        MesaPlateauM => "плато бесплодных земель M",
+    }
 }
 
 impl Game {
@@ -364,9 +424,10 @@ impl Game {
         let ["biome", name] = args else {
             return Err(usage_error(spec, "Неверные аргументы"));
         };
-        let Some(&(_, label, biome)) = biome_entry(name) else {
+        let Some(biome) = biome_entry(name) else {
             return Err(usage_error(spec, &format!("Неизвестный биом «{name}»")));
         };
+        let label = biome_label(biome);
         let origin = self.player.eye().floor().as_ivec3();
         match self.nearest_biome(origin.x, origin.z, biome) {
             Some((x, z, distance)) => Ok(Answer {
@@ -382,7 +443,7 @@ impl Game {
     }
 
     fn nearest_biome(&self, ox: i32, oz: i32, biome: Biome) -> Option<(i32, i32, i32)> {
-        if self.terrain.biome_at(ox, oz) == biome {
+        if self.terrain.sample_biome(ox, oz) == biome {
             return Some((ox, oz, 0));
         }
         if self.terrain.world_type() != WorldType::Standard {
@@ -396,7 +457,7 @@ impl Game {
             }
             for (dx, dz) in ring_cells(ring) {
                 let (x, z) = (ox + dx * LOCATE_STEP, oz + dz * LOCATE_STEP);
-                if self.terrain.biome_at(x, z) != biome {
+                if self.terrain.sample_biome(x, z) != biome {
                     continue;
                 }
                 let d2 = i64::from(x - ox).pow(2) + i64::from(z - oz).pow(2);
@@ -449,7 +510,7 @@ fn candidates(done: &[&str]) -> Vec<&'static str> {
         ["tp"] | ["tp", _] | ["tp", _, _] => vec!["~"],
         ["weather"] => WEATHERS.iter().map(|(name, _)| *name).collect(),
         ["locate"] => vec!["biome"],
-        ["locate", "biome"] => BIOMES.iter().map(|(name, _, _)| *name).collect(),
+        ["locate", "biome"] => Biome::ALL.iter().map(|biome| biome.name()).collect(),
         _ => Vec::new(),
     }
 }

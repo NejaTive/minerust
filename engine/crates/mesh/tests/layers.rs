@@ -8,7 +8,7 @@ use world::section::SECTION_SIZE;
 use world::terrain::Terrain;
 use world::world::World;
 
-const KEYS: [(i32, i32); 4] = [(-4, -11), (6, -12), (0, -12), (0, -7)];
+const KEYS: [(i32, i32); 4] = [(-19, 3), (36, 6), (22, 12), (-19, 31)];
 
 fn world_with_meshes() -> (World, Vec<(ColumnPos, Vec<SectionMeshes>)>) {
     let terrain = Terrain::new(1337);

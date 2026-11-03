@@ -7,9 +7,8 @@ use crate::section::SECTION_SIZE;
 use crate::terrain::{Biome, Terrain, WATER_LEVEL, WorldType};
 
 pub const MAX_REACH: i32 = 6;
-const FOREST_DENSITY: f32 = 0.04;
-const PLAINS_DENSITY: f32 = 0.002;
-const TUNDRA_DENSITY: f32 = 0.0004;
+const MAX_TREES_PER_CHUNK: f32 = 25.0;
+const BLOCKS_PER_CHUNK: f32 = 256.0;
 
 const SALT_SPOT: u64 = 1;
 const SALT_TRUNK: u64 = 2;
@@ -281,41 +280,68 @@ pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
 fn candidate(terrain: &Terrain, x: i32, z: i32) -> Option<Candidate> {
     let h = hash(terrain.seed(), x, z, SALT_SPOT);
     let roll = (h >> 8) as f32 / (1 << 24) as f32;
-    if roll >= FOREST_DENSITY.max(PLAINS_DENSITY) {
+    if roll >= MAX_TREES_PER_CHUNK / BLOCKS_PER_CHUNK {
         return None;
     }
-    let w = terrain.biome_weights(x, z);
-    let density = (w.forest + w.taiga) * FOREST_DENSITY
-        + w.plains * PLAINS_DENSITY
-        + w.tundra * TUNDRA_DENSITY;
-    let biome = w.dominant();
-    if biome == Biome::Desert || roll >= density {
+    let biome = terrain.biome_at(x, z);
+    if roll >= trees_per_chunk(biome) / BLOCKS_PER_CHUNK {
         return None;
     }
-    let surface = terrain.surface(x, z, w);
-    if surface <= WATER_LEVEL + 1 {
+    if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
         return None;
     }
     let kind = pick_kind(biome, hash(terrain.seed(), x, z, SALT_KIND));
     Some(Candidate { roll: h, kind })
 }
 
+// `treesPerChunk` из `BiomeDecorator` 1.12; у джунглей вместо 50 — 25, пока нет их деревьев.
+fn trees_per_chunk(biome: Biome) -> f32 {
+    use Biome::*;
+    match biome {
+        Forest | ForestHills | BirchForest | BirchForestHills | BirchForestM
+        | BirchForestHillsM | RoofedForest | RoofedForestM | Taiga | TaigaHills | TaigaM
+        | ColdTaiga | ColdTaigaHills | ColdTaigaM | MegaTaiga | MegaTaigaHills
+        | MegaSpruceTaiga | MegaSpruceTaigaHills => 10.0,
+        FlowerForest => 6.0,
+        Jungle | JungleHills | JungleM => MAX_TREES_PER_CHUNK,
+        JungleEdge | JungleEdgeM | Swampland | SwamplandM => 2.0,
+        Savanna | SavannaM | SavannaPlateau | SavannaPlateauM => 1.0,
+        ExtremeHillsPlus | ExtremeHillsPlusM => 3.0,
+        MesaPlateauF | MesaPlateauFM => 5.0,
+        Plains | SunflowerPlains => 0.5,
+        IcePlains | IceMountains => 0.1,
+        _ => 0.0,
+    }
+}
+
 fn pick_kind(biome: Biome, bits: u32) -> TreeKind {
+    use Biome::*;
     let second = (bits >> 16) % 100;
     match biome {
-        Biome::Forest => match second {
+        Forest | ForestHills | FlowerForest => match second {
             0..55 => TreeKind::Oak,
             55..88 => TreeKind::Birch,
             _ => TreeKind::BigOak,
         },
-        Biome::Taiga | Biome::Tundra => TreeKind::Spruce,
-        _ => {
-            if second < 50 {
+        BirchForest | BirchForestHills | BirchForestM | BirchForestHillsM => TreeKind::Birch,
+        RoofedForest | RoofedForestM => {
+            if second < 60 {
                 TreeKind::Oak
             } else {
-                TreeKind::Birch
+                TreeKind::BigOak
             }
         }
+        Jungle | JungleHills | JungleM | JungleEdge | JungleEdgeM => {
+            if second < 70 {
+                TreeKind::Oak
+            } else {
+                TreeKind::BigOak
+            }
+        }
+        Taiga | TaigaHills | TaigaM | ColdTaiga | ColdTaigaHills | ColdTaigaM | MegaTaiga
+        | MegaTaigaHills | MegaSpruceTaiga | MegaSpruceTaigaHills | ExtremeHillsPlus
+        | ExtremeHillsPlusM | IcePlains | IceMountains => TreeKind::Spruce,
+        _ => TreeKind::Oak,
     }
 }
 

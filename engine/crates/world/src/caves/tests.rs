@@ -1,7 +1,8 @@
 use glam::IVec2;
 
 use super::*;
-use crate::terrain::{Terrain, lake_key};
+use crate::biome::Biome;
+use crate::terrain::{Terrain, WATER_LEVEL, lake_key};
 use crate::trees::tree_at;
 
 impl Caves {
@@ -30,6 +31,17 @@ fn local(pos: IVec3) -> IVec3 {
 
 fn keys(center: ColumnPos, radius: i32) -> impl Iterator<Item = ColumnPos> {
     (-radius..=radius).flat_map(move |z| (-radius..=radius).map(move |x| center + IVec2::new(x, z)))
+}
+
+fn forest_center(terrain: &Terrain) -> ColumnPos {
+    (0..200)
+        .flat_map(|z| (-200..200).map(move |x| ColumnPos::new(x, z)))
+        .find(|key| {
+            let o = key.origin();
+            terrain.sample_biome(o.x + 8, o.z + 8) == Biome::Forest
+                && terrain.surface_height(o.x + 8, o.z + 8) > WATER_LEVEL + 3
+        })
+        .expect("no forest")
 }
 
 fn ground_and_carved(terrain: &Terrain, key: ColumnPos) -> (Column, Column) {
@@ -183,7 +195,7 @@ fn no_air_under_water() {
 fn trees_stand_on_ground() {
     let terrain = Terrain::new(1337);
     let mut trees = 0;
-    for key in keys(ColumnPos::new(0, 0), 6) {
+    for key in keys(forest_center(&terrain), 6) {
         let column = terrain.generate(key);
         let origin = key.origin();
         for z in origin.z..origin.z + 16 {
@@ -223,7 +235,7 @@ fn roof_is_opened_only_in_entrances() {
     let terrain = Terrain::new(1337);
     let caves = &terrain.caves;
     let mut openings = 0;
-    for key in keys(ColumnPos::new(0, 0), 8) {
+    for key in keys(forest_center(&terrain), 8) {
         let (ground, carved) = ground_and_carved(&terrain, key);
         let origin = key.origin();
         for z in origin.z..origin.z + 16 {

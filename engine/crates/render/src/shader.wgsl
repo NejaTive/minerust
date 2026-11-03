@@ -130,13 +130,10 @@ struct TileAnim {
 @group(0) @binding(3)
 var<uniform> animation: array<TileAnim, 28>;
 
-// Веса биомов (равнины, пустыня, лес, тайга) на блок, тор BIOME_MAP_SIZE по x и z; пишет
-// `Renderer::set_biome_column`. Палитра — `BiomePalette::to_bytes`: четыре цвета травы,
-// затем четыре цвета листвы, в том же порядке биомов.
+// Цвет травы (верхняя половина) и листвы (нижняя, на BIOME_MAP_SIZE ниже) на блок, тор
+// BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
 @group(0) @binding(11)
 var biome_map: texture_2d<f32>;
-@group(0) @binding(12)
-var<uniform> biome_palette: array<vec4<f32>, 8>;
 
 // Раскладка — `ShadowData` в shadow.rs; light = (на источник, сила), params.w — сила теней облаков.
 // Без теней блоков пишутся только light.xyz и params.w.
@@ -337,14 +334,8 @@ const BIOME_MAP_SIZE: i32 = 1024;
 
 fn biome_color(kind: f32, world_pos: vec3<f32>) -> vec3<f32> {
     let cell = vec2<i32>(floor(world_pos.xz)) & vec2<i32>(BIOME_MAP_SIZE - 1);
-    let w = textureLoad(biome_map, cell, 0);
-    let base = select(0u, 4u, kind > 1.5);
-    let sum = w.x + w.y + w.z + w.w;
-    let weights = select(vec4<f32>(1.0, 0.0, 0.0, 0.0), w / max(sum, 1e-4), sum > 0.001);
-    return biome_palette[base].rgb * weights.x
-        + biome_palette[base + 1u].rgb * weights.y
-        + biome_palette[base + 2u].rgb * weights.z
-        + biome_palette[base + 3u].rgb * weights.w;
+    let layer = select(0, BIOME_MAP_SIZE, kind > 1.5);
+    return textureLoad(biome_map, cell + vec2<i32>(0, layer), 0).rgb;
 }
 
 fn block_albedo(uv: vec2<f32>, slot: u32, world_pos: vec3<f32>) -> vec4<f32> {

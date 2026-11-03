@@ -2,14 +2,13 @@ use world::pos::ColumnPos;
 use world::section::SECTION_SIZE;
 
 pub const BIOME_MAP_SIZE: u32 = 1024;
-pub const PALETTE_BYTES: u64 = 8 * 16;
 
 pub(crate) fn create_biome_map(device: &wgpu::Device) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("biome weights"),
+        label: Some("biome tints"),
         size: wgpu::Extent3d {
             width: BIOME_MAP_SIZE,
-            height: BIOME_MAP_SIZE,
+            height: 2 * BIOME_MAP_SIZE,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -30,29 +29,36 @@ pub(crate) fn upload_biome_column(
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
     key: ColumnPos,
-    weights: &[u8],
+    tints: &[u8],
 ) {
     let (x, z) = column_origin(key);
     let side = SECTION_SIZE as u32;
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d { x, y: z, z: 0 },
-            aspect: wgpu::TextureAspect::All,
-        },
-        weights,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(side * 4),
-            rows_per_image: Some(side),
-        },
-        wgpu::Extent3d {
-            width: side,
-            height: side,
-            depth_or_array_layers: 1,
-        },
-    );
+    let plane = (side * side * 4) as usize;
+    for (n, bytes) in tints.chunks_exact(plane).take(2).enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x,
+                    y: z + n as u32 * BIOME_MAP_SIZE,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(side * 4),
+                rows_per_image: Some(side),
+            },
+            wgpu::Extent3d {
+                width: side,
+                height: side,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
 }
 
 #[cfg(test)]

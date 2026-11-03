@@ -2,13 +2,14 @@ use std::collections::HashMap;
 
 use glam::{IVec3, Mat4, Vec2, Vec3};
 use mesh::mesher::SectionMeshes;
+use world::biome_color::BiomePalette;
 use world::block::{Block, FluidKind};
 use world::clouds::{CloudMask, cloud_threshold, coverage_for_rain};
 use world::column::WORLD_HEIGHT;
 use world::pos::{ColumnPos, SectionPos};
 use world::section::SECTION_SIZE;
 
-use crate::biome::{PALETTE_BYTES, create_biome_map, upload_biome_column};
+use crate::biome::{create_biome_map, upload_biome_column};
 use crate::bloom::BloomPipelines;
 use crate::clouds::{
     CLOUD_INSTANCES, CLOUD_VERTICES, cloud_color, cloud_shadow_strength, create_cloud_texture,
@@ -85,7 +86,6 @@ struct GlobalSources {
     cloud_view: wgpu::TextureView,
     rain_cover_view: wgpu::TextureView,
     biome_view: wgpu::TextureView,
-    biome_palette: wgpu::Buffer,
     rain_tile_view: wgpu::TextureView,
     shadow_buffer: wgpu::Buffer,
     shadow_sampler: wgpu::Sampler,
@@ -138,10 +138,6 @@ impl GlobalSources {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: wgpu::BindingResource::TextureView(&self.biome_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 12,
-                    resource: self.biome_palette.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 8,
@@ -215,6 +211,7 @@ pub struct Renderer {
     cloud_texture: wgpu::Texture,
     rain_cover_texture: wgpu::Texture,
     biome_texture: wgpu::Texture,
+    biome_palette: BiomePalette,
     entity_buffer: wgpu::Buffer,
     entity_capacity: u64,
     entity_layout: wgpu::BindGroupLayout,
@@ -479,7 +476,6 @@ impl Renderer {
                     },
                     count: None,
                 },
-                uniform_entry(12, wgpu::ShaderStages::FRAGMENT),
             ],
         });
         let rain_tile_view = create_rain_tile_texture(&device, &queue);
@@ -488,13 +484,6 @@ impl Renderer {
             rain_cover_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let biome_texture = create_biome_map(&device);
         let biome_view = biome_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let biome_palette = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("biome palette"),
-            size: PALETTE_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&biome_palette, 0, &standard.palette().to_bytes());
         let cloud_texture = create_cloud_texture(&device);
         let cloud_view = cloud_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let shadow_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -510,7 +499,6 @@ impl Renderer {
             cloud_view,
             rain_cover_view,
             biome_view,
-            biome_palette,
             rain_tile_view,
             shadow_buffer,
             shadow_sampler: comparison_sampler(&device),
@@ -652,6 +640,7 @@ impl Renderer {
             cloud_texture,
             rain_cover_texture,
             biome_texture,
+            biome_palette: standard.palette().clone(),
             entity_buffer,
             entity_capacity: ENTITY_BUFFER_START,
             entity_layout,
@@ -749,16 +738,16 @@ impl Renderer {
         );
     }
 
-    pub fn set_biome_column(&self, key: ColumnPos, weights: &[u8]) {
-        upload_biome_column(&self.queue, &self.biome_texture, key, weights);
+    pub fn set_biome_column(&self, key: ColumnPos, tints: &[u8]) {
+        upload_biome_column(&self.queue, &self.biome_texture, key, tints);
+    }
+
+    pub fn biome_palette(&self) -> &BiomePalette {
+        &self.biome_palette
     }
 
     pub fn set_textures(&mut self, textures: &TextureSet) {
-        self.queue.write_buffer(
-            &self.global_sources.biome_palette,
-            0,
-            &textures.palette().to_bytes(),
-        );
+        self.biome_palette = textures.palette().clone();
         self.global_sources.block_textures =
             create_block_textures(&self.device, &self.queue, textures);
         self.global_sources.animation_table = create_animation_table(&self.device, textures);

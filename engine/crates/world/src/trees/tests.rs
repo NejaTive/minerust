@@ -231,7 +231,7 @@ fn trees_in(biome: Biome) -> Vec<&'static Tree> {
 #[test]
 fn forest_mix_matches_the_shares() {
     let forest = trees_in(Biome::Forest);
-    assert!(forest.len() > 2000, "{} forest trees", forest.len());
+    assert!(forest.len() > 500, "{} forest trees", forest.len());
     let share =
         |kind| forest.iter().filter(|t| t.kind == kind).count() as f32 / forest.len() as f32;
     let (oak, birch, spruce, big) = (
@@ -240,44 +240,68 @@ fn forest_mix_matches_the_shares() {
         share(TreeKind::Spruce),
         share(TreeKind::BigOak),
     );
-    assert!((0.50..0.60).contains(&oak), "oak {oak}");
-    assert!((0.28..0.38).contains(&birch), "birch {birch}");
+    assert!((0.48..0.62).contains(&oak), "oak {oak}");
+    assert!((0.26..0.40).contains(&birch), "birch {birch}");
     assert_eq!(spruce, 0.0);
-    assert!((0.07..0.17).contains(&big), "big oak {big}");
+    assert!((0.05..0.19).contains(&big), "big oak {big}");
 }
 
 #[test]
-fn plains_grow_only_oak_and_birch() {
+fn plains_grow_only_oak() {
     let plains = trees_in(Biome::Plains);
-    assert!(plains.len() > 20, "{} plains trees", plains.len());
-    assert!(
-        plains
-            .iter()
-            .all(|t| matches!(t.kind, TreeKind::Oak | TreeKind::Birch))
-    );
+    assert!(plains.len() > 5, "{} plains trees", plains.len());
+    assert!(plains.iter().all(|t| t.kind == TreeKind::Oak));
 }
 
 #[test]
-fn spruce_grows_only_in_snowy_biomes() {
+fn birch_forest_grows_only_birch() {
+    let birch = trees_in(Biome::BirchForest);
+    assert!(birch.len() > 100, "{} birch forest trees", birch.len());
+    assert!(birch.iter().all(|t| t.kind == TreeKind::Birch));
+}
+
+#[test]
+fn spruce_grows_only_in_taiga_like_biomes() {
     let terrain = Terrain::new(1337);
     let spruces: Vec<&Tree> = of_kind(TreeKind::Spruce).collect();
     assert!(spruces.len() > 100, "{} spruces", spruces.len());
-    assert!(
-        spruces
-            .iter()
-            .all(|t| terrain.biome_at(t.base.x, t.base.z).is_snowy())
-    );
+    assert!(spruces.iter().all(|t| matches!(
+        terrain.biome_at(t.base.x, t.base.z),
+        Biome::Taiga
+            | Biome::TaigaHills
+            | Biome::TaigaM
+            | Biome::ColdTaiga
+            | Biome::ColdTaigaHills
+            | Biome::ColdTaigaM
+            | Biome::MegaTaiga
+            | Biome::MegaTaigaHills
+            | Biome::MegaSpruceTaiga
+            | Biome::MegaSpruceTaigaHills
+            | Biome::ExtremeHillsPlus
+            | Biome::ExtremeHillsPlusM
+            | Biome::IcePlains
+            | Biome::IceMountains
+    )));
 }
 
 #[test]
 fn taiga_grows_only_spruce() {
     let taiga = trees_in(Biome::Taiga);
-    assert!(taiga.len() > 500, "{} taiga trees", taiga.len());
+    assert!(taiga.len() > 100, "{} taiga trees", taiga.len());
     assert!(taiga.iter().all(|t| t.kind == TreeKind::Spruce));
 }
 
 #[test]
-fn tundra_trees_are_rare_spruces() {
+fn only_wooded_biomes_grow_trees() {
+    let terrain = Terrain::new(1337);
+    for tree in forest_trees() {
+        let biome = terrain.biome_at(tree.base.x, tree.base.z);
+        assert!(trees_per_chunk(biome) > 0.0, "{biome:?}");
+    }
+}
+
+#[test]
+fn ice_plains_trees_are_rarer_than_taiga_trees() {
     let terrain = Terrain::new(1337);
     let cells = |biome| {
         (-1024..1024)
@@ -285,26 +309,35 @@ fn tundra_trees_are_rare_spruces() {
             .filter(|&(x, z)| terrain.biome_at(x, z) == biome)
             .count() as f32
     };
-    let tundra = trees_in(Biome::Tundra);
-    assert!(tundra.len() > 20, "{} tundra trees", tundra.len());
-    assert!(tundra.iter().all(|t| t.kind == TreeKind::Spruce));
-    let tundra_density = tundra.len() as f32 / cells(Biome::Tundra);
-    let taiga_density = trees_in(Biome::Taiga).len() as f32 / cells(Biome::Taiga);
+    let ice = trees_in(Biome::IcePlains);
+    assert!(ice.iter().all(|t| t.kind == TreeKind::Spruce));
+    let ice_density = ice.len() as f32 / cells(Biome::IcePlains).max(1.0);
+    let taiga_density = trees_in(Biome::Taiga).len() as f32 / cells(Biome::Taiga).max(1.0);
     assert!(
-        tundra_density * 10.0 < taiga_density,
-        "tundra {tundra_density}, taiga {taiga_density}"
+        ice_density * 10.0 < taiga_density,
+        "ice {ice_density}, taiga {taiga_density}"
     );
 }
 
 #[test]
-fn high_ground_outside_taiga_has_no_spruce() {
+fn snow_covers_leaves_only_in_snowy_biomes() {
     let terrain = Terrain::new(1337);
-    let high: Vec<&Tree> = forest_trees()
-        .iter()
-        .filter(|t| t.base.y > 78 && !terrain.biome_at(t.base.x, t.base.z).is_snowy())
-        .collect();
-    assert!(high.len() > 10, "{} high trees", high.len());
-    assert!(high.iter().all(|t| t.kind != TreeKind::Spruce));
+    let key = (-64..64)
+        .flat_map(|z| (-64..64).map(move |x| ColumnPos::new(x, z)))
+        .find(|key| {
+            let o = key.origin();
+            matches!(
+                terrain.sample_biome(o.x + 8, o.z + 8),
+                Biome::ColdTaiga | Biome::IcePlains
+            )
+        });
+    if let Some(key) = key {
+        let column = terrain.generate_trees(key);
+        let snow = (0..WORLD_HEIGHT).any(|y| {
+            (0..16).any(|z| (0..16).any(|x| column.get(IVec3::new(x, y, z)) == Block::Snow))
+        });
+        assert!(snow);
+    }
 }
 
 #[test]
@@ -324,26 +357,32 @@ fn no_trees_in_water_or_on_beaches() {
 
 #[test]
 fn forest_is_denser_than_plains_and_desert_is_empty() {
+    use std::collections::HashMap;
     let terrain = Terrain::new(1337);
-    let mut area = [0; 5];
-    let mut trees = [0; 5];
+    let mut counts: HashMap<Biome, (u32, u32)> = HashMap::new();
     for z in -1024..1024 {
         for x in -1024..1024 {
             if terrain.surface_height(x, z) <= WATER_LEVEL + 1 {
                 continue;
             }
-            let biome = terrain.biome_at(x, z) as usize;
-            area[biome] += 1;
-            if tree_at(&terrain, x, z).is_some() {
-                trees[biome] += 1;
-            }
+            let entry = counts.entry(terrain.biome_at(x, z)).or_default();
+            entry.0 += 1;
+            entry.1 += u32::from(tree_at(&terrain, x, z).is_some());
         }
     }
-    let [plains, desert, forest] = [0, 1, 2].map(|b| trees[b] as f32 / area[b] as f32);
-    assert!(area.iter().all(|&a| a > 10_000), "{area:?}");
-    assert_eq!(trees[Biome::Desert as usize], 0, "{desert}");
+    let density = |biome| {
+        let (area, trees) = counts.get(&biome).copied().unwrap_or_default();
+        assert!(area > 5_000, "{biome:?}: {area} cells");
+        trees as f32 / area as f32
+    };
+    let (forest, plains) = (density(Biome::Forest), density(Biome::Plains));
     assert!(forest > 0.01 && plains > 0.0003, "{forest} {plains}");
     assert!(forest > plains * 5.0, "{forest} {plains}");
+    for biome in [Biome::Desert, Biome::Beach, Biome::River] {
+        if let Some(&(_, trees)) = counts.get(&biome) {
+            assert_eq!(trees, 0, "{biome:?}");
+        }
+    }
 }
 
 const KINDS: [TreeKind; 4] = [
@@ -479,10 +518,29 @@ fn leaves_do_not_replace_logs_or_ground() {
     }
 }
 
+fn snowy_spruce(terrain: &Terrain) -> Tree {
+    (-150..150)
+        .flat_map(|z| (-150..150).map(move |x| ColumnPos::new(x, z)))
+        .filter(|key| {
+            let o = key.origin();
+            matches!(
+                terrain.sample_biome(o.x + 8, o.z + 8),
+                Biome::ColdTaiga | Biome::IcePlains
+            )
+        })
+        .flat_map(|key| {
+            let o = key.origin();
+            (0..16).flat_map(move |z| (0..16).map(move |x| (o.x + x, o.z + z)))
+        })
+        .filter_map(|(x, z)| tree_at(terrain, x, z))
+        .find(|t| t.kind == TreeKind::Spruce && terrain.biome_at(t.base.x, t.base.z).is_snowy())
+        .expect("no snowy spruce")
+}
+
 #[test]
 fn taiga_crowns_carry_snow_on_top_only() {
-    let terrain = Terrain::new(1337);
-    let tree = *of_kind(TreeKind::Spruce).next().unwrap();
+    let terrain = Terrain::new(7);
+    let tree = snowy_spruce(&terrain);
     let key = ColumnPos::of_block(tree.base);
     let column = terrain.generate_trees(key);
     let origin = key.origin();

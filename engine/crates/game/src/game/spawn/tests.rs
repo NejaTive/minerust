@@ -16,7 +16,7 @@ const CYCLES: usize = 600;
 
 fn biome_of(game: &Game, key: ColumnPos) -> Biome {
     let origin = key.origin();
-    game.terrain.biome_at(origin.x + 8, origin.z + 8)
+    game.terrain.sample_biome(origin.x + 8, origin.z + 8)
 }
 
 fn keys_in(seed: i32, biomes: &[Biome], count: usize) -> Vec<ColumnPos> {
@@ -85,7 +85,7 @@ fn herds_appear_on_grass_in_plains_but_not_in_desert_or_tundra() {
         herds += records.len();
     }
     assert!(herds > 0);
-    for key in keys_in(21, &[Biome::Desert, Biome::Tundra], 40) {
+    for key in keys_in(21, &[Biome::Desert, Biome::Ocean, Biome::River], 40) {
         load_generated(&mut game, key);
         assert!(game.generation_herds(key).is_empty());
     }
