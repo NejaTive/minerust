@@ -6,6 +6,7 @@ export interface KeyInfo {
   ctrlKey: boolean
   metaKey: boolean
   altKey: boolean
+  shiftKey?: boolean
 }
 
 export type KeyCommand =
@@ -33,4 +34,8 @@ export function classifyKeyDown(e: KeyInfo, locked: boolean, showDebug: boolean)
   const digit = /^Digit([1-9])$/.exec(e.code)
   if (digit) return hasModifier(e) ? NONE : { type: 'slot', slot: Number(digit[1]) - 1 }
   return { type: 'key' }
+}
+
+export function isConsoleOpenKey(e: KeyInfo, locked: boolean): boolean {
+  return locked && !e.repeat && e.code === 'Slash' && !hasModifier(e) && !e.shiftKey
 }

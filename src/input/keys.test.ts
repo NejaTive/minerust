@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyKeyDown, type KeyInfo } from './keys'
+import { classifyKeyDown, isConsoleOpenKey, type KeyInfo } from './keys'
 
 const key = (code: string, extra: Partial<KeyInfo> = {}): KeyInfo => ({
   code,
@@ -60,5 +60,16 @@ describe('classifyKeyDown', () => {
   it('автоповтор обычной клавиши игнорируется, остальное уходит в движок', () => {
     expect(classifyKeyDown(key('KeyW', { repeat: true }), true, false)).toEqual({ type: 'none' })
     expect(classifyKeyDown(key('KeyW'), true, false)).toEqual({ type: 'key' })
+  })
+})
+
+describe('isConsoleOpenKey', () => {
+  it('открывает консоль только по / при захваченном курсоре', () => {
+    expect(isConsoleOpenKey(key('Slash'), true)).toBe(true)
+    expect(isConsoleOpenKey(key('Slash'), false)).toBe(false)
+    expect(isConsoleOpenKey(key('Slash', { repeat: true }), true)).toBe(false)
+    expect(isConsoleOpenKey(key('Slash', { shiftKey: true }), true)).toBe(false)
+    expect(isConsoleOpenKey(key('Slash', { ctrlKey: true }), true)).toBe(false)
+    expect(isConsoleOpenKey(key('KeyT'), true)).toBe(false)
   })
 })

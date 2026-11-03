@@ -115,6 +115,8 @@ pub struct Player {
     pub auto_step: bool,
     pub step_offset: f32,
     pub terminal_speed: f32,
+    pub walk_multiplier: f32,
+    pub fly_multiplier: f32,
 }
 
 impl Player {
@@ -134,6 +136,8 @@ impl Player {
             auto_step: true,
             step_offset: 0.0,
             terminal_speed: TERMINAL_SPEED,
+            walk_multiplier: 1.0,
+            fly_multiplier: 1.0,
         }
     }
 
@@ -282,11 +286,12 @@ impl Player {
                 self.velocity.y = vy;
             }
             Mode::Walking => {
-                let speed = if self.sprinting {
-                    WALK_SPEED * SPRINT_FACTOR
-                } else {
-                    WALK_SPEED
-                };
+                let speed = self.walk_multiplier
+                    * if self.sprinting {
+                        WALK_SPEED * SPRINT_FACTOR
+                    } else {
+                        WALK_SPEED
+                    };
                 let target = Vec2::new(wish.x, wish.z) * speed;
                 let current = Vec2::new(self.velocity.x, self.velocity.z);
                 let horizontal = if self.on_ice(&collision) {
@@ -304,11 +309,12 @@ impl Player {
                 self.velocity.y = (self.velocity.y - GRAVITY * TICK).max(-self.terminal_speed);
             }
             Mode::Flying | Mode::Noclip => {
-                let speed = if self.sprinting {
-                    FLY_SPEED * FLY_SPRINT_FACTOR
-                } else {
-                    FLY_SPEED
-                };
+                let speed = self.fly_multiplier
+                    * if self.sprinting {
+                        FLY_SPEED * FLY_SPRINT_FACTOR
+                    } else {
+                        FLY_SPEED
+                    };
                 self.velocity = (wish + Vec3::Y * vertical).clamp_length_max(1.0) * speed;
             }
         }

@@ -903,3 +903,64 @@ fn ice_keeps_sliding_after_the_keys_are_released() {
 fn ice_friction_is_a_separate_constant_below_air_control() {
     const { assert!(ICE_ACCEL > 0.0 && ICE_ACCEL < AIR_ACCEL) };
 }
+
+fn flying() -> Player {
+    Player::new(Vec3::new(0.5, GROUND + 5.0, 0.5), Mode::Flying)
+}
+
+#[test]
+fn walk_multiplier_scales_distance() {
+    let solid = world(&[]);
+    let mut base = standing();
+    let mut fast = standing();
+    fast.walk_multiplier = 5.0;
+    run(&mut base, FORWARD, 0.0, 30, &solid);
+    run(&mut fast, FORWARD, 0.0, 30, &solid);
+    let ratio = (fast.feet.x - 0.5) / (base.feet.x - 0.5);
+    assert!((ratio - 5.0).abs() < 0.01, "{ratio}");
+}
+
+#[test]
+fn fly_multiplier_scales_distance() {
+    let solid = world(&[]);
+    let mut base = flying();
+    let mut fast = flying();
+    fast.fly_multiplier = 3.0;
+    run(&mut base, FORWARD, 0.0, 30, &solid);
+    run(&mut fast, FORWARD, 0.0, 30, &solid);
+    let ratio = (fast.feet.x - 0.5) / (base.feet.x - 0.5);
+    assert!((ratio - 3.0).abs() < 0.01, "{ratio}");
+}
+
+#[test]
+fn max_speed_flight_does_not_tunnel_through_thin_wall() {
+    let solid = world(&wall_x(20));
+    let mut player = flying();
+    player.fly_multiplier = 10.0;
+    player.sprinting = true;
+    for _ in 0..60 {
+        player.sprinting = true;
+        player.step(&FORWARD, 0.0, &solid, dry);
+    }
+    assert!(
+        player.feet.x < 20.0 - player.width / 2.0 + 0.001,
+        "{}",
+        player.feet.x
+    );
+}
+
+#[test]
+fn max_speed_walk_does_not_tunnel_through_thin_wall() {
+    let solid = world(&wall_x(20));
+    let mut player = standing();
+    player.walk_multiplier = 10.0;
+    for _ in 0..120 {
+        player.sprinting = true;
+        player.step(&FORWARD, 0.0, &solid, dry);
+    }
+    assert!(
+        player.feet.x < 20.0 - player.width / 2.0 + 0.001,
+        "{}",
+        player.feet.x
+    );
+}

@@ -328,6 +328,10 @@ impl Game {
         }
     }
 
+    pub fn weather_enabled(&self) -> bool {
+        self.weather_enabled
+    }
+
     pub fn set_weather_enabled(&mut self, enabled: bool) {
         self.weather_enabled = enabled;
     }
@@ -897,6 +901,8 @@ fn restore_player(state: &[f32]) -> Option<(Camera, Player)> {
     let player = Player::new(camera.position - Vec3::Y * EYE_HEIGHT, mode);
     Some((camera, player))
 }
+
+mod command;
 
 #[cfg(test)]
 mod tests;
