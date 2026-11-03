@@ -26,6 +26,50 @@ thread_local! {
 }
 
 #[wasm_bindgen]
+pub struct CommandResult {
+    ok: bool,
+    text: String,
+    suggest: Option<String>,
+}
+
+#[wasm_bindgen]
+impl CommandResult {
+    #[wasm_bindgen(getter)]
+    pub fn ok(&self) -> bool {
+        self.ok
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn text(&self) -> String {
+        self.text.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn suggest(&self) -> Option<String> {
+        self.suggest.clone()
+    }
+}
+
+#[wasm_bindgen]
+pub struct CommandCompletion {
+    start: usize,
+    options: Vec<String>,
+}
+
+#[wasm_bindgen]
+impl CommandCompletion {
+    #[wasm_bindgen(getter)]
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn options(&self) -> Vec<String> {
+        self.options.clone()
+    }
+}
+
+#[wasm_bindgen]
 pub struct PackInfo {
     description: String,
     icon: Option<Vec<u8>>,
@@ -360,6 +404,27 @@ impl Engine {
 
     pub fn cycle_weather(&mut self) {
         self.game.cycle_weather();
+    }
+
+    pub fn run_command(&mut self, line: &str) -> CommandResult {
+        let out = self.game.run_command(line);
+        CommandResult {
+            ok: out.ok,
+            text: out.text,
+            suggest: out.suggest,
+        }
+    }
+
+    pub fn complete_command(&self, line: &str) -> CommandCompletion {
+        let out = self.game.complete_command(line);
+        CommandCompletion {
+            start: out.start,
+            options: out.options,
+        }
+    }
+
+    pub fn command_usage(&self, line: &str) -> String {
+        self.game.command_usage(line)
     }
 
     pub fn weather(&self) -> String {

@@ -19,6 +19,7 @@ import { NoWebGpuError, hasWebGpu } from './gpu'
 import { FrameLoop, createEngine } from './host'
 import { MeshPool } from './mesh-pool'
 import { engineInfo } from './info'
+import { bindConsole, resetConsole, resetConsoleInput } from './console'
 import { gameState as state, notify, resetGameState } from './state'
 import { engineTarget, texturePacks } from './useTexturePack'
 
@@ -45,6 +46,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
   let stopAutosave: (() => void) | undefined
   let mode: InventoryMode = 'idle'
   let graceTimer = 0
+  let consoleScreen = false
   const modeIs = (value: InventoryMode) => mode === value
 
   function setMode(next: InventoryMode) {
@@ -56,7 +58,12 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
         INVENTORY_LOCK_GRACE_MS,
       )
     }
-    Object.assign(state, inventoryFlags(next))
+    const flags = inventoryFlags(next)
+    if (!flags.inventoryOpen) consoleScreen = false
+    Object.assign(state, flags, {
+      inventoryOpen: flags.inventoryOpen && !consoleScreen,
+      consoleOpen: flags.inventoryOpen && consoleScreen,
+    })
   }
 
   function setSwitching(value: boolean) {
@@ -94,9 +101,17 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
       void save()
     },
     inventoryGrace: () => mode === 'grace',
-    inventoryOpen: () => state.inventoryOpen,
+    inventoryOpen: () => state.inventoryOpen || state.consoleOpen,
+    consoleOpen: () => state.consoleOpen,
     openInventory() {
       if (!engine.value || switching || mode === 'lock-lost') return
+      setMode('inventory')
+      beginInventory(engine.value)
+    },
+    openConsole() {
+      if (!engine.value || switching || mode === 'lock-lost') return
+      consoleScreen = true
+      resetConsoleInput()
       setMode('inventory')
       beginInventory(engine.value)
     },
@@ -155,6 +170,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     applyBlock(created, block.value)
     await texturePacks.attach(engineTarget(created))
     engine.value = created
+    bindConsole(created, () => void closeInventory())
     state.ready = true
     pool = BENCH_WORKERS ? startPool(created) : undefined
     loop = new FrameLoop(created, el, {
@@ -185,6 +201,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     setMode('idle')
     if (document.pointerLockElement === canvas.value) document.exitPointerLock()
     void texturePacks.attach(undefined)
+    bindConsole(undefined)
     engine.value?.free()
     engine.value = undefined
   }
@@ -226,6 +243,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     stop()
     input.unbind()
     resetHotbar()
+    resetConsole()
     resetGameState()
   })
 

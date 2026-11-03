@@ -11,7 +11,7 @@ const canvas = ref<HTMLCanvasElement>()
 const { requestLock, releaseCursor, save } = useEngine(canvas, props.worldId)
 
 function onCanvasClick() {
-  if (gameState.locked || gameState.inventoryOpen) return
+  if (gameState.locked || gameState.inventoryOpen || gameState.consoleOpen) return
   emit('canvas-click')
 }
 

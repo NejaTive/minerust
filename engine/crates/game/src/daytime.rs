@@ -8,6 +8,9 @@ pub const DAY_END: f32 = 0.5;
 pub const DUSK_END: f32 = 0.575;
 pub const NIGHT_END: f32 = 0.925;
 
+pub const MC_TICKS_PER_DAY: u32 = 24_000;
+const TICKS_PER_MC_TICK: u32 = TICKS_PER_DAY / MC_TICKS_PER_DAY;
+
 pub const NOON: f32 = 0.25;
 
 pub const MORNING: f32 = 0.02;
@@ -148,6 +151,15 @@ impl DayTime {
 
     pub fn fraction(self) -> f32 {
         self.0 as f32 / TICKS_PER_DAY as f32
+    }
+
+    pub fn from_mc_ticks(ticks: i64) -> Self {
+        let mc = ticks.rem_euclid(i64::from(MC_TICKS_PER_DAY)) as u32;
+        Self(mc * TICKS_PER_MC_TICK)
+    }
+
+    pub fn mc_ticks(self) -> u32 {
+        self.0 / TICKS_PER_MC_TICK
     }
 
     pub fn advance(&mut self, ticks: u32) {

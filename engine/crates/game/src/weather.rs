@@ -136,6 +136,11 @@ impl WeatherState {
         self.begin(kind);
     }
 
+    pub fn set_kind_for(&mut self, kind: Weather, seconds: u32) {
+        self.set_kind(kind);
+        self.remaining = (seconds as f32 / TICK).round() as u32;
+    }
+
     fn begin(&mut self, kind: Weather) {
         self.kind = kind;
         let range = match kind {

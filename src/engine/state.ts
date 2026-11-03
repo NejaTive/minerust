@@ -15,6 +15,7 @@ const initialState = () => ({
   newerSave: false,
   locked: false,
   inventoryOpen: false,
+  consoleOpen: false,
   lockLost: false,
   busy: true,
   error: undefined as string | undefined,

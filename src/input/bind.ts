@@ -1,4 +1,4 @@
-import { classifyKeyDown, GAME_KEYS } from './keys'
+import { classifyKeyDown, GAME_KEYS, isConsoleOpenKey } from './keys'
 import { armMouseGuard, filterMouseDelta, type MouseGuard } from './mouse-guard'
 import { releasePointerLock, requestPointerLock } from './pointer-lock'
 import { stepSlot, WheelAccumulator } from './wheel'
@@ -17,6 +17,8 @@ export interface InputTarget {
   inventoryOpen(): boolean
   openInventory(): void
   closeInventory(): void
+  consoleOpen(): boolean
+  openConsole(): void
 }
 
 export interface InputEngine {
@@ -75,6 +77,18 @@ export function bindInput(target: InputTarget): { unbind(): void; isLocked(): bo
     if (step !== 0) target.selectSlot(stepSlot(target.slot(), step, target.slotCount))
   }
   const onKeyDown = (e: KeyboardEvent) => {
+    if (target.consoleOpen()) {
+      if (e.code === 'Escape') {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+      }
+      return
+    }
+    if (isConsoleOpenKey(e, locked)) {
+      e.preventDefault()
+      target.openConsole()
+      return
+    }
     const inv = target.inventoryOpen()
     if (e.code === 'KeyE' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (inv) {

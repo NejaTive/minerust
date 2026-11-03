@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 import GameCanvas from './components/GameCanvas.vue'
 import Hotbar from './components/Hotbar.vue'
 import Hud from './components/Hud.vue'
+import CommandConsole from './components/CommandConsole.vue'
+import CommandLog from './components/CommandLog.vue'
 import Inventory from './components/Inventory.vue'
 import MenuOverlay from './components/MenuOverlay.vue'
 import type { MenuScreen } from './components/menu/screens'
@@ -117,10 +119,19 @@ async function exitToMenu() {
       :show-debug="settings.showDebug"
     />
     <Hotbar v-if="state.locked && state.ready" :slot-index="slot" />
+    <CommandLog v-if="state.ready" />
     <Inventory v-if="state.inventoryOpen && state.ready" />
+    <CommandConsole v-if="state.consoleOpen && state.ready" />
   </template>
   <MenuOverlay
-    v-if="!BENCH && overlay === 'none' && !state.locked && !state.inventoryOpen && !state.lockLost"
+    v-if="
+      !BENCH &&
+      overlay === 'none' &&
+      !state.locked &&
+      !state.inventoryOpen &&
+      !state.consoleOpen &&
+      !state.lockLost
+    "
     v-model:screen="screen"
     :in-world="session.inWorld.value"
     :settings="settings"
