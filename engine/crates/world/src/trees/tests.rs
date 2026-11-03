@@ -416,7 +416,10 @@ fn crowns_cross_columns_seamlessly() {
 
 fn assert_seamless(kind: TreeKind) {
     let terrain = Terrain::new(1337);
-    let tree = border_tree(&terrain, kind);
+    assert_tree_seamless(&terrain, border_tree(&terrain, kind));
+}
+
+fn assert_tree_seamless(terrain: &Terrain, tree: Tree) {
     let center = ColumnPos::of_block(tree.base);
     let leaf_columns: HashSet<_> = tree
         .leaves()
@@ -451,7 +454,7 @@ fn assert_seamless(kind: TreeKind) {
     }
     let trees: Vec<Tree> = (min.y..min.y + size)
         .flat_map(|z| (min.x..min.x + size).map(move |x| (x, z)))
-        .filter_map(|(x, z)| tree_at(&terrain, x, z))
+        .filter_map(|(x, z)| tree_at(terrain, x, z))
         .collect();
     for tree in &trees {
         for (log, _) in tree.logs() {
@@ -498,6 +501,7 @@ fn assert_seamless(kind: TreeKind) {
                         if from_edge >= MAX_REACH {
                             let without_snow = |block| match block {
                                 Block::Snow => Block::Air,
+                                Block::Podzol | Block::CoarseDirt | Block::Grass => Block::Dirt,
                                 block => block,
                             };
                             assert_eq!(
@@ -982,5 +986,187 @@ fn huge_mushrooms_have_a_stem_and_a_cap_of_their_own_blocks() {
             };
             assert_eq!(extent(tree), reach);
         }
+    }
+}
+
+fn trees_of_biome(biome: Biome, columns: usize) -> Vec<Tree> {
+    static TERRAIN: OnceLock<Terrain> = OnceLock::new();
+    let terrain = TERRAIN.get_or_init(|| Terrain::new(1337));
+    let mut found = Vec::new();
+    let mut seen = 0;
+    for z in (-600..600).step_by(2) {
+        for x in (-600..600).step_by(2) {
+            let key = ColumnPos::new(x, z);
+            let origin = key.origin();
+            if terrain.sample_biome(origin.x + 8, origin.z + 8) != biome {
+                continue;
+            }
+            seen += 1;
+            for bz in 0..SECTION_SIZE {
+                for bx in 0..SECTION_SIZE {
+                    found.extend(
+                        tree_at(terrain, origin.x + bx, origin.z + bz)
+                            .filter(|t| terrain.biome_at(t.base.x, t.base.z) == biome),
+                    );
+                }
+            }
+            if seen >= columns {
+                return found;
+            }
+        }
+    }
+    found
+}
+
+fn share_of(trees: &[Tree], kind: TreeKind) -> usize {
+    trees.iter().filter(|t| t.kind == kind).count()
+}
+
+#[test]
+fn mega_taiga_mixes_mega_pines_with_ordinary_spruces() {
+    let trees = trees_of_biome(Biome::MegaTaiga, 80);
+    let pines = share_of(&trees, TreeKind::MegaPine);
+    let spruces = share_of(&trees, TreeKind::MegaSpruce);
+    let ordinary = share_of(&trees, TreeKind::Spruce);
+    assert!(
+        pines > 5 && ordinary > pines,
+        "{pines} pines, {ordinary} spruces"
+    );
+    assert!(
+        spruces < pines,
+        "{spruces} mega spruces, {pines} mega pines"
+    );
+    assert_eq!(pines + spruces + ordinary, trees.len());
+}
+
+#[test]
+fn mega_spruce_biomes_grow_only_pointed_mega_trees() {
+    let trees = trees_of_biome(Biome::MegaSpruceTaiga, 80);
+    assert!(share_of(&trees, TreeKind::MegaSpruce) > 5);
+    assert_eq!(share_of(&trees, TreeKind::MegaPine), 0);
+}
+
+fn mega_trees(kind: TreeKind) -> Vec<Tree> {
+    let biome = match kind {
+        TreeKind::MegaPine => Biome::MegaTaiga,
+        _ => Biome::MegaSpruceTaiga,
+    };
+    let trees: Vec<Tree> = trees_of_biome(biome, 80)
+        .into_iter()
+        .filter(|t| t.kind == kind)
+        .collect();
+    assert!(!trees.is_empty(), "{kind:?}");
+    trees
+}
+
+#[test]
+fn mega_trunk_is_two_by_two_and_thins_at_the_top() {
+    for kind in [TreeKind::MegaPine, TreeKind::MegaSpruce] {
+        for tree in mega_trees(kind).iter().take(10) {
+            assert!((13..=29).contains(&tree.height), "{tree:?}");
+            let logs: HashSet<IVec3> = tree.logs().into_iter().map(|(p, _)| p).collect();
+            assert_eq!(logs.len() as i32, 4 * (tree.height - 1) + 1);
+            for dy in 0..tree.height - 1 {
+                for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    assert!(logs.contains(&(tree.base + IVec3::new(dx, dy, dz))));
+                }
+            }
+            assert!(logs.contains(&(tree.base + IVec3::Y * (tree.height - 1))));
+        }
+    }
+}
+
+#[test]
+fn mega_pine_crown_is_short_and_round_and_mega_spruce_is_tall_and_sharp() {
+    let layers = |tree: &Tree| {
+        let leaves = tree.leaves();
+        let low = leaves.iter().map(|l| l.y).min().unwrap();
+        let high = leaves.iter().map(|l| l.y).max().unwrap();
+        (high - low + 1, spread(tree))
+    };
+    for tree in mega_trees(TreeKind::MegaPine).iter().take(20) {
+        let (height, reach) = layers(tree);
+        assert!((4..=8).contains(&height), "{height}");
+        assert!((3..=5).contains(&reach), "{reach}");
+    }
+    for tree in mega_trees(TreeKind::MegaSpruce).iter().take(20) {
+        let (height, reach) = layers(tree);
+        assert!((14..=18).contains(&height), "{height}");
+        assert!((3..=5).contains(&reach), "{reach}");
+        let top = tree.leaves().iter().map(|l| l.y).max().unwrap();
+        assert!(tree.leaves().iter().filter(|l| l.y == top).count() <= 4);
+    }
+}
+
+#[test]
+fn mega_pines_spread_podzol_around_their_trunk() {
+    let terrain = Terrain::new(1337);
+    let tree = mega_trees(TreeKind::MegaPine)[0];
+    let key = ColumnPos::of_block(tree.base);
+    let column = terrain.generate_trees(key);
+    let local = tree.base - key.origin() - IVec3::Y;
+    if Column::contains(local) {
+        assert_eq!(column.get(local), Block::Podzol);
+    }
+    let podzol = tree.podzol();
+    assert!(podzol.len() > 40);
+    assert!(
+        podzol
+            .iter()
+            .all(|p| (p.x - tree.base.x).abs() <= 6 && (p.z - tree.base.z).abs() <= 6)
+    );
+    assert!(mega_trees(TreeKind::MegaSpruce)[0].podzol().len() > 40);
+    assert!(of_kind(TreeKind::Oak).next().unwrap().podzol().is_empty());
+}
+
+#[test]
+fn tall_birch_reaches_thirteen_blocks_and_birch_forest_m_mixes_both() {
+    let trees = trees_of_biome(Biome::BirchForestM, 80);
+    let tall = share_of(&trees, TreeKind::TallBirch);
+    let short = share_of(&trees, TreeKind::Birch);
+    assert!(tall > 20 && short > 20, "{tall} tall, {short} short");
+    assert_eq!(tall + short, trees.len());
+    assert!(trees.iter().all(|t| (5..=13).contains(&t.height)));
+    assert!(
+        trees
+            .iter()
+            .any(|t| t.kind == TreeKind::TallBirch && t.height > 8)
+    );
+    assert!(
+        trees
+            .iter()
+            .filter(|t| t.kind == TreeKind::Birch)
+            .all(|t| t.height <= 7)
+    );
+}
+
+fn crossing_border(trees: Vec<Tree>) -> Tree {
+    trees
+        .into_iter()
+        .find(|t| {
+            let columns: HashSet<_> = t
+                .leaves()
+                .iter()
+                .map(|l| (l.x.div_euclid(SECTION_SIZE), l.z.div_euclid(SECTION_SIZE)))
+                .collect();
+            columns.len() > 1
+        })
+        .expect("a tree on a column border")
+}
+
+#[test]
+fn mega_pines_and_tall_birches_are_seamless_across_columns() {
+    let terrain = Terrain::new(1337);
+    for tree in [
+        crossing_border(mega_trees(TreeKind::MegaPine)),
+        crossing_border(mega_trees(TreeKind::MegaSpruce)),
+        crossing_border(
+            trees_of_biome(Biome::BirchForestM, 80)
+                .into_iter()
+                .filter(|t| t.kind == TreeKind::TallBirch)
+                .collect(),
+        ),
+    ] {
+        assert_tree_seamless(&terrain, tree);
     }
 }

@@ -21,6 +21,14 @@ const GRID_OFFSET: i32 = 1;
 const GRID_MUSHROOM_ONE_IN: u32 = 20;
 const MUSHROOM_TALL_ONE_IN: u32 = 12;
 const JUNGLE_BIG_OAK_FOOTPRINT: i32 = 3;
+const MEGA_TAIGA_PERCENT: u32 = 33;
+const MEGA_SPRUCE_ONE_IN: u32 = 13;
+const PODZOL_SPOTS: [(i32, i32); 4] = [(-1, -1), (2, -1), (-1, 2), (2, 2)];
+const PODZOL_RING: i32 = 8;
+const PODZOL_EXTRA_SPOTS: u32 = 5;
+const PODZOL_RADIUS: i32 = 2;
+const PODZOL_HEIGHT: i32 = 2;
+const PODZOL_DEPTH: i32 = 3;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum TreeKind {
@@ -36,14 +44,17 @@ pub enum TreeKind {
     BrownMushroom,
     RedMushroom,
     SwampOak,
+    TallBirch,
+    MegaPine,
+    MegaSpruce,
 }
 
 impl TreeKind {
     pub fn log(self) -> Block {
         match self {
             TreeKind::Oak | TreeKind::BigOak | TreeKind::SwampOak => Block::Log,
-            TreeKind::Birch => Block::BirchLog,
-            TreeKind::Spruce => Block::SpruceLog,
+            TreeKind::Birch | TreeKind::TallBirch => Block::BirchLog,
+            TreeKind::Spruce | TreeKind::MegaPine | TreeKind::MegaSpruce => Block::SpruceLog,
             TreeKind::JungleTree | TreeKind::MegaJungle | TreeKind::Shrub => Block::JungleLog,
             TreeKind::Acacia => Block::AcaciaLog,
             TreeKind::DarkOak => Block::DarkOakLog,
@@ -56,8 +67,8 @@ impl TreeKind {
             TreeKind::Oak | TreeKind::BigOak | TreeKind::Shrub | TreeKind::SwampOak => {
                 Block::Leaves
             }
-            TreeKind::Birch => Block::BirchLeaves,
-            TreeKind::Spruce => Block::SpruceLeaves,
+            TreeKind::Birch | TreeKind::TallBirch => Block::BirchLeaves,
+            TreeKind::Spruce | TreeKind::MegaPine | TreeKind::MegaSpruce => Block::SpruceLeaves,
             TreeKind::JungleTree | TreeKind::MegaJungle => Block::JungleLeaves,
             TreeKind::Acacia => Block::AcaciaLeaves,
             TreeKind::DarkOak => Block::DarkOakLeaves,
@@ -67,13 +78,18 @@ impl TreeKind {
     }
 
     fn wide_trunk(self) -> bool {
-        matches!(self, TreeKind::MegaJungle | TreeKind::DarkOak)
+        matches!(
+            self,
+            TreeKind::MegaJungle | TreeKind::DarkOak | TreeKind::MegaPine | TreeKind::MegaSpruce
+        )
     }
 
     fn trunk_range(self) -> (i32, i32) {
         match self {
             TreeKind::Oak => (4, 6),
             TreeKind::Birch => (5, 7),
+            TreeKind::TallBirch => (5, 13),
+            TreeKind::MegaPine | TreeKind::MegaSpruce => (13, 29),
             TreeKind::Spruce => (7, 10),
             TreeKind::BigOak => (6, 9),
             TreeKind::JungleTree => (4, 10),
@@ -89,7 +105,9 @@ impl TreeKind {
     fn footprint(self) -> i32 {
         match self {
             TreeKind::BigOak => 5,
-            TreeKind::Acacia | TreeKind::MegaJungle => 3,
+            TreeKind::Acacia | TreeKind::MegaJungle | TreeKind::MegaPine | TreeKind::MegaSpruce => {
+                3
+            }
             TreeKind::DarkOak
             | TreeKind::BrownMushroom
             | TreeKind::RedMushroom
@@ -136,7 +154,7 @@ impl Tree {
 
     pub fn round_radius(&self) -> i32 {
         match self.kind {
-            TreeKind::Birch => 1 + (self.shape >> 16) as i32 % 2,
+            TreeKind::Birch | TreeKind::TallBirch => 1 + (self.shape >> 16) as i32 % 2,
             _ => 2,
         }
     }
@@ -153,8 +171,36 @@ impl Tree {
             TreeKind::BrownMushroom => shapes::mushroom(self.base, self.height, false),
             TreeKind::RedMushroom => shapes::mushroom(self.base, self.height, true),
             TreeKind::SwampOak => shapes::swamp_oak(self.base, self.height, self.shape),
+            TreeKind::MegaPine => shapes::mega_pine(self.base, self.height, self.shape, false),
+            TreeKind::MegaSpruce => shapes::mega_pine(self.base, self.height, self.shape, true),
             _ => return None,
         })
+    }
+
+    pub fn podzol(&self) -> Vec<IVec3> {
+        if !matches!(self.kind, TreeKind::MegaPine | TreeKind::MegaSpruce) {
+            return Vec::new();
+        }
+        let mut rng = Rng(u64::from(self.shape) ^ 0x70d);
+        let mut centers: Vec<(i32, i32)> = PODZOL_SPOTS.to_vec();
+        for _ in 0..PODZOL_EXTRA_SPOTS {
+            let roll = rng.below(PODZOL_RING as u32 * PODZOL_RING as u32);
+            let (k, l) = (roll % PODZOL_RING, roll / PODZOL_RING);
+            if [k, l].iter().any(|&v| v == 0 || v == PODZOL_RING - 1) {
+                centers.push((k - 3, l - 3));
+            }
+        }
+        let mut spots = Vec::new();
+        for (cx, cz) in centers {
+            for dz in -PODZOL_RADIUS..=PODZOL_RADIUS {
+                for dx in -PODZOL_RADIUS..=PODZOL_RADIUS {
+                    if dx.abs() != PODZOL_RADIUS || dz.abs() != PODZOL_RADIUS {
+                        spots.push(self.base + IVec3::new(cx + dx, 0, cz + dz));
+                    }
+                }
+            }
+        }
+        spots
     }
 
     pub fn logs(&self) -> Vec<(IVec3, u8)> {
@@ -175,7 +221,7 @@ impl Tree {
             return parts.leaves;
         }
         match self.kind {
-            TreeKind::Oak | TreeKind::Birch => self.round_crown(),
+            TreeKind::Oak | TreeKind::Birch | TreeKind::TallBirch => self.round_crown(),
             TreeKind::Spruce => self.cone_crown(),
             _ => self.big_crown(),
         }
@@ -460,7 +506,7 @@ fn trees_per_chunk(biome: Biome) -> f32 {
         MesaPlateauF | MesaPlateauFM => 5.0,
         Plains | SunflowerPlains => 0.5,
         MushroomIsland => 1.0,
-        IcePlains | IceMountains => 0.1,
+        IcePlains | IceMountains | IceSpikes => 0.1,
         _ => 0.0,
     }
 }
@@ -474,7 +520,14 @@ fn pick_kind(biome: Biome, bits: u32) -> TreeKind {
             55..88 => TreeKind::Birch,
             _ => TreeKind::BigOak,
         },
-        BirchForest | BirchForestHills | BirchForestM | BirchForestHillsM => TreeKind::Birch,
+        BirchForest | BirchForestHills => TreeKind::Birch,
+        BirchForestM | BirchForestHillsM => {
+            if bits & 1 == 0 {
+                TreeKind::TallBirch
+            } else {
+                TreeKind::Birch
+            }
+        }
         RoofedForest | RoofedForestM => match second {
             0..80 => TreeKind::DarkOak,
             80..90 => TreeKind::Birch,
@@ -498,9 +551,19 @@ fn pick_kind(biome: Biome, bits: u32) -> TreeKind {
                 TreeKind::Oak
             }
         }
+        MegaTaiga | MegaTaigaHills if second < MEGA_TAIGA_PERCENT => {
+            if (bits >> 8).is_multiple_of(MEGA_SPRUCE_ONE_IN) {
+                TreeKind::MegaSpruce
+            } else {
+                TreeKind::MegaPine
+            }
+        }
+        MegaSpruceTaiga | MegaSpruceTaigaHills if second < MEGA_TAIGA_PERCENT => {
+            TreeKind::MegaSpruce
+        }
         Taiga | TaigaHills | TaigaM | ColdTaiga | ColdTaigaHills | ColdTaigaM | MegaTaiga
         | MegaTaigaHills | MegaSpruceTaiga | MegaSpruceTaigaHills | ExtremeHillsPlus
-        | ExtremeHillsPlusM | IcePlains | IceMountains => TreeKind::Spruce,
+        | ExtremeHillsPlusM | IcePlains | IceMountains | IceSpikes => TreeKind::Spruce,
         Swampland | SwamplandM => TreeKind::SwampOak,
         MushroomIsland => {
             if bits & 1 == 0 {
@@ -535,6 +598,28 @@ pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
             let local = log - origin;
             if Column::contains(local) {
                 column.set_with_data(local, tree.kind.log(), axis);
+            }
+        }
+    }
+    for tree in &trees {
+        for spot in tree.podzol() {
+            let local = spot - origin;
+            if !(0..SECTION_SIZE).contains(&local.x) || !(0..SECTION_SIZE).contains(&local.z) {
+                continue;
+            }
+            for dy in (-PODZOL_DEPTH..=PODZOL_HEIGHT).rev() {
+                let at = local + IVec3::Y * dy;
+                if !Column::contains(at) {
+                    continue;
+                }
+                let block = column.get(at);
+                if matches!(block, Block::Grass | Block::Dirt | Block::CoarseDirt) {
+                    column.set(at, Block::Podzol);
+                    break;
+                }
+                if block != Block::Air && dy < 0 {
+                    break;
+                }
             }
         }
     }

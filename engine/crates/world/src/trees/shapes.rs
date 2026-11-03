@@ -290,6 +290,44 @@ pub(super) fn acacia(base: IVec3, height: i32, shape: u32) -> Parts {
     parts
 }
 
+const MEGA_PINE_ROUND_CROWN: i32 = 3;
+const MEGA_PINE_POINTED_CROWN: i32 = 13;
+const MEGA_PINE_SLOPE: f32 = 3.5;
+
+pub(super) fn mega_pine(base: IVec3, height: i32, shape: u32, pointed: bool) -> Parts {
+    let mut rng = Rng(u64::from(shape) ^ 0x9e_17);
+    let mut parts = Parts::default();
+    let top = base.y + height;
+    let crown = rng.below(5)
+        + if pointed {
+            MEGA_PINE_POINTED_CROWN
+        } else {
+            MEGA_PINE_ROUND_CROWN
+        };
+    let mut previous = 0;
+    for y in top - crown..=top {
+        let below = top - y;
+        let width = (below as f32 / crown as f32 * MEGA_PINE_SLOPE).floor() as i32;
+        let extra = i32::from(below > 0 && width == previous && y & 1 == 0);
+        wide_disk(
+            &mut parts.leaves,
+            IVec3::new(base.x, y, base.z),
+            width + extra,
+        );
+        previous = width;
+    }
+    for dy in 0..height {
+        for (ox, oz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            if (ox, oz) == (0, 0) || dy < height - 1 {
+                parts
+                    .logs
+                    .push(log(IVec3::new(base.x + ox, base.y + dy, base.z + oz)));
+            }
+        }
+    }
+    parts
+}
+
 pub(super) fn dark_oak(base: IVec3, height: i32, shape: u32) -> Parts {
     let mut rng = Rng(u64::from(shape) ^ 0xda_4c);
     let mut parts = Parts::default();

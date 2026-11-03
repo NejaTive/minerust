@@ -472,3 +472,247 @@ fn swamp_and_island_decoration_is_deterministic() {
         assert!(same_columns(&a.generate(key), &b.generate(key)));
     }
 }
+
+fn surface_of(column: &Column, x: i32, z: i32) -> i32 {
+    (0..WORLD_HEIGHT)
+        .rev()
+        .find(|&y| column.get([x, y, z].into()).is_solid())
+        .unwrap_or(0)
+}
+
+#[test]
+fn ice_spikes_grow_packed_ice_spires_and_paths() {
+    let terrain = Terrain::new(SEED);
+    let (mut spires, mut paths, mut tallest) = (0, 0, 0);
+    for key in mesa_columns(&terrain, Biome::IceSpikes, 24) {
+        let column = terrain.generate(key);
+        for pos in find(&column, Block::IcePacked) {
+            let ground = terrain.surface_height(key.origin().x + pos.x, key.origin().z + pos.z);
+            if pos.y > ground + 1 {
+                spires += 1;
+                tallest = tallest.max(pos.y - ground);
+            } else if pos.y >= ground - 1 {
+                paths += 1;
+            }
+        }
+    }
+    assert!(spires > 100, "{spires} spire blocks");
+    assert!(paths > 20, "{paths} path blocks");
+    assert!(tallest >= 7, "tallest spire {tallest}");
+}
+
+#[test]
+fn ice_spikes_are_deterministic_and_stay_in_their_column() {
+    let (a, b) = (Terrain::new(SEED), Terrain::new(SEED));
+    for key in mesa_columns(&a, Biome::IceSpikes, 6) {
+        let first = a.generate(key);
+        assert!(same_columns(&first, &b.generate(key)));
+        let ground = a.generate_trees(key);
+        let packed = find(&first, Block::IcePacked)
+            .into_iter()
+            .filter(|&p| ground.get(p) != Block::IcePacked)
+            .count();
+        assert!(packed < 16 * 16 * WORLD_HEIGHT as usize);
+    }
+}
+
+#[test]
+fn spikes_only_stand_in_the_ice_spikes_biome() {
+    let terrain = Terrain::new(SEED);
+    for biome in [Biome::IcePlains, Biome::ColdTaiga] {
+        for key in columns_of(&terrain, biome, 6) {
+            assert!(
+                find(&terrain.generate(key), Block::IcePacked).is_empty(),
+                "{biome:?} {key}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mega_taiga_has_podzol_coarse_dirt_and_mossy_boulders() {
+    let terrain = Terrain::new(SEED);
+    let (mut podzol, mut coarse, mut grass, mut boulders) = (0, 0, 0, 0);
+    for key in mesa_columns(&terrain, Biome::MegaTaiga, 20) {
+        let column = terrain.generate(key);
+        for z in 0..16 {
+            for x in 0..16 {
+                match column.get([x, surface_of(&column, x, z), z].into()) {
+                    Block::Podzol => podzol += 1,
+                    Block::CoarseDirt => coarse += 1,
+                    Block::Grass => grass += 1,
+                    _ => {}
+                }
+            }
+        }
+        boulders += find(&column, Block::MossyCobblestone).len();
+    }
+    assert!(
+        podzol > coarse && coarse > 0 && grass > 0,
+        "{podzol} {coarse} {grass}"
+    );
+    assert!(boulders > 10, "{boulders} boulder blocks");
+}
+
+#[test]
+fn boulders_are_small_mossy_blobs_sunk_into_the_ground() {
+    let terrain = Terrain::new(SEED);
+    for key in mesa_columns(&terrain, Biome::MegaTaiga, 12) {
+        let column = terrain.generate(key);
+        for pos in find(&column, Block::MossyCobblestone) {
+            let ground = terrain.surface_height(key.origin().x + pos.x, key.origin().z + pos.z);
+            assert!(pos.y <= ground + 3, "{key} {pos}");
+        }
+    }
+    assert!(Block::MossyCobblestone.is_solid());
+}
+
+fn double_pairs(column: &Column) -> Vec<(IVec3, Block)> {
+    cells()
+        .filter_map(|p| {
+            let block = column.get(p);
+            block.double_upper().map(|upper| {
+                assert_eq!(column.get(p + IVec3::Y), upper, "{p}");
+                (p, block)
+            })
+        })
+        .collect()
+}
+
+fn assert_doubles_whole(column: &Column) {
+    for p in cells() {
+        let block = column.get(p);
+        if let Some(lower) = block.double_lower() {
+            assert_eq!(column.get(p - IVec3::Y), lower, "{p}");
+        }
+    }
+    for (p, _) in double_pairs(column) {
+        assert!(
+            matches!(
+                column.get(p - IVec3::Y),
+                Block::Grass | Block::Dirt | Block::Podzol | Block::CoarseDirt
+            ),
+            "{p}"
+        );
+    }
+}
+
+#[test]
+fn double_plants_are_always_whole_pairs_on_soil() {
+    let terrain = Terrain::new(SEED);
+    let mut total = 0;
+    for biome in [
+        Biome::Plains,
+        Biome::SunflowerPlains,
+        Biome::FlowerForest,
+        Biome::Forest,
+        Biome::Taiga,
+        Biome::MegaTaiga,
+        Biome::Savanna,
+    ] {
+        for key in mesa_columns(&terrain, biome, 12) {
+            let column = terrain.generate(key);
+            assert_doubles_whole(&column);
+            total += double_pairs(&column).len();
+        }
+    }
+    assert!(total > 100, "{total} double plants");
+}
+
+fn count_of(terrain: &Terrain, biome: Biome, columns: usize, blocks: &[Block]) -> usize {
+    mesa_columns(terrain, biome, columns)
+        .into_iter()
+        .map(|key| {
+            let column = terrain.generate(key);
+            cells().filter(|&p| blocks.contains(&column.get(p))).count()
+        })
+        .sum()
+}
+
+#[test]
+fn sunflowers_grow_in_sunflower_plains_only() {
+    let terrain = Terrain::new(SEED);
+    assert!(
+        count_of(
+            &terrain,
+            Biome::SunflowerPlains,
+            12,
+            &[Block::SunflowerLower]
+        ) > 10
+    );
+    assert_eq!(
+        count_of(&terrain, Biome::Plains, 12, &[Block::SunflowerLower]),
+        0
+    );
+}
+
+#[test]
+fn tall_grass_doubles_grow_on_plains_and_ferns_in_taiga() {
+    let terrain = Terrain::new(SEED);
+    assert!(count_of(&terrain, Biome::Plains, 12, &[Block::DoubleGrassLower]) > 5);
+    assert!(count_of(&terrain, Biome::Taiga, 12, &[Block::DoubleFernLower]) > 5);
+    assert!(count_of(&terrain, Biome::MegaTaiga, 12, &[Block::DoubleFernLower]) > 5);
+    assert_eq!(
+        count_of(&terrain, Biome::Taiga, 12, &[Block::DoubleGrassLower]),
+        0
+    );
+}
+
+#[test]
+fn flower_forest_has_many_tall_flowers_and_ordinary_forest_few() {
+    let terrain = Terrain::new(SEED);
+    let kinds = [Block::LilacLower, Block::RoseBushLower, Block::PeonyLower];
+    let flower_forest = count_of(&terrain, Biome::FlowerForest, 16, &kinds);
+    let forest = count_of(&terrain, Biome::Forest, 16, &kinds);
+    assert!(flower_forest > 20, "{flower_forest}");
+    assert!(flower_forest > 3 * forest, "{flower_forest} vs {forest}");
+}
+
+#[test]
+fn flower_forest_is_a_patchwork_of_many_flower_kinds() {
+    let terrain = Terrain::new(SEED);
+    let kinds = [
+        Block::Dandelion,
+        Block::Poppy,
+        Block::Allium,
+        Block::Houstonia,
+        Block::RedTulip,
+        Block::OrangeTulip,
+        Block::WhiteTulip,
+        Block::PinkTulip,
+        Block::OxeyeDaisy,
+    ];
+    let present = kinds
+        .into_iter()
+        .filter(|&k| count_of(&terrain, Biome::FlowerForest, 40, &[k]) > 0)
+        .count();
+    assert!(present >= 4, "{present} flower kinds");
+    assert_eq!(
+        count_of(&terrain, Biome::FlowerForest, 40, &[Block::BlueOrchid]),
+        0
+    );
+}
+
+#[test]
+fn swamps_grow_blue_orchids_and_plains_grow_the_new_flowers() {
+    let terrain = Terrain::new(SEED);
+    assert!(count_of(&terrain, Biome::Swampland, 60, &[Block::BlueOrchid]) > 0);
+    let plains = [Block::Houstonia, Block::OxeyeDaisy];
+    assert!(count_of(&terrain, Biome::Plains, 24, &plains) > 0);
+    assert_eq!(count_of(&terrain, Biome::Plains, 24, &[Block::Allium]), 0);
+}
+
+#[test]
+fn ferns_replace_some_grass_in_taiga_and_jungle() {
+    let terrain = Terrain::new(SEED);
+    for biome in [Biome::Taiga, Biome::Jungle, Biome::MegaTaiga] {
+        let ferns = count_of(&terrain, biome, 12, &[Block::Fern]);
+        let grass = count_of(&terrain, biome, 12, &[Block::TallGrass]);
+        assert!(ferns > 0, "{biome:?}");
+        assert!(
+            biome != Biome::Jungle || grass > ferns,
+            "{biome:?} {grass} {ferns}"
+        );
+    }
+    assert_eq!(count_of(&terrain, Biome::Plains, 12, &[Block::Fern]), 0);
+}

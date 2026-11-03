@@ -3,8 +3,9 @@ use glam::IVec3;
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
     AO_BRIGHTNESS, CACTUS, CROSS, CUBE_FACE, FACES, Face, LILY, LOG_BARK_X, LOG_BARK_Z, SNOW_SIDE,
-    SNOW_TOP, TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, VINE, WATER_BOTTOM, WATER_SIDE,
-    WATER_SIDE_LOW, WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
+    SNOW_TOP, SUNFLOWER_HEAD, TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, VINE,
+    WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP,
+    WATER_TOP_SLOPED,
 };
 use world::block::{
     ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, FluidKind, RenderLayer, Shape, VINE_SIDES,
@@ -599,6 +600,16 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
             mesh.quads.push(quad(LILY, layer));
             mesh.quads.push(quad(LILY + 1, layer));
         }
+        Shape::Sunflower => {
+            let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
+            for t in CROSS..CROSS + 4 {
+                mesh.quads.push(quad(t, layer));
+            }
+            mesh.quads
+                .push(quad(SUNFLOWER_HEAD, Tile::SunflowerFront.layer() as u8));
+            mesh.quads
+                .push(quad(SUNFLOWER_HEAD + 1, Tile::SunflowerBack.layer() as u8));
+        }
         Shape::Cross => {
             let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
             for t in CROSS..CROSS + 4 {
@@ -714,6 +725,8 @@ mod lily;
 mod oriented;
 #[cfg(test)]
 mod snow;
+#[cfg(test)]
+mod sunflower;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

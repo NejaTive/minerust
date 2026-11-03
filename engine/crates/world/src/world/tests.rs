@@ -651,3 +651,41 @@ fn mushrooms_pop_without_a_solid_floor() {
     world.set_block_supported(floor, Block::Air);
     assert_eq!(world.block(floor + IVec3::Y), Block::Air);
 }
+
+#[test]
+fn double_plants_break_whole_from_either_half() {
+    for broken_upper in [false, true] {
+        let mut world = World::new();
+        world.insert(ColumnPos::ZERO, Column::new());
+        let floor = IVec3::new(3, 10, 3);
+        let (lower, upper) = (floor + IVec3::Y, floor + 2 * IVec3::Y);
+        world.set_block(floor, Block::Grass);
+        world.set_block(lower, Block::LilacLower);
+        world.set_block(upper, Block::LilacUpper);
+        assert!(world.is_supported(lower, Block::LilacLower, 0));
+        assert!(world.is_supported(upper, Block::LilacUpper, 0));
+        let hit = if broken_upper { upper } else { lower };
+        let changed = world.set_block_supported(hit, Block::Air);
+        assert_eq!(world.block(lower), Block::Air);
+        assert_eq!(world.block(upper), Block::Air);
+        assert!(changed.contains(&lower) && changed.contains(&upper));
+        assert_eq!(world.block(floor), Block::Grass);
+    }
+}
+
+#[test]
+fn double_plant_halves_need_each_other_and_the_ground() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let floor = IVec3::new(3, 10, 3);
+    world.set_block(floor, Block::Podzol);
+    let lower = floor + IVec3::Y;
+    assert!(
+        !world.is_supported(lower, Block::SunflowerLower, 0),
+        "no upper half"
+    );
+    world.set_block(lower + IVec3::Y, Block::SunflowerUpper);
+    assert!(world.is_supported(lower, Block::SunflowerLower, 0));
+    world.set_block(lower, Block::Stone);
+    assert!(!world.is_supported(lower + IVec3::Y, Block::SunflowerUpper, 0));
+}
