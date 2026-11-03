@@ -11,5 +11,6 @@ pub mod rain_cover;
 mod raycast;
 mod repeat;
 mod rng;
+mod spawning;
 pub mod weather;
 pub use game::{BadCameraState, Edits, Game, MobView};

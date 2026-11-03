@@ -11,6 +11,7 @@ pub const WORLD_HEIGHT: i32 = COLUMN_SECTIONS * SECTION_SIZE;
 pub struct Column {
     sections: [Section; COLUMN_SECTIONS as usize],
     pub mobs: Vec<MobRecord>,
+    pub populated: bool,
 }
 
 impl Column {
@@ -18,6 +19,7 @@ impl Column {
         Self {
             sections: std::array::from_fn(|_| Section::new()),
             mobs: Vec::new(),
+            populated: false,
         }
     }
 

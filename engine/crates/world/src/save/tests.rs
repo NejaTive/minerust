@@ -2,7 +2,7 @@ use super::*;
 use crate::pos::ColumnPos;
 use crate::terrain::Terrain;
 
-const HEADER: usize = 7;
+const HEADER: usize = 8;
 
 const BLOCKS: [Block; 13] = [
     Block::Air,
@@ -233,20 +233,26 @@ fn v1_column_migrates_with_zero_data() {
     bytes.extend_from_slice(&(COLUMN_VOLUME as u16).to_le_bytes());
     let column = decode_column(&bytes).expect("v1 decodes");
     assert!(column.section(0).data().is_none());
-    assert_eq!(encode_column(&column).len(), bytes.len() + 3);
+    assert_eq!(encode_column(&column).len(), bytes.len() + 4);
 }
 
 #[test]
-fn column_without_mobs_costs_a_count_over_v2() {
+fn v3_column_migrates_as_populated() {
     let terrain = Terrain::new(1337);
-    for key in [ColumnPos::ZERO, ColumnPos::new(-7, 12)] {
-        let column = terrain.generate(key);
-        let v3 = encode_column(&column);
-        let mut v2 = v3[4..].to_vec();
-        v2.drain(1..3);
-        assert_eq!(v2_to_v3(&v2).expect("migrates"), v3[4..]);
-        assert_eq!(v3[4], 0);
-    }
+    let v4 = encode_column(&terrain.generate(ColumnPos::ZERO));
+    let mut v3 = v4[4..].to_vec();
+    v3.remove(1);
+    let mut populated = v4[4..].to_vec();
+    populated[1] = 1;
+    assert_eq!(v3_to_v4(&v3).expect("migrates"), populated);
+}
+
+#[test]
+fn populated_flag_round_trips() {
+    let mut column = Column::new();
+    assert!(!decode_column(&encode_column(&column)).unwrap().populated);
+    column.populated = true;
+    assert!(decode_column(&encode_column(&column)).unwrap().populated);
 }
 
 #[test]
@@ -339,6 +345,6 @@ fn unknown_mob_kind_is_rejected() {
         yaw: 0.0,
     });
     let mut bytes = encode_column(&column);
-    bytes[HEADER - 2 + 2] = 99;
+    bytes[HEADER] = 99;
     assert_eq!(decode_column(&bytes).err(), Some(SaveError::UnknownMob(99)));
 }

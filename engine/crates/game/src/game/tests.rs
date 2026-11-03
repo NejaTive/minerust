@@ -158,7 +158,8 @@ fn load_around_origin(game: &mut Game) {
     for x in -1..=1 {
         for z in -1..=1 {
             let key = ColumnPos::new(x, z);
-            let column = game.terrain.generate(key);
+            let mut column = game.terrain.generate(key);
+            column.populated = true;
             game.world.insert(key, column);
         }
     }
