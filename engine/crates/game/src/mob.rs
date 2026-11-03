@@ -7,26 +7,60 @@ use world::mob::{MobKind, MobRecord};
 use crate::physics::{Collision, Input, Mode, Player};
 use crate::rng::Rng;
 
-pub const PIG_SIZE: f32 = 0.9;
-
 pub struct MobSpec {
-    pub size: f32,
+    pub width: f32,
+    pub height: f32,
+    pub eye: f32,
+    pub walk_input: f32,
     pub shadow_radius: f32,
+    pub fall_speed: Option<f32>,
 }
 
 pub const PIG: MobSpec = MobSpec {
-    size: PIG_SIZE,
+    width: 0.9,
+    height: 0.9,
+    eye: 0.6,
+    walk_input: 0.5,
     shadow_radius: 0.7,
+    fall_speed: None,
+};
+
+pub const CHICKEN: MobSpec = MobSpec {
+    width: 0.4,
+    height: 0.7,
+    eye: 0.7,
+    walk_input: 0.5,
+    shadow_radius: 0.3,
+    fall_speed: Some(3.9),
+};
+
+pub const COW: MobSpec = MobSpec {
+    width: 0.9,
+    height: 1.4,
+    eye: 1.3,
+    walk_input: 0.4,
+    shadow_radius: 0.7,
+    fall_speed: None,
+};
+
+pub const SHEEP: MobSpec = MobSpec {
+    width: 0.9,
+    height: 1.3,
+    eye: 1.235,
+    walk_input: 0.46,
+    shadow_radius: 0.7,
+    fall_speed: None,
 };
 
 pub fn spec(kind: MobKind) -> &'static MobSpec {
     match kind {
         MobKind::Pig => &PIG,
+        MobKind::Chicken => &CHICKEN,
+        MobKind::Cow => &COW,
+        MobKind::Sheep => &SHEEP,
     }
 }
-const PIG_EYE: f32 = 0.6;
 
-const WALK_INPUT: f32 = 0.5;
 const TURN_RATE: f32 = 0.12;
 const FACING_TOLERANCE: f32 = 1.0;
 const ARRIVE_DISTANCE: f32 = 0.6;
@@ -52,6 +86,12 @@ const HEAD_PITCH_LIMIT: f32 = 0.7;
 const HEAD_RATE: f32 = 0.08;
 const LIMB_BLEND: f32 = 0.15;
 const TICKS_PER_MC_TICK: f32 = 3.0;
+const FLAP_GROUND_RATE: f32 = -1.0;
+const FLAP_AIR_RATE: f32 = 4.0;
+const FLAP_RATE_SCALE: f32 = 0.3;
+const FLAP_KICK: f32 = 1.0;
+const FLAP_DECAY: f32 = 0.9;
+const FLAP_PHASE_SPEED: f32 = 2.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Pose {
@@ -61,6 +101,8 @@ pub struct Pose {
     pub head_pitch: f32,
     pub limb_phase: f32,
     pub limb_swing: f32,
+    pub flap_phase: f32,
+    pub flap_amount: f32,
 }
 
 impl Pose {
@@ -72,6 +114,8 @@ impl Pose {
             head_pitch: self.head_pitch + (next.head_pitch - self.head_pitch) * alpha,
             limb_phase: self.limb_phase + (next.limb_phase - self.limb_phase) * alpha,
             limb_swing: self.limb_swing + (next.limb_swing - self.limb_swing) * alpha,
+            flap_phase: self.flap_phase + (next.flap_phase - self.flap_phase) * alpha,
+            flap_amount: self.flap_amount + (next.flap_amount - self.flap_amount) * alpha,
         }
     }
 }
@@ -94,6 +138,9 @@ pub struct Mob {
     head_pitch: f32,
     limb_phase: f32,
     limb_swing: f32,
+    flap_phase: f32,
+    flap_amount: f32,
+    flap_speed: f32,
     plan: Plan,
     head_goal: Vec2,
     head_hold: u32,
@@ -110,8 +157,12 @@ pub struct Surroundings<'a, C, F> {
 
 impl Mob {
     pub fn new(kind: MobKind, feet: Vec3, yaw: f32, seed: u32) -> Mob {
-        let mut body = Player::sized(feet, Mode::Walking, spec(kind).size, spec(kind).size);
+        let spec = spec(kind);
+        let mut body = Player::sized(feet, Mode::Walking, spec.width, spec.height);
         body.auto_step = false;
+        if let Some(fall_speed) = spec.fall_speed {
+            body.terminal_speed = fall_speed;
+        }
         let mut mob = Mob {
             kind,
             body,
@@ -120,6 +171,9 @@ impl Mob {
             head_pitch: 0.0,
             limb_phase: 0.0,
             limb_swing: 0.0,
+            flap_phase: 0.0,
+            flap_amount: 0.0,
+            flap_speed: 0.0,
             plan: Plan::Idle,
             head_goal: Vec2::ZERO,
             head_hold: 0,
@@ -132,6 +186,8 @@ impl Mob {
                 head_pitch: 0.0,
                 limb_phase: 0.0,
                 limb_swing: 0.0,
+                flap_phase: 0.0,
+                flap_amount: 0.0,
             },
         };
         mob.prev = mob.pose();
@@ -158,6 +214,8 @@ impl Mob {
             head_pitch: self.head_pitch,
             limb_phase: self.limb_phase,
             limb_swing: self.limb_swing,
+            flap_phase: self.flap_phase,
+            flap_amount: self.flap_amount,
         }
     }
 
@@ -181,7 +239,7 @@ impl Mob {
                 self.yaw = turn_towards(self.yaw, goal, TURN_RATE);
                 let aligned = angle_diff(goal, self.yaw).abs() < FACING_TOLERANCE;
                 if aligned && self.ground_ahead(around) {
-                    WALK_INPUT
+                    spec(self.kind).walk_input
                 } else {
                     0.0
                 }
@@ -199,6 +257,7 @@ impl Mob {
             .step_with(&input, self.yaw, around.collision, around.fluid);
         let moved = Vec2::new(self.body.feet.x - before.x, self.body.feet.z - before.z).length();
         self.animate_limbs(moved);
+        self.animate_wings();
         self.animate_head(around);
     }
 
@@ -254,7 +313,8 @@ impl Mob {
         F: Fn(IVec3) -> Option<(FluidKind, f32)>,
     {
         let feet = self.body.feet;
-        let reach = PIG_SIZE / 2.0 + HOP_PROBE;
+        let spec = spec(self.kind);
+        let reach = spec.width / 2.0 + HOP_PROBE;
         let ahead = (feet + Vec3::new(self.yaw.cos(), 0.0, self.yaw.sin()) * reach)
             .floor()
             .as_ivec3();
@@ -272,8 +332,12 @@ impl Mob {
             );
             (lo..=hi).all(|y| (around.collision)(IVec3::new(column.x, y, column.z)).height <= 0.0)
         };
-        free(ahead, top, top + PIG_SIZE)
-            && free(here, feet.y + PIG_SIZE, feet.y + HOP_HEIGHT + PIG_SIZE)
+        free(ahead, top, top + spec.height)
+            && free(
+                here,
+                feet.y + spec.height,
+                feet.y + HOP_HEIGHT + spec.height,
+            )
     }
 
     fn ground_ahead<C, F>(&self, around: &Surroundings<C, F>) -> bool
@@ -295,12 +359,30 @@ impl Mob {
         self.limb_phase += self.limb_swing / TICKS_PER_MC_TICK;
     }
 
+    fn animate_wings(&mut self) {
+        if spec(self.kind).fall_speed.is_none() {
+            return;
+        }
+        let rate = if self.body.on_ground {
+            FLAP_GROUND_RATE
+        } else {
+            FLAP_AIR_RATE
+        };
+        self.flap_amount =
+            (self.flap_amount + rate * FLAP_RATE_SCALE / TICKS_PER_MC_TICK).clamp(0.0, 1.0);
+        if !self.body.on_ground && self.flap_speed < FLAP_KICK {
+            self.flap_speed = FLAP_KICK;
+        }
+        self.flap_speed *= FLAP_DECAY.powf(1.0 / TICKS_PER_MC_TICK);
+        self.flap_phase += self.flap_speed * FLAP_PHASE_SPEED / TICKS_PER_MC_TICK;
+    }
+
     fn animate_head<C, F>(&mut self, around: &Surroundings<C, F>)
     where
         C: Fn(IVec3) -> Collision,
         F: Fn(IVec3) -> Option<(FluidKind, f32)>,
     {
-        let eye = self.body.feet + Vec3::Y * PIG_EYE;
+        let eye = self.body.feet + Vec3::Y * spec(self.kind).eye;
         let to_player = around.player_eye - eye;
         let flat = Vec2::new(to_player.x, to_player.z);
         if self.watching > 0 {

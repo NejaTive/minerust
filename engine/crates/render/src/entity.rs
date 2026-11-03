@@ -1,4 +1,4 @@
-use std::f32::consts::FRAC_PI_2;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::{Mat3, Vec2, Vec3};
 use wgpu::util::DeviceExt;
@@ -16,6 +16,11 @@ const SHADOW_DROP: f32 = 2.0;
 const CULL_HEIGHT: f32 = 1.4;
 const LEG_SWING: f32 = 1.4;
 const LEG_FREQUENCY: f32 = 0.6662;
+const LAID_FLAT: Mat3 = Mat3::from_cols(
+    Vec3::new(1.0, 0.0, 0.0),
+    Vec3::new(0.0, 0.0, 1.0),
+    Vec3::new(0.0, -1.0, 0.0),
+);
 
 const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32, 3 => Float32x2];
@@ -31,6 +36,9 @@ pub fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModelKind {
     Pig,
+    Chicken,
+    Cow,
+    Sheep,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -50,6 +58,8 @@ pub struct MobInstance {
     pub head_pitch: f32,
     pub limb_phase: f32,
     pub limb_swing: f32,
+    pub flap_phase: f32,
+    pub flap_amount: f32,
     pub sky_level: f32,
     pub block_level: f32,
     pub shadow_radius: f32,
@@ -65,54 +75,321 @@ impl MobInstance {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EntityTexture {
+    Pig,
+    Chicken,
+    Cow,
+    Sheep,
+    SheepFur,
+}
+
+impl EntityTexture {
+    pub const ALL: [EntityTexture; TEXTURES] = [
+        EntityTexture::Pig,
+        EntityTexture::Chicken,
+        EntityTexture::Cow,
+        EntityTexture::Sheep,
+        EntityTexture::SheepFur,
+    ];
+}
+
+pub const TEXTURES: usize = 5;
+
+pub type MobVertices = [Vec<f32>; TEXTURES];
+
 struct BoxPart {
+    sheet: EntityTexture,
     origin: Vec3,
     size: Vec3,
+    grow: f32,
     texture: Vec2,
     pivot: Vec3,
     rotation: Mat3,
 }
 
-fn pig_parts(instance: &MobInstance) -> [BoxPart; 7] {
-    let head_rotation =
-        Mat3::from_rotation_y(instance.head_yaw) * Mat3::from_rotation_x(-instance.head_pitch);
-    let head_pivot = Vec3::new(0.0, 12.0, -6.0);
-    let leg = |x: f32, z: f32, phase: f32| BoxPart {
-        origin: Vec3::new(-2.0, 0.0, -2.0),
-        size: Vec3::new(4.0, 6.0, 4.0),
-        texture: Vec2::new(0.0, 16.0),
-        pivot: Vec3::new(x, 18.0, z),
-        rotation: Mat3::from_rotation_x(
-            (instance.limb_phase * LEG_FREQUENCY + phase).cos() * LEG_SWING * instance.limb_swing,
+fn part(
+    sheet: EntityTexture,
+    texture: (f32, f32),
+    origin: [f32; 3],
+    size: [f32; 3],
+    pivot: [f32; 3],
+    rotation: Mat3,
+) -> BoxPart {
+    BoxPart {
+        sheet,
+        origin: Vec3::from(origin),
+        size: Vec3::from(size),
+        grow: 0.0,
+        texture: Vec2::new(texture.0, texture.1),
+        pivot: Vec3::from(pivot),
+        rotation,
+    }
+}
+
+fn head_rotation(instance: &MobInstance) -> Mat3 {
+    Mat3::from_rotation_y(instance.head_yaw) * Mat3::from_rotation_x(-instance.head_pitch)
+}
+
+fn leg_rotation(instance: &MobInstance, phase: f32) -> Mat3 {
+    Mat3::from_rotation_x(
+        (instance.limb_phase * LEG_FREQUENCY + phase).cos() * LEG_SWING * instance.limb_swing,
+    )
+}
+
+const LEG_PHASES: [f32; 4] = [0.0, PI, PI, 0.0];
+
+fn pig_parts(instance: &MobInstance) -> Vec<BoxPart> {
+    let sheet = EntityTexture::Pig;
+    let head = head_rotation(instance);
+    let head_pivot = [0.0, 12.0, -6.0];
+    let mut parts = vec![
+        part(
+            sheet,
+            (0.0, 0.0),
+            [-4.0, -4.0, -8.0],
+            [8.0, 8.0, 8.0],
+            head_pivot,
+            head,
         ),
+        part(
+            sheet,
+            (16.0, 16.0),
+            [-2.0, 0.0, -9.0],
+            [4.0, 3.0, 1.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (28.0, 8.0),
+            [-5.0, -10.0, -7.0],
+            [10.0, 16.0, 8.0],
+            [0.0, 11.0, 2.0],
+            LAID_FLAT,
+        ),
+    ];
+    let legs = [(-3.0, 7.0), (3.0, 7.0), (-3.0, -5.0), (3.0, -5.0)];
+    for ((x, z), phase) in legs.into_iter().zip(LEG_PHASES) {
+        parts.push(part(
+            sheet,
+            (0.0, 16.0),
+            [-2.0, 0.0, -2.0],
+            [4.0, 6.0, 4.0],
+            [x, 18.0, z],
+            leg_rotation(instance, phase),
+        ));
+    }
+    parts
+}
+
+fn cow_parts(instance: &MobInstance) -> Vec<BoxPart> {
+    let sheet = EntityTexture::Cow;
+    let head = head_rotation(instance);
+    let head_pivot = [0.0, 4.0, -8.0];
+    let body_pivot = [0.0, 5.0, 2.0];
+    let mut parts = vec![
+        part(
+            sheet,
+            (0.0, 0.0),
+            [-4.0, -4.0, -6.0],
+            [8.0, 8.0, 6.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (22.0, 0.0),
+            [-5.0, -5.0, -4.0],
+            [1.0, 3.0, 1.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (22.0, 0.0),
+            [4.0, -5.0, -4.0],
+            [1.0, 3.0, 1.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (18.0, 4.0),
+            [-6.0, -10.0, -7.0],
+            [12.0, 18.0, 10.0],
+            body_pivot,
+            LAID_FLAT,
+        ),
+        part(
+            sheet,
+            (52.0, 0.0),
+            [-2.0, 2.0, -8.0],
+            [4.0, 6.0, 1.0],
+            body_pivot,
+            LAID_FLAT,
+        ),
+    ];
+    let legs = [(-4.0, 7.0), (4.0, 7.0), (-4.0, -6.0), (4.0, -6.0)];
+    for ((x, z), phase) in legs.into_iter().zip(LEG_PHASES) {
+        parts.push(part(
+            sheet,
+            (0.0, 16.0),
+            [-2.0, 0.0, -2.0],
+            [4.0, 12.0, 4.0],
+            [x, 12.0, z],
+            leg_rotation(instance, phase),
+        ));
+    }
+    parts
+}
+
+fn sheep_parts(instance: &MobInstance) -> Vec<BoxPart> {
+    let sheet = EntityTexture::Sheep;
+    let fur = EntityTexture::SheepFur;
+    let head = head_rotation(instance);
+    let head_pivot = [0.0, 6.0, -8.0];
+    let body_pivot = [0.0, 5.0, 2.0];
+    let grown = |mut part: BoxPart, grow: f32| {
+        part.grow = grow;
+        part
     };
-    let pi = std::f32::consts::PI;
-    [
-        BoxPart {
-            origin: Vec3::new(-4.0, -4.0, -8.0),
-            size: Vec3::new(8.0, 8.0, 8.0),
-            texture: Vec2::new(0.0, 0.0),
-            pivot: head_pivot,
-            rotation: head_rotation,
-        },
-        BoxPart {
-            origin: Vec3::new(-2.0, 0.0, -9.0),
-            size: Vec3::new(4.0, 3.0, 1.0),
-            texture: Vec2::new(16.0, 16.0),
-            pivot: head_pivot,
-            rotation: head_rotation,
-        },
-        BoxPart {
-            origin: Vec3::new(-5.0, -10.0, -7.0),
-            size: Vec3::new(10.0, 16.0, 8.0),
-            texture: Vec2::new(28.0, 8.0),
-            pivot: Vec3::new(0.0, 11.0, 2.0),
-            rotation: Mat3::from_rotation_x(FRAC_PI_2),
-        },
-        leg(-3.0, 7.0, 0.0),
-        leg(3.0, 7.0, pi),
-        leg(-3.0, -5.0, pi),
-        leg(3.0, -5.0, 0.0),
+    let mut parts = vec![
+        part(
+            sheet,
+            (0.0, 0.0),
+            [-3.0, -4.0, -6.0],
+            [6.0, 6.0, 8.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (28.0, 8.0),
+            [-4.0, -10.0, -7.0],
+            [8.0, 16.0, 6.0],
+            body_pivot,
+            LAID_FLAT,
+        ),
+        grown(
+            part(
+                fur,
+                (0.0, 0.0),
+                [-3.0, -4.0, -4.0],
+                [6.0, 6.0, 6.0],
+                head_pivot,
+                head,
+            ),
+            0.6,
+        ),
+        grown(
+            part(
+                fur,
+                (28.0, 8.0),
+                [-4.0, -10.0, -7.0],
+                [8.0, 16.0, 6.0],
+                body_pivot,
+                LAID_FLAT,
+            ),
+            1.75,
+        ),
+    ];
+    let legs = [(-3.0, 7.0), (3.0, 7.0), (-3.0, -5.0), (3.0, -5.0)];
+    for ((x, z), phase) in legs.into_iter().zip(LEG_PHASES) {
+        let rotation = leg_rotation(instance, phase);
+        parts.push(part(
+            sheet,
+            (0.0, 16.0),
+            [-2.0, 0.0, -2.0],
+            [4.0, 12.0, 4.0],
+            [x, 12.0, z],
+            rotation,
+        ));
+        parts.push(grown(
+            part(
+                fur,
+                (0.0, 16.0),
+                [-2.0, 0.0, -2.0],
+                [4.0, 6.0, 4.0],
+                [x, 12.0, z],
+                rotation,
+            ),
+            0.5,
+        ));
+    }
+    parts
+}
+
+fn chicken_parts(instance: &MobInstance) -> Vec<BoxPart> {
+    let sheet = EntityTexture::Chicken;
+    let head = head_rotation(instance);
+    let head_pivot = [0.0, 15.0, -4.0];
+    let flap = ((instance.flap_phase.sin() + 1.0) * instance.flap_amount).max(0.0);
+    vec![
+        part(
+            sheet,
+            (0.0, 0.0),
+            [-2.0, -6.0, -2.0],
+            [4.0, 6.0, 3.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (14.0, 0.0),
+            [-2.0, -4.0, -4.0],
+            [4.0, 2.0, 2.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (14.0, 4.0),
+            [-1.0, -2.0, -3.0],
+            [2.0, 2.0, 2.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (0.0, 9.0),
+            [-3.0, -4.0, -3.0],
+            [6.0, 8.0, 6.0],
+            [0.0, 16.0, 0.0],
+            LAID_FLAT,
+        ),
+        part(
+            sheet,
+            (26.0, 0.0),
+            [-1.0, 0.0, -3.0],
+            [3.0, 5.0, 3.0],
+            [-2.0, 19.0, 1.0],
+            leg_rotation(instance, 0.0),
+        ),
+        part(
+            sheet,
+            (26.0, 0.0),
+            [-1.0, 0.0, -3.0],
+            [3.0, 5.0, 3.0],
+            [1.0, 19.0, 1.0],
+            leg_rotation(instance, PI),
+        ),
+        part(
+            sheet,
+            (24.0, 13.0),
+            [0.0, 0.0, -3.0],
+            [1.0, 4.0, 6.0],
+            [-4.0, 13.0, 0.0],
+            Mat3::from_rotation_z(flap),
+        ),
+        part(
+            sheet,
+            (24.0, 13.0),
+            [-1.0, 0.0, -3.0],
+            [1.0, 4.0, 6.0],
+            [4.0, 13.0, 0.0],
+            Mat3::from_rotation_z(-flap),
+        ),
     ]
 }
 
@@ -128,17 +405,23 @@ fn face_shade(normal: Vec3) -> f32 {
         + 0.8 * normal.z * normal.z
 }
 
-pub fn push_mob(instance: &MobInstance, out: &mut Vec<f32>) {
+pub fn push_mob(instance: &MobInstance, out: &mut MobVertices) {
     let parts = match instance.kind {
         ModelKind::Pig => pig_parts(instance),
+        ModelKind::Chicken => chicken_parts(instance),
+        ModelKind::Cow => cow_parts(instance),
+        ModelKind::Sheep => sheep_parts(instance),
     };
     for part in &parts {
-        push_box(part, instance, out);
+        push_box(part, instance, &mut out[part.sheet as usize]);
     }
 }
 
 fn push_box(part: &BoxPart, instance: &MobInstance, out: &mut Vec<f32>) {
-    let (lo, hi) = (part.origin, part.origin + part.size);
+    let (lo, hi) = (
+        part.origin - Vec3::splat(part.grow),
+        part.origin + part.size + Vec3::splat(part.grow),
+    );
     let (dx, dy, dz) = (part.size.x, part.size.y, part.size.z);
     let (u, v) = (part.texture.x, part.texture.y);
     let corner = |x: f32, y: f32, z: f32| {
@@ -205,13 +488,13 @@ fn push_box(part: &BoxPart, instance: &MobInstance, out: &mut Vec<f32>) {
             (Vec3::new(lo.x, lo.y, lo.z), Vec2::new(u + dz, v + dz)),
         ],
         [
-            (Vec3::new(hi.x, hi.y, hi.z), Vec2::new(u + dz + dx, v + dz)),
+            (Vec3::new(hi.x, hi.y, hi.z), Vec2::new(u + dz + 2.0 * dx, v)),
+            (Vec3::new(lo.x, hi.y, hi.z), Vec2::new(u + dz + dx, v)),
+            (Vec3::new(lo.x, hi.y, lo.z), Vec2::new(u + dz + dx, v + dz)),
             (
-                Vec3::new(lo.x, hi.y, hi.z),
+                Vec3::new(hi.x, hi.y, lo.z),
                 Vec2::new(u + dz + 2.0 * dx, v + dz),
             ),
-            (Vec3::new(lo.x, hi.y, lo.z), Vec2::new(u + dz + 2.0 * dx, v)),
-            (Vec3::new(hi.x, hi.y, lo.z), Vec2::new(u + dz + dx, v)),
         ],
     ];
     for face in faces {
@@ -285,8 +568,8 @@ pub fn visible_blobs(instances: &[MobInstance], visible: impl Fn(Vec3, Vec3) -> 
 pub fn visible_vertices(
     instances: &[MobInstance],
     visible: impl Fn(Vec3, Vec3) -> bool,
-) -> Vec<f32> {
-    let mut out = Vec::new();
+) -> MobVertices {
+    let mut out = MobVertices::default();
     for instance in instances {
         let (min, max) = instance.bounds();
         if visible(min, max) {
@@ -320,53 +603,64 @@ pub fn texture_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
-pub fn create_texture_group(
+pub fn create_texture_groups(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     images: &EntityImages,
-) -> wgpu::BindGroup {
-    let pig = &images.pig;
-    let texture = device.create_texture_with_data(
-        queue,
-        &wgpu::TextureDescriptor {
-            label: Some("entity pig"),
-            size: wgpu::Extent3d {
-                width: pig.width,
-                height: pig.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-        wgpu::util::TextureDataOrder::LayerMajor,
-        &pig.rgba,
-    );
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+) -> Vec<wgpu::BindGroup> {
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("entity"),
         mag_filter: wgpu::FilterMode::Nearest,
         min_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("entity"),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&sampler),
-            },
-        ],
-    })
+    EntityTexture::ALL
+        .into_iter()
+        .map(|sheet| {
+            let image = match sheet {
+                EntityTexture::Pig => &images.pig,
+                EntityTexture::Chicken => &images.chicken,
+                EntityTexture::Cow => &images.cow,
+                EntityTexture::Sheep => &images.sheep,
+                EntityTexture::SheepFur => &images.sheep_fur,
+            };
+            let texture = device.create_texture_with_data(
+                queue,
+                &wgpu::TextureDescriptor {
+                    label: Some("entity sheet"),
+                    size: wgpu::Extent3d {
+                        width: image.width,
+                        height: image.height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                },
+                wgpu::util::TextureDataOrder::LayerMajor,
+                &image.rgba,
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("entity"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

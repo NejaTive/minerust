@@ -1,1 +1,6 @@
-[{ "name": "pig_spawn_egg", "label": "яйцо призыва свиньи" }]
+[
+  { "name": "pig_spawn_egg", "label": "яйцо призыва свиньи" },
+  { "name": "chicken_spawn_egg", "label": "яйцо призыва курицы" },
+  { "name": "cow_spawn_egg", "label": "яйцо призыва коровы" },
+  { "name": "sheep_spawn_egg", "label": "яйцо призыва овцы" }
+]
