@@ -65,3 +65,60 @@ fn bench_points() {
         &forest[..forest.len().min(5)]
     );
 }
+
+#[test]
+#[ignore]
+fn climate_quantiles() {
+    for seed in [1337, 42, 7, 5] {
+        let terrain = Terrain::new(seed);
+        let (mut t, mut h) = (Vec::new(), Vec::new());
+        for z in (-20000..20000).step_by(100) {
+            for x in (-20000..20000).step_by(100) {
+                let (a, b) = terrain.climate(x, z);
+                t.push(a);
+                h.push(b);
+            }
+        }
+        t.sort_by(f32::total_cmp);
+        h.sort_by(f32::total_cmp);
+        let q = |v: &Vec<f32>| {
+            [
+                0.07, 0.15, 0.3, 0.45, 0.55, 0.7, 0.78, 0.85, 0.93, 0.33, 0.67,
+            ]
+            .map(|p| v[(p * v.len() as f32) as usize])
+        };
+        println!("seed {seed} t {:.3?}\n h {:.3?}", q(&t), q(&h));
+    }
+}
+
+#[test]
+#[ignore]
+fn share_report() {
+    for seed in [1337, 42, 7, 5, 99, 2024] {
+        let terrain = Terrain::new(seed);
+        let s = |b| super::tests::biome_share(&terrain, b);
+        println!(
+            "seed {seed} plains {:.3} forest {:.3} desert {:.3} taiga {:.3} tundra {:.3}",
+            s(Biome::Plains),
+            s(Biome::Forest),
+            s(Biome::Desert),
+            s(Biome::Taiga),
+            s(Biome::Tundra)
+        );
+    }
+}
+
+#[test]
+#[ignore]
+fn run_report() {
+    for seed in [1337, 42, 7, 99] {
+        let terrain = Terrain::new(seed);
+
+        println!(
+            "run {seed} all {:.0} snow {:.0} desert {:.0}",
+            super::tests::mean_run_length(&terrain, |b| b),
+            super::tests::mean_run_length(&terrain, Biome::is_snowy),
+            super::tests::mean_run_length(&terrain, |b| b == Biome::Desert)
+        );
+    }
+}

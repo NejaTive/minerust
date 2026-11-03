@@ -1,4 +1,4 @@
-use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
+use fastnoise_lite::{DomainWarpType, FastNoiseLite, FractalType, NoiseType};
 use glam::IVec3;
 
 use crate::block::Block;
@@ -15,14 +15,29 @@ pub const WATER_LEVEL: i32 = 62;
 const GRAVEL_DEPTH: i32 = 2;
 const BEACH: std::ops::RangeInclusive<i32> = WATER_LEVEL - 2..=WATER_LEVEL + 1;
 const BEACH_SAND_DEPTH: i32 = 3;
-const PLAINS_AMPLITUDE: f32 = 6.0;
-const DESERT_AMPLITUDE: f32 = 4.0;
-const FOREST_AMPLITUDE: f32 = 14.0;
-const TAIGA_AMPLITUDE: f32 = 9.0;
-const TUNDRA_AMPLITUDE: f32 = PLAINS_AMPLITUDE;
+const BASE_AMPLITUDE: f32 = 8.0;
 const HILLS_AMPLITUDE: f32 = 34.0;
+const CONTINENT_AMPLITUDE: f32 = 4.0;
+const BIOME_AMPLITUDE: [f32; 5] = [-2.0, -4.0, 4.0, 1.0, -2.0];
 
-const TAIGA_COLD: (f32, f32) = (0.55, 0.7);
+const CLIMATE_FREQUENCY: f32 = 0.00033;
+const HUMIDITY_FREQUENCY: f32 = 0.0013;
+const WARP_FREQUENCY: f32 = 0.001;
+const WARP_AMPLITUDE: f32 = 160.0;
+const JITTER_FREQUENCY: f32 = 0.04;
+const JITTER_AMPLITUDE: f32 = 4.0;
+const TEMPERATURE_BLEND: f32 = 0.018;
+const HUMIDITY_BLEND: f32 = 0.06;
+const TEMPERATURE_CUTS: [f32; 4] = [-0.5, -0.36, -0.048, 0.26];
+const HUMIDITY_CUTS: [f32; 2] = [-0.209, 0.209];
+const BIOME_TABLE: [[Biome; 3]; 5] = [
+    [Biome::Tundra, Biome::Tundra, Biome::Tundra],
+    [Biome::Tundra, Biome::Taiga, Biome::Taiga],
+    [Biome::Plains, Biome::Plains, Biome::Forest],
+    [Biome::Plains, Biome::Forest, Biome::Forest],
+    [Biome::Desert, Biome::Desert, Biome::Plains],
+];
+
 const BEDROCK_SCATTER: i32 = 3;
 const SALT_BEDROCK: u64 = 30;
 pub const FLAT_SURFACE: i32 = 4;
@@ -76,31 +91,41 @@ pub struct BiomeWeights {
 
 impl BiomeWeights {
     pub fn dominant(self) -> Biome {
-        let land = self.plains.max(self.forest);
-        let cold = self.taiga.max(self.tundra);
-        if cold > land.max(self.desert) {
-            if self.tundra > self.taiga {
-                Biome::Tundra
-            } else {
-                Biome::Taiga
-            }
-        } else if self.desert > land {
-            Biome::Desert
-        } else if self.forest > self.plains {
-            Biome::Forest
-        } else {
-            Biome::Plains
-        }
+        let all = self.as_array();
+        let top = all.iter().copied().fold(0.0, f32::max);
+        let index = all.iter().position(|&w| w == top).unwrap_or(0);
+        BIOMES[index]
+    }
+
+    fn as_array(self) -> [f32; 5] {
+        [
+            self.plains,
+            self.desert,
+            self.forest,
+            self.taiga,
+            self.tundra,
+        ]
     }
 }
+
+const BIOMES: [Biome; 5] = [
+    Biome::Plains,
+    Biome::Desert,
+    Biome::Forest,
+    Biome::Taiga,
+    Biome::Tundra,
+];
 
 pub struct Terrain {
     seed: i32,
     world_type: WorldType,
     height: FastNoiseLite,
-    hilliness: FastNoiseLite,
+    erosion: FastNoiseLite,
+    continentalness: FastNoiseLite,
     temperature: FastNoiseLite,
     humidity: FastNoiseLite,
+    warp: FastNoiseLite,
+    jitter: FastNoiseLite,
     pub(crate) caves: Caves,
 }
 
@@ -116,14 +141,19 @@ impl Terrain {
         height.set_fractal_octaves(Some(5));
         height.set_frequency(Some(0.005));
 
-        let mut hilliness = FastNoiseLite::with_seed(seed.wrapping_add(1));
-        hilliness.set_noise_type(Some(NoiseType::OpenSimplex2));
-        hilliness.set_frequency(Some(0.0015));
-
-        let climate = |offset| {
+        let layer = |offset: i32, frequency: f32, octaves: i32| {
             let mut noise = FastNoiseLite::with_seed(seed.wrapping_add(offset));
             noise.set_noise_type(Some(NoiseType::OpenSimplex2));
-            noise.set_frequency(Some(0.003));
+            noise.set_fractal_type(Some(FractalType::FBm));
+            noise.set_fractal_octaves(Some(octaves));
+            noise.set_frequency(Some(frequency));
+            noise
+        };
+        let warp = |offset: i32, frequency: f32, amplitude: f32| {
+            let mut noise = FastNoiseLite::with_seed(seed.wrapping_add(offset));
+            noise.set_domain_warp_type(Some(DomainWarpType::OpenSimplex2));
+            noise.set_domain_warp_amp(Some(amplitude));
+            noise.set_frequency(Some(frequency));
             noise
         };
 
@@ -131,9 +161,12 @@ impl Terrain {
             seed,
             world_type,
             height,
-            hilliness,
-            temperature: climate(2),
-            humidity: climate(3),
+            erosion: layer(1, 0.0008, 2),
+            continentalness: layer(4, 0.0005, 2),
+            temperature: layer(2, CLIMATE_FREQUENCY, 4),
+            humidity: layer(3, HUMIDITY_FREQUENCY, 2),
+            warp: warp(5, WARP_FREQUENCY, WARP_AMPLITUDE),
+            jitter: warp(6, JITTER_FREQUENCY, JITTER_AMPLITUDE),
             caves: Caves::new(seed),
         }
     }
@@ -156,21 +189,31 @@ impl Terrain {
                 tundra: 0.0,
             };
         }
-        let (x, z) = (x as f32, z as f32);
-        let temperature = self.temperature.get_noise_2d(x, z);
-        let humidity = self.humidity.get_noise_2d(x, z);
-        let desert = smoothstep(0.05, 0.25, temperature) * smoothstep(0.1, 0.3, -humidity);
-        let cold = smoothstep(-TAIGA_COLD.0, -TAIGA_COLD.1, temperature);
-        let wet = smoothstep(0.1, 0.3, humidity);
-        let (taiga, tundra) = (cold * wet, cold * (1.0 - wet));
-        let forest = wet * (1.0 - cold);
-        BiomeWeights {
-            plains: (1.0 - desert - forest - cold).max(0.0),
-            desert,
-            forest,
-            taiga,
-            tundra,
+        let (temperature, humidity) = self.climate(x, z);
+        let temperature: [f32; 5] = bands(temperature, &TEMPERATURE_CUTS, TEMPERATURE_BLEND);
+        let humidity: [f32; 3] = bands(humidity, &HUMIDITY_CUTS, HUMIDITY_BLEND);
+        let mut weights = [0.0; 5];
+        for (row, &t) in BIOME_TABLE.iter().zip(&temperature) {
+            for (&biome, &h) in row.iter().zip(&humidity) {
+                weights[biome as usize] += t * h;
+            }
         }
+        BiomeWeights {
+            plains: weights[Biome::Plains as usize],
+            desert: weights[Biome::Desert as usize],
+            forest: weights[Biome::Forest as usize],
+            taiga: weights[Biome::Taiga as usize],
+            tundra: weights[Biome::Tundra as usize],
+        }
+    }
+
+    pub(crate) fn climate(&self, x: i32, z: i32) -> (f32, f32) {
+        let (x, z) = self.warp.domain_warp_2d(x as f32, z as f32);
+        let (x, z) = self.jitter.domain_warp_2d(x, z);
+        (
+            self.temperature.get_noise_2d(x, z),
+            self.humidity.get_noise_2d(x, z),
+        )
     }
 
     /// Веса биомов колонки для `Renderer::set_biome_column`: строки по z, внутри x, четыре
@@ -202,14 +245,17 @@ impl Terrain {
             WorldType::Standard => {}
         }
         let (x, z) = (x as f32, z as f32);
-        let hills = smoothstep(-0.2, 0.4, self.hilliness.get_noise_2d(x, z));
-        let amplitude = w.plains * PLAINS_AMPLITUDE
-            + w.desert * DESERT_AMPLITUDE
-            + w.forest * FOREST_AMPLITUDE
-            + w.taiga * TAIGA_AMPLITUDE
-            + w.tundra * TUNDRA_AMPLITUDE
-            + HILLS_AMPLITUDE * hills;
-        let y = SEA_LEVEL + amplitude * self.height.get_noise_2d(x, z);
+        let hills = smoothstep(-0.2, 0.4, self.erosion.get_noise_2d(x, z));
+        let biome: f32 = w
+            .as_array()
+            .iter()
+            .zip(BIOME_AMPLITUDE)
+            .map(|(weight, delta)| weight * delta)
+            .sum();
+        let amplitude = BASE_AMPLITUDE + biome + HILLS_AMPLITUDE * hills;
+        let y = SEA_LEVEL
+            + CONTINENT_AMPLITUDE * self.continentalness.get_noise_2d(x, z)
+            + amplitude * self.height.get_noise_2d(x, z);
         (y.floor() as i32).clamp(1, WORLD_HEIGHT - 2)
     }
 
@@ -373,6 +419,18 @@ pub fn debug_grid_side(cells: usize) -> i32 {
 fn debug_cell_origin(cell: usize, side: i32) -> (i32, i32) {
     let cell = cell as i32;
     (cell % side * DEBUG_STEP, cell / side * DEBUG_STEP)
+}
+
+fn bands<const N: usize, const M: usize>(value: f32, cuts: &[f32; N], blend: f32) -> [f32; M] {
+    let mut out = [0.0; M];
+    let mut above = 1.0;
+    for (slot, &cut) in out.iter_mut().zip(cuts) {
+        let step = smoothstep(cut - blend, cut + blend, value);
+        *slot = above - step;
+        above = step;
+    }
+    out[N] = above;
+    out
 }
 
 pub(crate) fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
