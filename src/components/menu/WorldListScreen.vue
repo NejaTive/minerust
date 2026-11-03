@@ -21,7 +21,7 @@ const played = (ts: number) =>
   <ul v-if="worlds.length" class="list px-scroll" role="listbox" aria-label="Миры">
     <li v-for="world in worlds" :key="world.id">
       <button
-        class="row"
+        class="row px-row"
         :class="{ selected: world.id === selectedId }"
         role="option"
         :aria-selected="world.id === selectedId"

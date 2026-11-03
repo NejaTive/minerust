@@ -127,20 +127,22 @@ body,
   color: var(--px-text-dim);
 }
 .px-menu button {
-  position: relative;
   box-sizing: border-box;
-  height: calc(20 * var(--gui-u));
-  padding: 0 12px;
   color: var(--px-text);
   font: inherit;
   text-shadow: inherit;
   background: none;
   border: 0;
   cursor: pointer;
+}
+.px-menu button:not(.px-row) {
+  position: relative;
+  height: calc(20 * var(--gui-u));
+  padding: 0 12px;
   isolation: isolate;
 }
-.px-menu button::before,
-.px-menu button::after {
+.px-menu button:not(.px-row)::before,
+.px-menu button:not(.px-row)::after {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -151,24 +153,24 @@ body,
   background-position-y: calc(-66 * var(--gui-u));
   image-rendering: pixelated;
 }
-.px-menu button::before {
+.px-menu button:not(.px-row)::before {
   right: 50%;
   left: 0;
   background-position-x: 0;
 }
-.px-menu button::after {
+.px-menu button:not(.px-row)::after {
   right: 0;
   left: 50%;
   background-position-x: calc(100% + 56 * var(--gui-u));
 }
-.px-menu button:hover:not(:disabled)::before,
-.px-menu button:hover:not(:disabled)::after,
-.px-menu button:focus-visible::before,
-.px-menu button:focus-visible::after {
+.px-menu button:not(.px-row):hover:not(:disabled)::before,
+.px-menu button:not(.px-row):hover:not(:disabled)::after,
+.px-menu button:not(.px-row):focus-visible::before,
+.px-menu button:not(.px-row):focus-visible::after {
   background-position-y: calc(-86 * var(--gui-u));
 }
-.px-menu button:disabled::before,
-.px-menu button:disabled::after {
+.px-menu button:not(.px-row):disabled::before,
+.px-menu button:not(.px-row):disabled::after {
   background-position-y: calc(-46 * var(--gui-u));
 }
 .px-menu button:hover:not(:disabled),
@@ -181,9 +183,18 @@ body,
   text-shadow: none;
   cursor: default;
 }
-.px-menu button.selected {
+.px-menu button:not(.px-row).selected {
   outline: 2px solid #fff;
   outline-offset: -2px;
+}
+.px-menu button.px-row {
+  padding: 6px 12px;
+  background: rgb(0 0 0 / 0.45);
+  border: 2px solid transparent;
+}
+.px-menu button.px-row.selected,
+.px-menu button.px-row:focus-visible {
+  border-color: #fff;
 }
 .px-menu input[type='text'] {
   box-sizing: border-box;
