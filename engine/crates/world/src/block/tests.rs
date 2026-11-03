@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard())
 }
 
-const ALL: [Block; 25] = Block::ALL;
+const ALL: [Block; 26] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -17,7 +17,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(25), Err(25));
+    assert_eq!(Block::try_from(26), Err(26));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -76,6 +76,7 @@ fn solid_and_opaque() {
                 | Block::Lava
                 | Block::Snow
                 | Block::Ice
+                | Block::Barrier
         ) && !plant;
         assert_eq!(
             block.is_targetable(),
@@ -196,6 +197,9 @@ fn air_has_no_tiles_and_others_have_all() {
     let air = Block::Air.def();
     assert!(air.top.is_none() && air.side.is_none() && air.bottom.is_none());
     for block in Block::ALL.into_iter().skip(1) {
+        if block == Block::Barrier {
+            continue;
+        }
         let def = block.def();
         assert!(def.top.is_some() && def.side.is_some() && def.bottom.is_some());
     }
@@ -424,4 +428,35 @@ fn snowy_side_has_white_stripe_over_dirt() {
     let bottom = row(DEFAULT_TILE_SIZE as usize - 1);
     let mean = |c: usize| bottom.chunks(4).map(|p| u32::from(p[c])).sum::<u32>();
     assert!(mean(2) < mean(0));
+}
+
+#[test]
+fn barrier_is_solid_invisible_and_light_transparent() {
+    let def = Block::Barrier.def();
+    assert!(def.solid && def.targetable && !def.opaque && !def.selectable);
+    assert_eq!(Block::Barrier.emission(), 0);
+    assert_eq!(Block::from_name("barrier"), None);
+    assert!(
+        [Facing::Top, Facing::Bottom, Facing::Side]
+            .into_iter()
+            .all(|facing| Block::Barrier.tile(facing).is_none())
+    );
+}
+
+#[test]
+fn states_cover_every_data_kind() {
+    for block in Block::ALL {
+        let states: Vec<u8> = block.states().collect();
+        let expected = match block.data_kind() {
+            DataKind::None => 1,
+            DataKind::Axis => 3,
+            DataKind::Attachment => 5,
+            DataKind::Fluid => usize::from(FLUID_MAX_LEVEL) + 2,
+        };
+        assert_eq!(states.len(), expected, "{block:?}");
+        let mut unique = states.clone();
+        unique.dedup();
+        assert_eq!(unique.len(), states.len());
+    }
+    assert!(Block::Water.states().any(|d| d & FLUID_FALLING != 0));
 }

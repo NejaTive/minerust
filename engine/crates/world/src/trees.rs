@@ -246,7 +246,7 @@ impl Candidate {
 }
 
 pub fn tree_at(terrain: &Terrain, x: i32, z: i32) -> Option<Tree> {
-    if terrain.world_type() == WorldType::Flat {
+    if terrain.world_type() != WorldType::Standard {
         return None;
     }
     let own = candidate(terrain, x, z)?;

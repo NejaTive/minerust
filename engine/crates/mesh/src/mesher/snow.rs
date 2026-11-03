@@ -469,3 +469,10 @@ fn water_in_a_hole_keeps_its_surface_and_full_height_neighbours_under_ice() {
     assert_eq!(tops.len(), 1);
     assert!((tops[0] - 1.875).abs() < 1e-6, "{tops:?}");
 }
+
+#[test]
+fn barrier_has_no_mesh() {
+    let meshes = mesh_with(&[(AT, Block::Barrier)]);
+    assert!(meshes.solid.quads.is_empty() && meshes.cutout.quads.is_empty());
+    assert!(meshes.water.quads.is_empty());
+}

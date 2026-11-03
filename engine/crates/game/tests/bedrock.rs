@@ -48,3 +48,17 @@ fn stone_above_bedrock_still_breaks() {
     game.interact(0.0);
     assert_eq!(game.world.block(IVec3::new(0, FLAT_SURFACE, 0)), Block::Air);
 }
+
+#[test]
+fn debug_world_is_immutable_and_spawns_above_the_grid() {
+    let mut game = Game::of(1, WorldType::Debug, None).unwrap();
+    let key = ColumnPos::ZERO;
+    game.world.insert(key, game.terrain.generate(key));
+    game.light.add_column(&game.world, key);
+    assert!((game.camera_state()[1] - 72.0).abs() < 3.0);
+    let before = game.world.block(IVec3::new(0, 70, 0));
+    aim_down(&mut game, 72.0);
+    game.mouse_button(0, true);
+    game.interact(0.0);
+    assert_eq!(game.world.block(IVec3::new(0, 70, 0)), before);
+}

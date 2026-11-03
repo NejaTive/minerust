@@ -32,6 +32,7 @@ pub enum Block {
     SnowyGrass,
     Snow,
     Ice,
+    Barrier,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -206,7 +207,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 25] = [
+pub const BLOCKS: [BlockDef; 26] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -317,10 +318,17 @@ pub const BLOCKS: [BlockDef; 25] = [
         layer: RenderLayer::Translucent,
         ..BlockDef::uniform("ice", "лёд", Tile::Ice)
     },
+    BlockDef {
+        selectable: false,
+        opaque: false,
+        name: "barrier",
+        label: "барьер",
+        ..BlockDef::CUBE
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 25] = [
+    pub const ALL: [Block; 26] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -346,6 +354,7 @@ impl Block {
         Block::SnowyGrass,
         Block::Snow,
         Block::Ice,
+        Block::Barrier,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -456,6 +465,32 @@ impl Block {
                 _ => None,
             },
         }
+    }
+
+    pub fn states(self) -> impl Iterator<Item = u8> {
+        let states: &[u8] = match self.data_kind() {
+            DataKind::None => &[0],
+            DataKind::Axis => &[AXIS_Y, AXIS_X, AXIS_Z],
+            DataKind::Attachment => &[
+                ATTACH_FLOOR,
+                ATTACH_POS_X,
+                ATTACH_NEG_X,
+                ATTACH_POS_Z,
+                ATTACH_NEG_Z,
+            ],
+            DataKind::Fluid => &[
+                FLUID_SOURCE,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                FLUID_MAX_LEVEL,
+                FLUID_FALLING,
+            ],
+        };
+        states.iter().copied()
     }
 
     pub fn axis(self, data: u8) -> usize {
