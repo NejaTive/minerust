@@ -116,3 +116,92 @@ fn record_round_trips() {
 fn angle_difference_wraps() {
     assert!((angle_diff(0.1, TAU - 0.1) - 0.2).abs() < 1e-5);
 }
+
+fn walk_east(mob: &mut Mob) {
+    mob.plan = Plan::Walk {
+        target: Vec2::new(6.0, 0.5),
+        ticks: 0,
+        checkpoint: Vec2::new(0.5, 0.5),
+    };
+}
+
+fn cells_above_floor(blocks: &'static [(i32, i32)], from_x: i32) -> impl Fn(IVec3) -> Collision {
+    move |pos| {
+        let solid = pos.y <= FLOOR
+            || pos.x >= from_x && blocks.iter().any(|&(lo, hi)| (lo..=hi).contains(&pos.y));
+        if solid {
+            Collision::FULL
+        } else {
+            Collision::NONE
+        }
+    }
+}
+
+#[test]
+fn hops_onto_a_block_without_snapping_up() {
+    let step = cells_above_floor(&[(64, 64)], 3);
+    let mut mob = pig(1);
+    walk_east(&mut mob);
+    let around = Surroundings {
+        collision: &step,
+        fluid: &dry,
+        player_eye: Vec3::new(0.5, 65.6, 0.5),
+    };
+    let mut worst_rise: f32 = 0.0;
+    for _ in 0..600 {
+        let before = mob.body.feet.y;
+        mob.tick(&around);
+        worst_rise = worst_rise.max(mob.body.feet.y - before);
+    }
+    assert!(
+        mob.body.feet.x > 3.0 && mob.body.feet.y >= 64.99,
+        "{:?}",
+        mob.body.feet
+    );
+    assert!(worst_rise < 0.5, "{worst_rise}");
+}
+
+#[test]
+fn does_not_jump_at_a_two_block_wall() {
+    let wall = cells_above_floor(&[(64, 65)], 3);
+    let mut mob = pig(1);
+    walk_east(&mut mob);
+    let mut peak: f32 = 0.0;
+    let around = Surroundings {
+        collision: &wall,
+        fluid: &dry,
+        player_eye: Vec3::new(0.5, 65.6, 0.5),
+    };
+    for _ in 0..600 {
+        mob.tick(&around);
+        peak = peak.max(mob.body.feet.y);
+    }
+    assert!(mob.body.feet.x < 3.0);
+    assert_eq!(peak, 64.0);
+}
+
+#[test]
+fn does_not_jump_under_a_ceiling() {
+    let low = |pos: IVec3| {
+        let solid = pos.y <= FLOOR || pos.x >= 3 && pos.y == 64 || pos.y == 65;
+        if solid {
+            Collision::FULL
+        } else {
+            Collision::NONE
+        }
+    };
+    let mut mob = pig(1);
+    walk_east(&mut mob);
+    let mut peak: f32 = 0.0;
+    let around = Surroundings {
+        collision: &low,
+        fluid: &dry,
+        player_eye: Vec3::new(0.5, 65.6, 0.5),
+    };
+    for _ in 0..600 {
+        mob.tick(&around);
+        peak = peak.max(mob.body.feet.y);
+    }
+    assert!(mob.body.feet.x < 3.0);
+    assert_eq!(peak, 64.0);
+}
