@@ -79,7 +79,7 @@ fn low_ground_is_under_water() {
 fn water_fills_column_up_to_level() {
     let terrain = Terrain::new(1);
     let (x, z) = find_column(&terrain, |x, z, w| {
-        terrain.surface(x, z, w) == 55 && w.dominant() != Biome::Taiga
+        terrain.surface(x, z, w) == 55 && !w.dominant().is_snowy()
     })
     .expect("no column with surface 55");
     let column = terrain.generate(ColumnPos::new(x.div_euclid(16), z.div_euclid(16)));
@@ -168,12 +168,12 @@ fn weights_sum_to_one() {
     for i in 0..1000 {
         let w = terrain.biome_weights(i * 13, i * -7);
         assert!(
-            [w.plains, w.desert, w.forest, w.taiga]
+            [w.plains, w.desert, w.forest, w.taiga, w.tundra]
                 .iter()
                 .all(|&v| (0.0..=1.0).contains(&v))
         );
         assert!(
-            (w.plains + w.desert + w.forest + w.taiga - 1.0).abs() < 1e-5,
+            (w.plains + w.desert + w.forest + w.taiga + w.tundra - 1.0).abs() < 1e-5,
             "{w:?}"
         );
     }
@@ -183,7 +183,7 @@ fn weights_sum_to_one() {
 fn all_biomes_within_2048_blocks() {
     for seed in [1337, 42, 7] {
         let terrain = Terrain::new(seed);
-        let mut counts = [0; 4];
+        let mut counts = [0; 5];
         for z in (0..2048).step_by(16) {
             for x in (0..2048).step_by(16) {
                 counts[terrain.biome_at(x, z) as usize] += 1;
@@ -200,7 +200,7 @@ fn all_biomes_within_2048_blocks() {
 #[test]
 fn biome_borders_have_no_cliffs() {
     let terrain = Terrain::new(1337);
-    let pure = |w: BiomeWeights| [w.plains, w.desert, w.forest, w.taiga].contains(&1.0);
+    let pure = |w: BiomeWeights| [w.plains, w.desert, w.forest, w.taiga, w.tundra].contains(&1.0);
     let (mut border, mut forest, mut border_pairs) = (0, 0, 0);
     for row in (-2048..2048).step_by(32) {
         for along_x in [true, false] {
@@ -399,23 +399,33 @@ fn biome_share(terrain: &Terrain, biome: Biome) -> f32 {
 }
 
 #[test]
-fn taiga_is_about_as_common_as_desert() {
+fn cold_biomes_are_about_as_common_as_desert_and_tundra_leads() {
     for seed in [1337, 42, 7] {
         let terrain = Terrain::new(seed);
-        let (taiga, desert) = (
+        let (taiga, tundra, desert) = (
             biome_share(&terrain, Biome::Taiga),
+            biome_share(&terrain, Biome::Tundra),
             biome_share(&terrain, Biome::Desert),
         );
-        assert!((0.12..0.25).contains(&taiga), "seed {seed}: taiga {taiga}");
+        let cold = taiga + tundra;
+        assert!((0.12..0.25).contains(&cold), "seed {seed}: cold {cold}");
         assert!(
-            (taiga - desert).abs() < 0.04,
-            "seed {seed}: taiga {taiga}, desert {desert}"
+            (cold - desert).abs() < 0.04,
+            "seed {seed}: cold {cold}, desert {desert}"
+        );
+        assert!(
+            tundra > cold * 0.5,
+            "seed {seed}: tundra {tundra}, taiga {taiga}"
+        );
+        assert!(
+            taiga > cold * 0.1,
+            "seed {seed}: tundra {tundra}, taiga {taiga}"
         );
     }
 }
 
 #[test]
-fn taiga_never_touches_desert() {
+fn cold_biomes_never_touch_desert() {
     for seed in [1337, 42] {
         let terrain = Terrain::new(seed);
         let mut taiga = 0;
@@ -423,12 +433,10 @@ fn taiga_never_touches_desert() {
             let mut previous = terrain.biome_at(-4000, z);
             for x in -3999..4000 {
                 let biome = terrain.biome_at(x, z);
-                taiga += i32::from(biome == Biome::Taiga);
+                taiga += i32::from(biome.is_snowy());
                 assert!(
-                    !matches!(
-                        (previous, biome),
-                        (Biome::Taiga, Biome::Desert) | (Biome::Desert, Biome::Taiga)
-                    ),
+                    !(previous.is_snowy() && biome == Biome::Desert
+                        || previous == Biome::Desert && biome.is_snowy()),
                     "seed {seed}: {x}, {z}"
                 );
                 previous = biome;
@@ -439,16 +447,25 @@ fn taiga_never_touches_desert() {
 }
 
 #[test]
-fn flat_world_has_no_taiga() {
-    let terrain = Terrain::of(1337, WorldType::Flat);
-    for i in 0..500 {
-        let weights = terrain.biome_weights(i * 97, i * -61);
-        assert_eq!(weights.taiga, 0.0);
-        assert_eq!(weights.dominant(), Biome::Plains);
+fn flat_and_debug_worlds_have_no_cold_biomes() {
+    for world_type in [WorldType::Flat, WorldType::Debug] {
+        let terrain = Terrain::of(1337, world_type);
+        for i in 0..500 {
+            let weights = terrain.biome_weights(i * 97, i * -61);
+            assert_eq!((weights.taiga, weights.tundra), (0.0, 0.0));
+            assert_eq!(weights.dominant(), Biome::Plains);
+        }
     }
 }
 
-fn taiga_columns(terrain: &Terrain) -> Vec<ColumnPos> {
+#[test]
+fn tundra_is_found_in_the_standard_world() {
+    let terrain = Terrain::new(1337);
+    let (x, z) = find_biome(&terrain, Biome::Tundra);
+    assert_eq!(terrain.biome_at(x, z), Biome::Tundra);
+}
+
+fn cold_columns(terrain: &Terrain, biome: Biome) -> Vec<ColumnPos> {
     (-48..48)
         .flat_map(|z| (-48..48).map(move |x| ColumnPos::new(x, z)))
         .filter(|key| {
@@ -456,23 +473,29 @@ fn taiga_columns(terrain: &Terrain) -> Vec<ColumnPos> {
             (0..SECTION_SIZE)
                 .step_by(5)
                 .flat_map(|d| [(d, d), (d, SECTION_SIZE - 1 - d)])
-                .all(|(dx, dz)| terrain.biome_at(origin.x + dx, origin.z + dz) == Biome::Taiga)
+                .all(|(dx, dz)| terrain.biome_at(origin.x + dx, origin.z + dz) == biome)
         })
         .collect()
 }
 
 #[test]
-fn taiga_surface_is_snowy_grass_under_a_snow_layer() {
+fn snowy_surface_is_snowy_grass_under_a_snow_layer() {
     let terrain = Terrain::new(1337);
+    for biome in [Biome::Taiga, Biome::Tundra] {
+        assert_snowy_surface(&terrain, biome);
+    }
+}
+
+fn assert_snowy_surface(terrain: &Terrain, biome: Biome) {
     let mut checked = 0;
-    for key in taiga_columns(&terrain).into_iter().take(40) {
+    for key in cold_columns(terrain, biome).into_iter().take(40) {
         let column = terrain.generate_ground(key);
         for z in 0..SECTION_SIZE {
             for x in 0..SECTION_SIZE {
                 let (wx, wz) = (key.origin().x + x, key.origin().z + z);
                 let surface = terrain.surface_height(wx, wz);
                 let at = |y| column.get(IVec3::new(x, y, z));
-                if surface < WATER_LEVEL || terrain.biome_at(wx, wz) != Biome::Taiga {
+                if surface < WATER_LEVEL || terrain.biome_at(wx, wz) != biome {
                     continue;
                 }
                 if matches!(at(surface), Block::Sand | Block::Bedrock) {
@@ -486,7 +509,7 @@ fn taiga_surface_is_snowy_grass_under_a_snow_layer() {
             }
         }
     }
-    assert!(checked > 2000, "{checked} cells");
+    assert!(checked > 1000, "{biome:?}: {checked} cells");
 }
 
 #[test]
@@ -507,8 +530,14 @@ fn other_biomes_stay_green_and_snowless() {
 }
 
 #[test]
-fn taiga_water_is_capped_with_ice() {
+fn snowy_water_is_capped_with_ice() {
     let terrain = Terrain::new(1337);
+    for biome in [Biome::Taiga, Biome::Tundra] {
+        assert_ice_cap(&terrain, biome);
+    }
+}
+
+fn assert_ice_cap(terrain: &Terrain, biome: Biome) {
     let mut lakes = 0;
     let mut deep = 0;
     for z in -48..48 {
@@ -519,7 +548,7 @@ fn taiga_water_is_capped_with_ice() {
                 for lx in 0..SECTION_SIZE {
                     let (wx, wz) = (key.origin().x + lx, key.origin().z + lz);
                     let surface = terrain.surface_height(wx, wz);
-                    if surface >= WATER_LEVEL || terrain.biome_at(wx, wz) != Biome::Taiga {
+                    if surface >= WATER_LEVEL || terrain.biome_at(wx, wz) != biome {
                         continue;
                     }
                     let at = |y| column.get(IVec3::new(lx, y, lz));
@@ -535,14 +564,17 @@ fn taiga_water_is_capped_with_ice() {
             }
         }
     }
-    assert!(lakes > 200, "{lakes} frozen cells");
-    assert!(deep > 100, "{deep} cells with water under the ice");
+    assert!(lakes > 200, "{biome:?}: {lakes} frozen cells");
+    assert!(
+        deep > 100,
+        "{biome:?}: {deep} cells with water under the ice"
+    );
 }
 
 #[test]
 fn snow_layer_follows_the_ground_through_caves() {
     let terrain = Terrain::new(1337);
-    for key in taiga_columns(&terrain).into_iter().take(40) {
+    for key in cold_columns(&terrain, Biome::Taiga).into_iter().take(40) {
         let column = terrain.generate_carved(key);
         for y in 1..WORLD_HEIGHT {
             for z in 0..SECTION_SIZE {

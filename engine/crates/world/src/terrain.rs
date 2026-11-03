@@ -19,6 +19,7 @@ const PLAINS_AMPLITUDE: f32 = 6.0;
 const DESERT_AMPLITUDE: f32 = 4.0;
 const FOREST_AMPLITUDE: f32 = 14.0;
 const TAIGA_AMPLITUDE: f32 = 9.0;
+const TUNDRA_AMPLITUDE: f32 = PLAINS_AMPLITUDE;
 const HILLS_AMPLITUDE: f32 = 34.0;
 
 const TAIGA_COLD: (f32, f32) = (0.55, 0.7);
@@ -55,6 +56,13 @@ pub enum Biome {
     Desert,
     Forest,
     Taiga,
+    Tundra,
+}
+
+impl Biome {
+    pub fn is_snowy(self) -> bool {
+        matches!(self, Biome::Taiga | Biome::Tundra)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -63,13 +71,19 @@ pub struct BiomeWeights {
     pub desert: f32,
     pub forest: f32,
     pub taiga: f32,
+    pub tundra: f32,
 }
 
 impl BiomeWeights {
     pub fn dominant(self) -> Biome {
         let land = self.plains.max(self.forest);
-        if self.taiga > land.max(self.desert) {
-            Biome::Taiga
+        let cold = self.taiga.max(self.tundra);
+        if cold > land.max(self.desert) {
+            if self.tundra > self.taiga {
+                Biome::Tundra
+            } else {
+                Biome::Taiga
+            }
         } else if self.desert > land {
             Biome::Desert
         } else if self.forest > self.plains {
@@ -139,24 +153,28 @@ impl Terrain {
                 desert: 0.0,
                 forest: 0.0,
                 taiga: 0.0,
+                tundra: 0.0,
             };
         }
         let (x, z) = (x as f32, z as f32);
         let temperature = self.temperature.get_noise_2d(x, z);
         let humidity = self.humidity.get_noise_2d(x, z);
         let desert = smoothstep(0.05, 0.25, temperature) * smoothstep(0.1, 0.3, -humidity);
-        let taiga = smoothstep(-TAIGA_COLD.0, -TAIGA_COLD.1, temperature);
-        let forest = smoothstep(0.1, 0.3, humidity) * (1.0 - taiga);
+        let cold = smoothstep(-TAIGA_COLD.0, -TAIGA_COLD.1, temperature);
+        let wet = smoothstep(0.1, 0.3, humidity);
+        let (taiga, tundra) = (cold * wet, cold * (1.0 - wet));
+        let forest = wet * (1.0 - cold);
         BiomeWeights {
-            plains: (1.0 - desert - forest - taiga).max(0.0),
+            plains: (1.0 - desert - forest - cold).max(0.0),
             desert,
             forest,
             taiga,
+            tundra,
         }
     }
 
     /// Веса биомов колонки для `Renderer::set_biome_column`: строки по z, внутри x, четыре
-    /// байта на блок в порядке `BiomeWeights`.
+    /// байта на блок: равнины, пустыня, лес, холод (тайга + тундра).
     pub fn column_biome_bytes(&self, key: ColumnPos) -> Vec<u8> {
         let origin = key.origin();
         let mut out = Vec::with_capacity((SECTION_SIZE * SECTION_SIZE * 4) as usize);
@@ -189,6 +207,7 @@ impl Terrain {
             + w.desert * DESERT_AMPLITUDE
             + w.forest * FOREST_AMPLITUDE
             + w.taiga * TAIGA_AMPLITUDE
+            + w.tundra * TUNDRA_AMPLITUDE
             + HILLS_AMPLITUDE * hills;
         let y = SEA_LEVEL + amplitude * self.height.get_noise_2d(x, z);
         (y.floor() as i32).clamp(1, WORLD_HEIGHT - 2)
@@ -242,7 +261,7 @@ impl Terrain {
                 let surface = self.surface(wx, wz, weights);
                 let biome = weights.dominant();
                 let desert = biome == Biome::Desert;
-                let taiga = biome == Biome::Taiga;
+                let snowy = biome.is_snowy();
                 let sand_depth = if desert {
                     (3.0 + weights.desert).round() as i32
                 } else if BEACH.contains(&surface) {
@@ -254,7 +273,7 @@ impl Terrain {
                     Block::Gravel
                 } else if surface < WATER_LEVEL {
                     Block::Dirt
-                } else if taiga {
+                } else if snowy {
                     Block::SnowyGrass
                 } else {
                     Block::Grass
@@ -273,7 +292,7 @@ impl Terrain {
                     column.set(IVec3::new(x, y, z), block);
                 }
                 for y in surface + 1..=WATER_LEVEL {
-                    let water = if taiga && y == WATER_LEVEL {
+                    let water = if snowy && y == WATER_LEVEL {
                         Block::Ice
                     } else {
                         Block::Water

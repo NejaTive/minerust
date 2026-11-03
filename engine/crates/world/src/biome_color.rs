@@ -3,8 +3,8 @@ use crate::textures::DecodedImage;
 
 pub const BIOME_COUNT: usize = 4;
 
-/// Порядок как в `BiomeWeights`: равнины, пустыня, лес, тайга. Тайга у нас всегда заснежена,
-/// поэтому берётся климат Snowy Taiga.
+/// Порядок как в `BiomeWeights`: равнины, пустыня, лес, холод. Тайга и тундра заснежены и в
+/// Minecraft дают один цвет (температура ниже 0 зажимается), поэтому берётся климат Snowy Taiga.
 const CLIMATE: [(f32, f32); BIOME_COUNT] = [(0.8, 0.4), (2.0, 0.0), (0.7, 0.8), (-0.5, 0.4)];
 
 const GRASS: [u32; BIOME_COUNT] = [0x91BD59, 0xBFB755, 0x79C05A, 0x80B497];
@@ -125,7 +125,8 @@ impl BiomePalette {
 }
 
 pub fn weights_bytes(w: BiomeWeights) -> [u8; BIOME_COUNT] {
-    [w.plains, w.desert, w.forest, w.taiga].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+    [w.plains, w.desert, w.forest, w.taiga + w.tundra]
+        .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
 pub fn blend(colors: &[[f32; 3]; BIOME_COUNT], weights: [u8; BIOME_COUNT]) -> [f32; 3] {
