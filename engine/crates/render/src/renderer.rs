@@ -169,6 +169,13 @@ fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGrou
     }
 }
 
+#[derive(Default)]
+struct MobDraw {
+    mobs: u32,
+    blob_offset: u64,
+    blobs: u32,
+}
+
 const ENTITY_BUFFER_START: u64 = 64 * 1024;
 
 fn create_entity_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
@@ -775,20 +782,29 @@ impl Renderer {
             entity::create_texture_group(&self.device, &self.queue, &self.entity_layout, images);
     }
 
-    fn upload_mobs(&mut self, params: &FrameParams) -> u32 {
+    fn upload_mobs(&mut self, params: &FrameParams) -> MobDraw {
         let frustum = Frustum::from_view_proj(params.view_proj);
-        let floats =
-            entity::visible_vertices(&params.mobs, |min, max| frustum.intersects_aabb(min, max));
-        if floats.is_empty() {
-            return 0;
+        let visible = |min, max| frustum.intersects_aabb(min, max);
+        let mobs = entity::visible_vertices(&params.mobs, visible);
+        let blobs = entity::visible_blobs(&params.mobs, visible);
+        let bytes: Vec<u8> = mobs
+            .iter()
+            .chain(&blobs)
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
+        if bytes.is_empty() {
+            return MobDraw::default();
         }
-        let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
         if bytes.len() as u64 > self.entity_capacity {
             self.entity_capacity = (bytes.len() as u64).next_power_of_two();
             self.entity_buffer = create_entity_buffer(&self.device, self.entity_capacity);
         }
         self.queue.write_buffer(&self.entity_buffer, 0, &bytes);
-        (floats.len() / entity::VERTEX_FLOATS) as u32
+        MobDraw {
+            mobs: (mobs.len() / entity::VERTEX_FLOATS) as u32,
+            blob_offset: (mobs.len() * 4) as u64,
+            blobs: (blobs.len() / entity::BLOB_FLOATS) as u32,
+        }
     }
 
     pub fn set_cloud_mask(&self, mask: &CloudMask) {
@@ -913,7 +929,7 @@ impl Renderer {
     }
 
     pub fn begin(&mut self, params: &FrameParams) -> Result<Option<PendingFrame>, String> {
-        let mob_vertices = self.upload_mobs(params);
+        let mob_draw = self.upload_mobs(params);
         let (sun_screen, sun_ray) = if params.effects.hdr && params.effects.sun_rays {
             light_rays(
                 params.view_proj,
@@ -1135,12 +1151,19 @@ impl Renderer {
             }
             self.drawn_sections = visible.len() as u32;
 
-            if mob_vertices > 0 {
+            if mob_draw.mobs > 0 {
                 pass.set_pipeline(&pipes.entity);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_bind_group(3, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw(0..mob_vertices, 0..1);
+                pass.set_vertex_buffer(0, self.entity_buffer.slice(..mob_draw.blob_offset));
+                pass.draw(0..mob_draw.mobs, 0..1);
+                counts.draw_calls += 1;
+            }
+            if mob_draw.blobs > 0 {
+                pass.set_pipeline(&pipes.blob);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.entity_buffer.slice(mob_draw.blob_offset..));
+                pass.draw(0..mob_draw.blobs, 0..1);
                 counts.draw_calls += 1;
             }
 

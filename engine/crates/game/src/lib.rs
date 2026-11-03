@@ -5,6 +5,7 @@ mod double_tap;
 mod game;
 pub mod loader;
 pub mod mob;
+pub mod mob_shadow;
 pub mod physics;
 pub mod rain_cover;
 mod raycast;

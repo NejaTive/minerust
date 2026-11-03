@@ -11,6 +11,13 @@ fn instance() -> MobInstance {
         limb_swing: 0.0,
         sky_level: 15.0,
         block_level: 0.0,
+        shadow_radius: 0.7,
+        shadow: vec![ShadowPatch {
+            min: Vec2::new(9.5, -5.5),
+            max: Vec2::new(10.5, -4.5),
+            y: 64.02,
+            opacity: 0.5,
+        }],
     }
 }
 
@@ -113,4 +120,25 @@ fn light_levels_ride_along_the_vertices() {
 fn culled_mobs_emit_nothing() {
     assert!(visible_vertices(&[instance()], |_, _| false).is_empty());
     assert!(!visible_vertices(&[instance()], |_, _| true).is_empty());
+}
+
+#[test]
+fn blob_vertices_carry_local_coordinates_and_opacity() {
+    let pig = instance();
+    let mut out = Vec::new();
+    push_blobs(&pig, &mut out);
+    assert_eq!(out.len(), 6 * BLOB_FLOATS);
+    for v in out.as_chunks::<BLOB_FLOATS>().0 {
+        assert_eq!(v[1], 64.02);
+        assert_eq!(v[5], 0.5);
+        let local = Vec2::new(v[3], v[4]);
+        let expected = (Vec2::new(v[0], v[2]) - Vec2::new(10.0, -5.0)) / 0.7;
+        assert!((local - expected).length() < 1e-5);
+    }
+}
+
+#[test]
+fn culled_mobs_emit_no_blobs() {
+    assert!(visible_blobs(&[instance()], |_, _| false).is_empty());
+    assert!(!visible_blobs(&[instance()], |_, _| true).is_empty());
 }

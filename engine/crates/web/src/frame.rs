@@ -1,7 +1,7 @@
 use game::Game;
 use game::camera::NEAR;
 use glam::{Vec2, Vec3};
-use render::entity::{MobInstance, ModelKind};
+use render::entity::{MobInstance, ModelKind, ShadowPatch};
 use render::fog::Fog;
 use render::{Effects, FrameParams};
 use world::block::FluidKind;
@@ -82,6 +82,17 @@ pub(crate) fn frame_params(
                 limb_swing: view.pose.limb_swing,
                 sky_level: f32::from(view.sky_level),
                 block_level: f32::from(view.block_level),
+                shadow_radius: view.shadow_radius,
+                shadow: view
+                    .shadow
+                    .into_iter()
+                    .map(|patch| ShadowPatch {
+                        min: patch.min,
+                        max: patch.max,
+                        y: patch.y,
+                        opacity: patch.opacity,
+                    })
+                    .collect(),
             })
             .collect(),
     }

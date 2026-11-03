@@ -623,6 +623,37 @@ fn fs_entity(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, true)), 1.0);
 }
 
+// Пятно тени под мобом: квад на верхней грани блока, local — смещение от центра моба
+// в радиусах пятна (entity.rs, `push_blobs`), strength — наибольшая непрозрачность.
+struct BlobIn {
+    @location(0) position: vec3<f32>,
+    @location(1) local: vec2<f32>,
+    @location(2) strength: f32,
+};
+
+struct BlobOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) world_pos: vec3<f32>,
+    @location(1) local: vec2<f32>,
+    @location(2) strength: f32,
+};
+
+@vertex
+fn vs_blob(in: BlobIn) -> BlobOut {
+    var out: BlobOut;
+    out.position = globals.view_proj * vec4<f32>(in.position, 1.0);
+    out.world_pos = in.position;
+    out.local = in.local;
+    out.strength = in.strength;
+    return out;
+}
+
+@fragment
+fn fs_blob(in: BlobOut) -> @location(0) vec4<f32> {
+    let falloff = 1.0 - smoothstep(0.3, 1.0, length(in.local));
+    return vec4<f32>(apply_fog(vec3<f32>(0.0), in.world_pos), in.strength * falloff);
+}
+
 // Одинаково в sky.wgsl и shader.wgsl: туман сцены сходится с горизонтом неба.
 fn dusk_glow(dir: vec3<f32>, height: f32) -> f32 {
     let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));
