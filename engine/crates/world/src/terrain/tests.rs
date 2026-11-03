@@ -180,12 +180,12 @@ fn weights_sum_to_one() {
 }
 
 #[test]
-fn all_biomes_within_2048_blocks() {
+fn all_biomes_within_16000_blocks() {
     for seed in [1337, 42, 7] {
         let terrain = Terrain::new(seed);
         let mut counts = [0; 5];
-        for z in (0..2048).step_by(16) {
-            for x in (0..2048).step_by(16) {
+        for z in (-8000..8000).step_by(64) {
+            for x in (-8000..8000).step_by(64) {
                 counts[terrain.biome_at(x, z) as usize] += 1;
             }
         }
@@ -195,6 +195,76 @@ fn all_biomes_within_2048_blocks() {
             "seed {seed}: {counts:?}"
         );
     }
+}
+
+pub(super) fn mean_run_length<K: PartialEq>(terrain: &Terrain, class: impl Fn(Biome) -> K) -> f32 {
+    let (mut cells, mut runs) = (0, 0);
+    for row in (-8000..8000).step_by(97) {
+        let mut previous = None;
+        for x in (-8000..8000).step_by(4) {
+            let class = class(terrain.biome_at(x, row));
+            runs += i32::from(previous.as_ref() != Some(&class));
+            cells += 4;
+            previous = Some(class);
+        }
+    }
+    cells as f32 / runs as f32
+}
+
+#[test]
+fn biomes_are_large() {
+    for seed in [1337, 42, 7, 99] {
+        let length = mean_run_length(&Terrain::new(seed), |biome| biome);
+        assert!(length > 230.0, "seed {seed}: mean run {length}");
+    }
+}
+
+#[test]
+fn snow_and_desert_zones_are_huge() {
+    for seed in [1337, 42, 7, 99] {
+        let terrain = Terrain::new(seed);
+        let snow = mean_run_length(&terrain, Biome::is_snowy);
+        let desert = mean_run_length(&terrain, |biome| biome == Biome::Desert);
+        assert!(snow > 600.0, "seed {seed}: snow run {snow}");
+        assert!(desert > 600.0, "seed {seed}: desert run {desert}");
+    }
+}
+
+#[test]
+fn surface_is_deterministic() {
+    let (a, b) = (Terrain::new(42), Terrain::new(42));
+    for (x, z) in [(0, 0), (-1000, 37), (123_456, -98_765)] {
+        assert_eq!(a.surface_height(x, z), b.surface_height(x, z));
+        assert_eq!(a.biome_at(x, z), b.biome_at(x, z));
+    }
+}
+
+#[test]
+fn terrain_is_smooth_across_biome_borders() {
+    let mean_step = |on_border: bool| {
+        let (mut sum, mut count) = (0, 0);
+        for seed in [1337, 42, 7] {
+            let terrain = Terrain::new(seed);
+            for row in (-4000..4000).step_by(61) {
+                let mut previous = None;
+                for x in -4000..4000 {
+                    let height = terrain.surface_height(x, row);
+                    let biome = terrain.biome_at(x, row);
+                    if let Some((ph, pb)) = previous
+                        && (pb != biome) == on_border
+                    {
+                        sum += i32::abs(height - ph);
+                        count += 1;
+                    }
+                    previous = Some((height, biome));
+                }
+            }
+        }
+        sum as f32 / count as f32
+    };
+    let (border, inside) = (mean_step(true), mean_step(false));
+    assert!(border <= 3.0, "border step {border}");
+    assert!(border <= inside * 1.5, "border {border}, inside {inside}");
 }
 
 #[test]
@@ -386,7 +456,7 @@ fn bedrock_is_deterministic() {
     ));
 }
 
-fn biome_share(terrain: &Terrain, biome: Biome) -> f32 {
+pub(super) fn biome_share(terrain: &Terrain, biome: Biome) -> f32 {
     let mut hits = 0;
     let mut total = 0;
     for z in (-8000..8000).step_by(40) {
