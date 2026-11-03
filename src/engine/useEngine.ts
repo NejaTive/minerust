@@ -20,6 +20,7 @@ import { FrameLoop, createEngine } from './host'
 import { MeshPool } from './mesh-pool'
 import { engineInfo } from './info'
 import { gameState as state, notify, resetGameState } from './state'
+import { engineTarget, texturePacks } from './useTexturePack'
 
 const randomSeed = () => crypto.getRandomValues(new Int32Array(1))[0]
 
@@ -152,6 +153,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     setMode('idle')
     created.set_paused(BENCH ? false : !input.isLocked())
     applyBlock(created, block.value)
+    await texturePacks.attach(engineTarget(created))
     engine.value = created
     state.ready = true
     pool = BENCH_WORKERS ? startPool(created) : undefined
@@ -182,6 +184,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     pool = undefined
     setMode('idle')
     if (document.pointerLockElement === canvas.value) document.exitPointerLock()
+    void texturePacks.attach(undefined)
     engine.value?.free()
     engine.value = undefined
   }

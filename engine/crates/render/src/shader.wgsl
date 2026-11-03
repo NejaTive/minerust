@@ -116,11 +116,27 @@ var block_textures: texture_2d_array<f32>;
 @group(0) @binding(2)
 var block_sampler: sampler;
 
-// Запись на слой: (кадры, кадров в секунду, прокрутка боковых граней в блоках в секунду,
-// колыхание: 0 нет, 1 листва, 2 трава и цветы; плюс 4 — светящийся тайл, EMISSIVE_FLAG в tile.rs).
-// Строит `world::tile::animation_table`; размер — `LAYER_COUNT`.
+// Запись на тайл (слот квада = `Tile::layer`). timing: (кадры, кадров в секунду, прокрутка
+// боковых граней в блоках в секунду, колыхание: 0 нет, 1 листва, 2 трава и цветы; плюс 4 —
+// светящийся тайл, EMISSIVE_FLAG в tile.rs); layers: (первый слой текстуры, 1 если кадры
+// смешиваются, слой наложения, 1 если наложение есть); tint.rgb умножает цвет текстуры,
+// tint.w — окраска биомом: 0 нет, 1 трава, 2 листва (`BiomeTint::code`).
+// Строит `world::textures::TextureSet::animation_table`; размер — `TILE_COUNT`.
+struct TileAnim {
+    timing: vec4<f32>,
+    layers: vec4<f32>,
+    tint: vec4<f32>,
+};
 @group(0) @binding(3)
-var<uniform> animation: array<vec4<f32>, 58>;
+var<uniform> animation: array<TileAnim, 28>;
+
+// Веса биомов (равнины, пустыня, лес, тайга) на блок, тор BIOME_MAP_SIZE по x и z; пишет
+// `Renderer::set_biome_column`. Палитра — `BiomePalette::to_bytes`: четыре цвета травы,
+// затем четыре цвета листвы, в том же порядке биомов.
+@group(0) @binding(11)
+var biome_map: texture_2d<f32>;
+@group(0) @binding(12)
+var<uniform> biome_palette: array<vec4<f32>, 8>;
 
 // Раскладка — `ShadowData` в shadow.rs; light = (на источник, сила), params.w — сила теней облаков.
 // Без теней блоков пишутся только light.xyz и params.w.
@@ -256,14 +272,14 @@ fn block_vertex(in: VertexIn) -> VertexOut {
     }
     var world_pos = in.origin + cell + offset / 16.0;
     let layer = (w0 >> 18u) & 0xFFu;
-    world_pos += sway_offset(world_pos, sway_kind(animation[layer].w), offset.y > 0.0);
+    world_pos += sway_offset(world_pos, sway_kind(animation[layer].timing.w), offset.y > 0.0);
     let ao = (w1 >> (2u * corner)) & 3u;
     let sun = (w1 >> (8u + 5u * corner)) & 0x1Fu;
     let block = (w2 >> (5u * corner)) & 0x1Fu;
     var out: VertexOut;
     out.position = globals.view_proj * vec4<f32>(world_pos, 1.0);
     out.uv = vec2<f32>(f32((packed >> 15u) & 0x1Fu), v) / 16.0;
-    out.uv.y -= table.shapes[shape].shade.y * fract(globals.anim_time * animation[layer].z);
+    out.uv.y -= table.shapes[shape].shade.y * fract(globals.anim_time * animation[layer].timing.z);
     out.shade = table.shapes[shape].shade.x * table.ao[ao];
     out.sun_light = level_brightness(f32(sun) * 0.5 - globals.darkness);
     out.sky_exposure = level_brightness(f32(sun) * 0.5);
@@ -297,15 +313,50 @@ fn vs_shadow(in: VertexIn) -> ShadowOut {
 
 @fragment
 fn fs_shadow_cutout(in: ShadowOut) {
-    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
+    let texel = sample_block(in.uv, in.layer);
     if texel.a < 0.5 {
         discard;
     }
 }
 
-fn animated_layer(base: u32) -> u32 {
-    let entry = animation[base];
-    return base + u32(floor(globals.anim_time * entry.y)) % u32(entry.x);
+fn sample_block(uv: vec2<f32>, slot: u32) -> vec4<f32> {
+    let entry = animation[slot];
+    let frames = u32(entry.timing.x);
+    let first = u32(entry.layers.x);
+    let time = globals.anim_time * entry.timing.y;
+    let frame = u32(floor(time)) % frames;
+    let blend = entry.layers.y * fract(time);
+    let next = select(frame, (frame + 1u) % frames, entry.layers.y > 0.5);
+    let a = textureSample(block_textures, block_sampler, uv, first + frame);
+    let b = textureSample(block_textures, block_sampler, uv, first + next);
+    let texel = mix(a, b, blend);
+    return vec4<f32>(texel.rgb * entry.tint.rgb, texel.a);
+}
+
+const BIOME_MAP_SIZE: i32 = 1024;
+
+fn biome_color(kind: f32, world_pos: vec3<f32>) -> vec3<f32> {
+    let cell = vec2<i32>(floor(world_pos.xz)) & vec2<i32>(BIOME_MAP_SIZE - 1);
+    let w = textureLoad(biome_map, cell, 0);
+    let base = select(0u, 4u, kind > 1.5);
+    let sum = w.x + w.y + w.z + w.w;
+    let weights = select(vec4<f32>(1.0, 0.0, 0.0, 0.0), w / max(sum, 1e-4), sum > 0.001);
+    return biome_palette[base].rgb * weights.x
+        + biome_palette[base + 1u].rgb * weights.y
+        + biome_palette[base + 2u].rgb * weights.z
+        + biome_palette[base + 3u].rgb * weights.w;
+}
+
+fn block_albedo(uv: vec2<f32>, slot: u32, world_pos: vec3<f32>) -> vec4<f32> {
+    let entry = animation[slot];
+    var texel = sample_block(uv, slot);
+    let kind = entry.tint.w;
+    texel = vec4<f32>(texel.rgb * select(vec3<f32>(1.0), biome_color(kind, world_pos), kind > 0.5), texel.a);
+    let has_overlay = entry.layers.w > 0.5;
+    let overlay_layer = u32(select(entry.layers.x, entry.layers.z, has_overlay));
+    let overlay = textureSample(block_textures, block_sampler, uv, overlay_layer);
+    let over = select(0.0, overlay.a, has_overlay);
+    return vec4<f32>(mix(texel.rgb, overlay.rgb * biome_color(1.0, world_pos), over), texel.a);
 }
 
 fn luma_normalized(tint: vec3<f32>) -> vec3<f32> {
@@ -419,7 +470,7 @@ fn block_visibility(in: VertexOut, geometric: vec3<f32>, cutout: bool) -> f32 {
     var normal = geometric;
     var lift = 0.0;
     var facing = dot(geometric, shadows.light.xyz);
-    let kind = sway_kind(animation[in.layer].w);
+    let kind = sway_kind(animation[in.layer].timing.w);
     let sways = effect(FX_PLANT_SWAY);
     let gust = 1.0 + RAIN_SWAY_GAIN * globals.rain;
     // Кресты, трава, факел: тонкая двусторонняя геометрия, света «от солнца» у них нет.
@@ -485,7 +536,7 @@ fn shaded_glow(in: VertexOut, texel: vec3<f32>, sun_vis: f32, glow: vec3<f32>) -
     if any(glow > vec3<f32>(0.0)) {
         color = min(color + glow * weather_exposure(), max(color, vec3<f32>(GLOW_CEILING)));
     }
-    if effect(FX_HDR) && is_emissive(animation[in.layer].w) {
+    if effect(FX_HDR) && is_emissive(animation[in.layer].timing.w) {
         color = max(color, texel * HDR_EMISSIVE_LEVEL);
     }
     if globals.eye_fluid > 0.5 {
@@ -499,7 +550,7 @@ fn shaded_glow(in: VertexOut, texel: vec3<f32>, sun_vis: f32, glow: vec3<f32>) -
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let normal = flat_normal(in.world_pos);
-    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
+    let texel = block_albedo(in.uv, in.layer, in.world_pos);
     return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, false)), 1.0);
 }
 
@@ -511,7 +562,7 @@ const GLOW_SHADOW_FLOOR: f32 = 0.35;
 const GLOW_CEILING: f32 = 0.95;
 
 fn foliage_glow(in: VertexOut, sun_vis: f32) -> f32 {
-    if !effect(FX_SHADOWS) || is_emissive(animation[in.layer].w) || globals.eye_fluid > 0.5 {
+    if !effect(FX_SHADOWS) || is_emissive(animation[in.layer].timing.w) || globals.eye_fluid > 0.5 {
         return 0.0;
     }
     let toward_light = dot(normalize(in.world_pos - globals.camera_pos), shadows.light.xyz);
@@ -526,7 +577,7 @@ fn foliage_glow(in: VertexOut, sun_vis: f32) -> f32 {
 @fragment
 fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
     let normal = flat_normal(in.world_pos);
-    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
+    let texel = block_albedo(in.uv, in.layer, in.world_pos);
     if texel.a < 0.5 {
         discard;
     }
@@ -715,7 +766,7 @@ fn ssr_trace(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
 
 @fragment
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
+    let texel = sample_block(in.uv, in.layer);
     var normal = flat_normal(in.world_pos);
     let sun_vis = sun_visibility(in, normal, false);
     if globals.eye_fluid > 0.5 || !effect(FX_WATER_REFLECTIONS) {
@@ -783,6 +834,6 @@ fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_ice(in: VertexOut) -> @location(0) vec4<f32> {
     let normal = flat_normal(in.world_pos);
-    let texel = textureSample(block_textures, block_sampler, in.uv, animated_layer(in.layer));
+    let texel = sample_block(in.uv, in.layer);
     return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, false)), texel.a);
 }

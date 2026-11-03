@@ -1,6 +1,7 @@
 use glam::{IVec3, Vec3};
 
-use crate::tile::{TILE_SIZE, TORCH_PIXELS, TORCH_TOP_ROW, Tile, tile_pixels};
+use crate::textures::TextureSet;
+use crate::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW, Tile};
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -31,6 +32,7 @@ pub enum Block {
     SnowyGrass,
     Snow,
     Ice,
+    Barrier,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -205,7 +207,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 25] = [
+pub const BLOCKS: [BlockDef; 26] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -316,10 +318,17 @@ pub const BLOCKS: [BlockDef; 25] = [
         layer: RenderLayer::Translucent,
         ..BlockDef::uniform("ice", "лёд", Tile::Ice)
     },
+    BlockDef {
+        selectable: false,
+        opaque: false,
+        name: "barrier",
+        label: "барьер",
+        ..BlockDef::CUBE
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 25] = [
+    pub const ALL: [Block; 26] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -345,6 +354,7 @@ impl Block {
         Block::SnowyGrass,
         Block::Snow,
         Block::Ice,
+        Block::Barrier,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -386,9 +396,9 @@ impl Block {
     pub fn bounds(self, data: u8) -> (Vec3, Vec3) {
         match self.shape() {
             Shape::Torch => {
-                let unit = 1.0 / TILE_SIZE as f32;
+                let unit = 1.0 / PIXEL_GRID as f32;
                 let (lo, hi) = (TORCH_PIXELS.0 as f32 * unit, TORCH_PIXELS.1 as f32 * unit);
-                let height = (TILE_SIZE - TORCH_TOP_ROW) as f32 * unit;
+                let height = (PIXEL_GRID - TORCH_TOP_ROW) as f32 * unit;
                 let Some(support) = self.support_dir(data).filter(|dir| dir.y == 0) else {
                     return (Vec3::new(lo, 0.0, lo), Vec3::new(hi, height, hi));
                 };
@@ -457,6 +467,32 @@ impl Block {
         }
     }
 
+    pub fn states(self) -> impl Iterator<Item = u8> {
+        let states: &[u8] = match self.data_kind() {
+            DataKind::None => &[0],
+            DataKind::Axis => &[AXIS_Y, AXIS_X, AXIS_Z],
+            DataKind::Attachment => &[
+                ATTACH_FLOOR,
+                ATTACH_POS_X,
+                ATTACH_NEG_X,
+                ATTACH_POS_Z,
+                ATTACH_NEG_Z,
+            ],
+            DataKind::Fluid => &[
+                FLUID_SOURCE,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                FLUID_MAX_LEVEL,
+                FLUID_FALLING,
+            ],
+        };
+        states.iter().copied()
+    }
+
     pub fn axis(self, data: u8) -> usize {
         match data {
             AXIS_X => 0,
@@ -515,8 +551,9 @@ impl Block {
             .find(|block| block.def().selectable && block.def().name == name)
     }
 
-    pub fn icon_pixels(self) -> Option<Vec<u8>> {
-        self.tile(Facing::Side).map(tile_pixels)
+    pub fn icon_pixels(self, textures: &TextureSet) -> Option<Vec<u8>> {
+        self.tile(Facing::Side)
+            .map(|tile| textures.icon_pixels(tile))
     }
 
     pub fn tile(self, facing: Facing) -> Option<Tile> {

@@ -1,4 +1,5 @@
 mod arena;
+mod biome;
 mod bloom;
 mod clouds;
 mod effects;
@@ -22,6 +23,7 @@ mod shadow_map;
 mod slots;
 mod texture;
 
+pub use biome::BIOME_MAP_SIZE;
 pub use effects::Effects;
 pub use renderer::{FrameCounts, FrameParams, PendingFrame, Renderer};
 pub use shadow::ShadowQuality;

@@ -3,23 +3,23 @@ import { onMounted, ref } from 'vue'
 import {
   GAME_MODES,
   MODE_LABELS,
-  WORLD_TYPES,
   WORLD_TYPE_LABELS,
   cycle,
+  selectableWorldTypes,
   type GameMode,
   type WorldType,
 } from '../../world/kinds'
 import { DEFAULT_WORLD_NAME, MAX_WORLD_NAME, uniqueName } from '../../world/names'
 import { useWorlds, type CreateWorldForm } from '../../world/useWorlds'
 
-defineProps<{ busy: boolean }>()
+const props = defineProps<{ busy: boolean; showDebug: boolean }>()
 const emit = defineEmits<{ submit: [form: CreateWorldForm]; cancel: [] }>()
 
 const { worlds, refresh } = useWorlds()
 const name = ref(DEFAULT_WORLD_NAME)
 const seed = ref('')
 const mode = ref<GameMode>(GAME_MODES[0])
-const worldType = ref<WorldType>(WORLD_TYPES[0])
+const worldType = ref<WorldType>('standard')
 
 onMounted(async () => {
   await refresh()
@@ -47,7 +47,10 @@ const submit = () =>
     <button type="button" @click="mode = cycle(GAME_MODES, mode)">
       Режим игры: {{ MODE_LABELS[mode] }}
     </button>
-    <button type="button" @click="worldType = cycle(WORLD_TYPES, worldType)">
+    <button
+      type="button"
+      @click="worldType = cycle(selectableWorldTypes(props.showDebug), worldType)"
+    >
       Тип мира: {{ WORLD_TYPE_LABELS[worldType] }}
     </button>
     <label class="field">

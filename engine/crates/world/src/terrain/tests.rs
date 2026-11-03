@@ -556,3 +556,129 @@ fn snow_layer_follows_the_ground_through_caves() {
         }
     }
 }
+
+#[test]
+fn column_biome_bytes_follow_biome_weights() {
+    let terrain = Terrain::new(7);
+    let key = ColumnPos::new(3, -5);
+    let bytes = terrain.column_biome_bytes(key);
+    assert_eq!(bytes.len(), 16 * 16 * 4);
+    let origin = key.origin();
+    for (dx, dz) in [(0, 0), (5, 9), (15, 15)] {
+        let at = ((dz * 16 + dx) * 4) as usize;
+        let expected =
+            crate::biome_color::weights_bytes(terrain.biome_weights(origin.x + dx, origin.z + dz));
+        assert_eq!(bytes[at..at + 4], expected);
+    }
+}
+
+#[test]
+fn flat_world_is_all_plains() {
+    let terrain = Terrain::of(1, WorldType::Flat);
+    let bytes = terrain.column_biome_bytes(ColumnPos::new(0, 0));
+    assert!(bytes.chunks(4).all(|w| w == [255, 0, 0, 0]));
+}
+
+#[test]
+fn climates_blend_smoothly_between_neighbours() {
+    let terrain = Terrain::new(11);
+    let palette = crate::biome_color::BiomePalette::constants();
+    let color = |x: i32| {
+        let w = crate::biome_color::weights_bytes(terrain.biome_weights(x, 0));
+        crate::biome_color::blend(&palette.grass, w)
+    };
+    let step = (-2000..2000)
+        .map(|x| {
+            let (a, b) = (color(x), color(x + 1));
+            (0..3).map(|c| (a[c] - b[c]).abs()).fold(0.0_f32, f32::max)
+        })
+        .fold(0.0_f32, f32::max);
+    assert!(
+        step < 0.05,
+        "grass color jumps by {step} between adjacent blocks"
+    );
+}
+
+#[test]
+#[ignore]
+fn column_biome_bytes_timing() {
+    let terrain = Terrain::new(1);
+    let start = std::time::Instant::now();
+    for i in 0..200 {
+        std::hint::black_box(terrain.column_biome_bytes(ColumnPos::new(i, i)));
+    }
+    println!("column_biome_bytes: {:?} per column", start.elapsed() / 200);
+}
+
+fn debug_world() -> (Terrain, Vec<Column>) {
+    let terrain = Terrain::of(7, WorldType::Debug);
+    let span = (debug_grid_side(debug_states().len()) * 2 + SECTION_SIZE - 1) / SECTION_SIZE + 1;
+    let columns = (0..span * span)
+        .map(|i| terrain.generate(ColumnPos::new(i % span, i / span)))
+        .collect();
+    (terrain, columns)
+}
+
+#[test]
+fn debug_world_holds_every_state_once_on_the_grid() {
+    let (_, columns) = debug_world();
+    let mut seen = Vec::new();
+    let mut other = 0;
+    for column in &columns {
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                for y in 0..WORLD_HEIGHT {
+                    let p = IVec3::new(x, y, z);
+                    match (y, column.get(p)) {
+                        (_, Block::Air) => {}
+                        (DEBUG_GRID_Y, block) => seen.push((block, column.get_data(p))),
+                        (DEBUG_FLOOR_Y, Block::Barrier) => {}
+                        _ => other += 1,
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(other, 0);
+    seen.sort_by_key(|&(block, data)| (block as u8, data));
+    let mut expected = debug_states();
+    expected.sort_by_key(|&(block, data)| (block as u8, data));
+    assert_eq!(seen, expected);
+}
+
+#[test]
+fn debug_blocks_do_not_touch() {
+    let (_, columns) = debug_world();
+    let mut cells = Vec::new();
+    for (i, column) in columns.iter().enumerate() {
+        let span = (columns.len() as f64).sqrt() as i32;
+        let origin = ColumnPos::new(i as i32 % span, i as i32 / span).origin();
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                if column.get(IVec3::new(x, DEBUG_GRID_Y, z)) != Block::Air {
+                    cells.push((origin.x + x, origin.z + z));
+                }
+            }
+        }
+    }
+    assert!(cells.iter().all(|&(x, z)| x % 2 == 0 && z % 2 == 0));
+}
+
+#[test]
+fn debug_floor_covers_columns_outside_the_grid() {
+    let terrain = Terrain::of(7, WorldType::Debug);
+    let column = terrain.generate(ColumnPos::new(-9, 30));
+    for (x, z) in [(0, 0), (15, 15)] {
+        assert_eq!(column.get(IVec3::new(x, DEBUG_FLOOR_Y, z)), Block::Barrier);
+        assert_eq!(column.get(IVec3::new(x, DEBUG_GRID_Y, z)), Block::Air);
+    }
+}
+
+#[test]
+fn debug_world_has_no_features_and_plains_biome() {
+    let terrain = Terrain::of(7, WorldType::Debug);
+    assert_eq!(WorldType::from_name("debug"), Some(WorldType::Debug));
+    assert_eq!(terrain.biome_at(5, 5), Biome::Plains);
+    let column = terrain.generate_trees(ColumnPos::new(3, 3));
+    assert_eq!(column.get(IVec3::new(0, 1, 0)), Block::Air);
+}

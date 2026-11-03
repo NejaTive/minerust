@@ -1,6 +1,15 @@
 use super::*;
+use crate::tile::DEFAULT_TILE_SIZE;
 
-const ALL: [Block; 25] = Block::ALL;
+fn tile_pixels(tile: Tile) -> Vec<u8> {
+    TextureSet::standard().tile_pixels(tile)
+}
+
+fn icon_pixels(block: Block) -> Option<Vec<u8>> {
+    block.icon_pixels(&TextureSet::standard())
+}
+
+const ALL: [Block; 26] = Block::ALL;
 
 #[test]
 fn byte_round_trip() {
@@ -8,7 +17,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(25), Err(25));
+    assert_eq!(Block::try_from(26), Err(26));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -36,12 +45,13 @@ fn selectable_by_name() {
 
 #[test]
 fn icon_is_side_face() {
-    let pixels = |tile| Some(tile_pixels(tile));
-    assert_eq!(Block::Grass.icon_pixels(), pixels(Tile::GrassSide));
-    assert_eq!(Block::Log.icon_pixels(), pixels(Tile::LogSide));
-    assert_eq!(Block::Stone.icon_pixels(), pixels(Tile::Stone));
-    assert_eq!(Block::Air.icon_pixels(), None);
-    let grass = Block::Grass.icon_pixels().unwrap();
+    let set = TextureSet::standard();
+    let pixels = |tile| Some(set.icon_pixels(tile));
+    assert_eq!(icon_pixels(Block::Grass), pixels(Tile::GrassSide));
+    assert_eq!(icon_pixels(Block::Log), pixels(Tile::LogSide));
+    assert_eq!(icon_pixels(Block::Stone), pixels(Tile::Stone));
+    assert_eq!(icon_pixels(Block::Air), None);
+    let grass = icon_pixels(Block::Grass).unwrap();
     let (top, bottom) = (&grass[..3], &grass[grass.len() - 4..][..3]);
     assert_ne!(top, bottom);
 }
@@ -66,6 +76,7 @@ fn solid_and_opaque() {
                 | Block::Lava
                 | Block::Snow
                 | Block::Ice
+                | Block::Barrier
         ) && !plant;
         assert_eq!(
             block.is_targetable(),
@@ -154,7 +165,7 @@ fn new_blocks_selectable_by_name() {
         Block::Dandelion,
         Block::Torch,
     ] {
-        assert!(block.icon_pixels().is_some());
+        assert!(icon_pixels(block).is_some());
     }
 }
 
@@ -186,6 +197,9 @@ fn air_has_no_tiles_and_others_have_all() {
     let air = Block::Air.def();
     assert!(air.top.is_none() && air.side.is_none() && air.bottom.is_none());
     for block in Block::ALL.into_iter().skip(1) {
+        if block == Block::Barrier {
+            continue;
+        }
         let def = block.def();
         assert!(def.top.is_some() && def.side.is_some() && def.bottom.is_some());
     }
@@ -263,8 +277,11 @@ fn water_is_placed_as_source() {
 
 #[test]
 fn water_has_icon_for_the_palette() {
-    let icon = Block::Water.icon_pixels().expect("water icon");
-    assert_eq!(icon.len(), 16 * 16 * 4);
+    let icon = icon_pixels(Block::Water).expect("water icon");
+    assert_eq!(
+        icon.len(),
+        (DEFAULT_TILE_SIZE * DEFAULT_TILE_SIZE * 4) as usize
+    );
 }
 
 #[test]
@@ -293,7 +310,7 @@ fn tree_blocks_are_selectable_with_russian_labels() {
     ] {
         assert_eq!(Block::from_name(name), Some(block));
         assert_eq!(block.def().label, label);
-        assert!(block.icon_pixels().is_some(), "{name}");
+        assert!(icon_pixels(block).is_some(), "{name}");
     }
 }
 
@@ -405,7 +422,41 @@ fn snow_tile_is_whitish_and_ice_is_light_blue() {
 #[test]
 fn snowy_side_has_white_stripe_over_dirt() {
     let pixels = tile_pixels(Tile::SnowyGrassSide);
-    let row = |y: usize| &pixels[y * 64..(y + 1) * 64];
+    let row_bytes = DEFAULT_TILE_SIZE as usize * 4;
+    let row = |y: usize| &pixels[y * row_bytes..(y + 1) * row_bytes];
     assert!(row(0).chunks(4).all(|p| p[0] > 190 && p[2] > 220));
-    assert!(row(15).chunks(4).all(|p| p[2] < p[0]));
+    let bottom = row(DEFAULT_TILE_SIZE as usize - 1);
+    let mean = |c: usize| bottom.chunks(4).map(|p| u32::from(p[c])).sum::<u32>();
+    assert!(mean(2) < mean(0));
+}
+
+#[test]
+fn barrier_is_solid_invisible_and_light_transparent() {
+    let def = Block::Barrier.def();
+    assert!(def.solid && def.targetable && !def.opaque && !def.selectable);
+    assert_eq!(Block::Barrier.emission(), 0);
+    assert_eq!(Block::from_name("barrier"), None);
+    assert!(
+        [Facing::Top, Facing::Bottom, Facing::Side]
+            .into_iter()
+            .all(|facing| Block::Barrier.tile(facing).is_none())
+    );
+}
+
+#[test]
+fn states_cover_every_data_kind() {
+    for block in Block::ALL {
+        let states: Vec<u8> = block.states().collect();
+        let expected = match block.data_kind() {
+            DataKind::None => 1,
+            DataKind::Axis => 3,
+            DataKind::Attachment => 5,
+            DataKind::Fluid => usize::from(FLUID_MAX_LEVEL) + 2,
+        };
+        assert_eq!(states.len(), expected, "{block:?}");
+        let mut unique = states.clone();
+        unique.dedup();
+        assert_eq!(unique.len(), states.len());
+    }
+    assert!(Block::Water.states().any(|d| d & FLUID_FALLING != 0));
 }

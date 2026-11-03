@@ -23,5 +23,6 @@
   { "name": "bedrock", "label": "коренная порода", "placeable": true },
   { "name": "snowy_grass", "label": "заснеженная трава", "placeable": true },
   { "name": "snow", "label": "снег", "placeable": true },
-  { "name": "ice", "label": "лёд", "placeable": true }
+  { "name": "ice", "label": "лёд", "placeable": true },
+  { "name": "barrier", "label": "барьер", "placeable": false }
 ]

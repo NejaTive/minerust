@@ -10,6 +10,7 @@ import CreateWorldScreen from './menu/CreateWorldScreen.vue'
 import DeleteWorldScreen from './menu/DeleteWorldScreen.vue'
 import PauseScreen from './menu/PauseScreen.vue'
 import SettingsScreen from './menu/SettingsScreen.vue'
+import TexturePackScreen from './menu/TexturePackScreen.vue'
 import TitleScreen from './menu/TitleScreen.vue'
 import WorldListScreen from './menu/WorldListScreen.vue'
 import { TITLES, backTarget, type MenuScreen } from './menu/screens'
@@ -117,6 +118,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
       />
       <CreateWorldScreen
         v-else-if="screen === 'create'"
+        :show-debug="settings.showDebug"
         :busy="working"
         @submit="createWorld"
         @cancel="back"
@@ -136,6 +138,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
         @update:settings="emit('update:settings', $event)"
         @controls="go('controls')"
         @graphics="go('graphics')"
+        @textures="go('textures')"
         @back="back"
       />
       <GraphicsScreen
@@ -145,6 +148,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
         @update:settings="emit('update:settings', $event)"
         @back="back"
       />
+      <TexturePackScreen v-else-if="screen === 'textures'" @back="back" />
       <ControlsScreen v-else @back="back" />
     </div>
   </div>

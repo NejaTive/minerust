@@ -53,3 +53,11 @@ fn rain_shader_grid_matches_cover_window() {
     assert!(RAIN_SHADER.contains(&format!("const GRID_SIZE: u32 = {COVER_SIZE}u;")));
     assert!(RAIN_SHADER.contains(&format!("const GRID_RADIUS: i32 = {};", COVER_SIZE / 2)));
 }
+
+#[test]
+fn biome_map_size_matches_shader() {
+    assert!(BLOCK_SHADER.contains(&format!(
+        "const BIOME_MAP_SIZE: i32 = {};",
+        render::BIOME_MAP_SIZE
+    )));
+}

@@ -27,6 +27,10 @@ describe('isReadable', () => {
     expect(isReadable(meta({ worldType: 'flat' }))).toBe(true)
   })
 
+  it('читает мир отладки', () => {
+    expect(isReadable(meta({ worldType: 'debug' }))).toBe(true)
+  })
+
   it.each([
     ['версия 0', { version: 0 }],
     ['версия дробная', { version: 1.5 }],

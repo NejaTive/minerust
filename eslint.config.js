@@ -7,7 +7,7 @@ import tseslint from 'typescript-eslint'
 // Без типовых правил (`recommendedTypeChecked`): они требуют полного прогона tsc и шумят на
 // wasm-объектах; типы и так проверяет `vue-tsc`.
 export default tseslint.config(
-  { ignores: ['dist', 'engine', 'node_modules'] },
+  { ignores: ['dist', 'engine', 'node_modules', 'Faithful-32x-1.12.2'] },
   js.configs.recommended,
   tseslint.configs.recommended,
   pluginVue.configs['flat/recommended'],

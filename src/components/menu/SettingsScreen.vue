@@ -7,6 +7,7 @@ const emit = defineEmits<{
   'update:settings': [patch: Partial<Settings>]
   controls: []
   graphics: []
+  textures: []
   back: []
 }>()
 
@@ -80,6 +81,7 @@ function checkedOf(e: Event): boolean {
     </label>
   </div>
   <button @click="emit('graphics')">Графика</button>
+  <button @click="emit('textures')">Текстур-пак</button>
   <button v-if="showControls" @click="emit('controls')">Управление</button>
   <button @click="emit('back')">Назад</button>
 </template>

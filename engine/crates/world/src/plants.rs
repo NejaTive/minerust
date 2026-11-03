@@ -12,7 +12,7 @@ const SALT_PLANT: u64 = 11;
 const SALT_KIND: u64 = 12;
 
 fn plant_at(terrain: &Terrain, x: i32, z: i32) -> Option<Block> {
-    if terrain.world_type() == WorldType::Flat {
+    if terrain.world_type() != WorldType::Standard {
         return None;
     }
     let roll = (hash(terrain.seed(), x, z, SALT_PLANT) >> 8) as f32 / (1 << 24) as f32;

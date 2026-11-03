@@ -9,7 +9,7 @@ use world::fluid::Fluid;
 use world::light::LightMap;
 use world::pos::{ColumnPos, SectionPos};
 use world::random_ticks::{RandomTicks, STEP_TICKS};
-use world::terrain::{Biome, Terrain, WorldType};
+use world::terrain::{Biome, DEBUG_SPAWN_Y, Terrain, WorldType};
 use world::world::{World, affected_sections};
 
 use crate::camera::Camera;
@@ -102,6 +102,10 @@ impl Game {
         let terrain = Terrain::of(seed, world_type);
         let (camera, player) = match state {
             Some(state) => restore_player(state).ok_or(BadCameraState)?,
+            None if world_type == WorldType::Debug => {
+                let player = Player::new(Vec3::new(0.5, DEBUG_SPAWN_Y as f32, 0.5), Mode::Flying);
+                (Camera::spawn(player.eye()), player)
+            }
             None => {
                 let spawn = terrain.generate(ColumnPos::ZERO);
                 let ground = (0..WORLD_HEIGHT)
@@ -425,7 +429,9 @@ impl Game {
             return Edits::new(dirty, lit);
         }
         let mut target = self.pick();
-        if self.breaking.fire(time)
+        let editable = self.terrain.world_type() != WorldType::Debug;
+        if editable
+            && self.breaking.fire(time)
             && let Some(hit) = target
             && hit.block.y >= 0
             && !self.world.block(hit.block).is_unbreakable()
@@ -437,7 +443,8 @@ impl Game {
             self.apply_edit(&changed, &[], &mut dirty, &mut lit);
             target = self.pick();
         }
-        if self.placing.fire(time)
+        if editable
+            && self.placing.fire(time)
             && let Some(block) = self.selected
             && let Some((hit, pos)) = self.placement_hit(target, block)
             && let Some(data) = block.placement_data(hit.normal)
@@ -522,10 +529,12 @@ impl Game {
         let weather_pace = if self.time_frozen { 0 } else { factor };
         self.weather
             .advance(ticks, weather_pace, self.weather_enabled);
-        self.advance_fluid(ticks);
-        self.advance_lava(ticks);
-        self.advance_falling(ticks);
-        self.advance_random_ticks(ticks * factor);
+        if self.terrain.world_type() != WorldType::Debug {
+            self.advance_fluid(ticks);
+            self.advance_lava(ticks);
+            self.advance_falling(ticks);
+            self.advance_random_ticks(ticks * factor);
+        }
         for _ in 0..ticks {
             if !self.body_loaded() {
                 self.clock.reset();

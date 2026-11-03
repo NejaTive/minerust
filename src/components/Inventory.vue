@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, useTemplateRef, watch } from 'vue'
-import { BLOCK_ICON_SIZE, paintBlockIconsIn } from '../engine/blockIcon'
+import { paintBlockIconsIn } from '../engine/blockIcon'
 import { blockLabel, engineInfo } from '../engine/info'
+import { texturePacks } from '../engine/useTexturePack'
 import { useSettings } from '../settings/useSettings'
 
 const { slots, slot, putInSlot, swapSlots, clearSlot } = useSettings()
@@ -14,7 +15,7 @@ const paint = () => paintBlockIconsIn(root.value)
 
 onMounted(paint)
 watch(
-  [palette, slots],
+  [palette, slots, () => texturePacks.state.revision],
   async () => {
     await nextTick()
     paint()
@@ -68,7 +69,7 @@ function onHotbarContextMenu(e: MouseEvent, index: number) {
 
 <template>
   <div ref="root" class="overlay" role="dialog" aria-modal="true" aria-label="Инвентарь">
-    <div class="panel px-frame">
+    <div class="panel gui-panel">
       <h1>Инвентарь</h1>
       <p class="hint">
         Клик — в выбранный слот · перетащите в слот · ПКМ по слоту — очистить · E / Esc — закрыть
@@ -78,20 +79,20 @@ function onHotbarContextMenu(e: MouseEvent, index: number) {
           v-for="block in palette"
           :key="block.name"
           type="button"
-          class="cell px-slot"
+          class="cell gui-slot"
           :title="block.label"
           draggable="true"
           @click="putSelected(block.name)"
           @dragstart="onPaletteDragStart($event, block.name)"
         >
-          <canvas :data-block="block.name" :width="BLOCK_ICON_SIZE" :height="BLOCK_ICON_SIZE" />
+          <canvas :data-block="block.name" />
         </button>
       </div>
       <div class="hotbar-row">
         <div
           v-for="(name, index) in slots"
           :key="index"
-          class="slot px-slot"
+          class="slot gui-slot"
           :class="{ selected: index === slot }"
           :title="name ? blockLabel(name) : undefined"
           draggable="true"
@@ -101,12 +102,7 @@ function onHotbarContextMenu(e: MouseEvent, index: number) {
           @contextmenu="onHotbarContextMenu($event, index)"
           @click="selectSlot(index)"
         >
-          <canvas
-            v-if="name"
-            :data-block="name"
-            :width="BLOCK_ICON_SIZE"
-            :height="BLOCK_ICON_SIZE"
-          />
+          <canvas v-if="name" :data-block="name" />
           <span class="number">{{ index + 1 }}</span>
         </div>
       </div>
@@ -123,8 +119,7 @@ function onHotbarContextMenu(e: MouseEvent, index: number) {
   place-items: center;
   padding: 16px;
   overflow: auto;
-  color: var(--px-text);
-  text-shadow: 2px 2px 0 var(--px-shadow);
+  color: #404040;
   background: rgb(0 0 0 / 0.45);
 }
 .panel {
@@ -132,8 +127,8 @@ function onHotbarContextMenu(e: MouseEvent, index: number) {
   flex-direction: column;
   gap: 12px;
   box-sizing: border-box;
-  width: min(560px, 100%);
-  padding: 20px;
+  width: calc(182 * var(--gui-u));
+  padding: calc(6 * var(--gui-u));
 }
 h1 {
   margin: 0;
@@ -149,13 +144,16 @@ h1 {
 }
 .palette {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 48px);
-  gap: 4px;
-  justify-content: center;
+  grid-template-columns: repeat(9, calc(18 * var(--gui-u)));
 }
-.cell {
-  width: 48px;
-  height: 48px;
+.hotbar-row {
+  display: flex;
+}
+.cell,
+.slot {
+  position: relative;
+  width: calc(18 * var(--gui-u));
+  height: calc(18 * var(--gui-u));
   margin: 0;
   padding: 0;
   display: flex;
@@ -163,36 +161,37 @@ h1 {
   justify-content: center;
   cursor: grab;
 }
-.cell:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.2);
-  border-color: #fff;
+.cell:hover::before {
+  position: absolute;
+  inset: var(--gui-u);
+  content: '';
+  background: rgb(255 255 255 / 0.5);
 }
-.hotbar-row {
-  display: flex;
-  gap: 4px;
-  justify-content: center;
-  padding: 4px;
-  background: rgb(0 0 0 / 0.35);
+.slot.selected {
+  z-index: 1;
 }
-.slot {
-  position: relative;
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: grab;
+.slot.selected::after {
+  position: absolute;
+  top: calc(-3 * var(--gui-u));
+  left: calc(-3 * var(--gui-u));
+  width: calc(24 * var(--gui-u));
+  height: calc(24 * var(--gui-u));
+  content: '';
+  background: var(--gui-widgets) 0 calc(-22 * var(--gui-u)) / calc(256 * var(--gui-u))
+    calc(256 * var(--gui-u)) no-repeat;
+  image-rendering: pixelated;
+  pointer-events: none;
 }
 canvas {
-  width: 32px;
-  height: 32px;
+  width: calc(16 * var(--gui-u));
+  height: calc(16 * var(--gui-u));
   image-rendering: pixelated;
   pointer-events: none;
 }
 .number {
   position: absolute;
-  left: 0;
-  top: -2px;
+  right: 0;
+  bottom: -2px;
   color: #fff;
   font-size: var(--px-fs-s);
   line-height: 1;
