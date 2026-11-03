@@ -10,12 +10,13 @@ const { slots, slot, putInSlot, swapSlots, clearSlot } = useSettings()
 const root = useTemplateRef<HTMLElement>('root')
 
 const palette = computed(() => engineInfo().blocks.filter((b) => b.placeable))
+const itemPalette = computed(() => engineInfo().items)
 
 const paint = () => paintBlockIconsIn(root.value)
 
 onMounted(paint)
 watch(
-  [palette, slots, () => texturePacks.state.revision],
+  [palette, itemPalette, slots, () => texturePacks.state.revision],
   async () => {
     await nextTick()
     paint()
@@ -88,6 +89,21 @@ function onHotbarContextMenu(e: MouseEvent, index: number) {
           <canvas :data-block="block.name" />
         </button>
       </div>
+      <h2>Предметы</h2>
+      <div class="palette">
+        <button
+          v-for="item in itemPalette"
+          :key="item.name"
+          type="button"
+          class="cell gui-slot"
+          :title="item.label"
+          draggable="true"
+          @click="putSelected(item.name)"
+          @dragstart="onPaletteDragStart($event, item.name)"
+        >
+          <canvas :data-block="item.name" />
+        </button>
+      </div>
       <div class="hotbar-row">
         <div
           v-for="(name, index) in slots"
@@ -135,6 +151,11 @@ h1 {
   font-size: var(--px-fs);
   font-weight: 700;
   text-align: center;
+}
+h2 {
+  margin: 0;
+  font-size: var(--px-fs-s);
+  font-weight: 700;
 }
 .hint {
   margin: 0;

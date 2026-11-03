@@ -1,6 +1,7 @@
 use glam::IVec3;
 
 use crate::block::Block;
+use crate::mob::MobRecord;
 use crate::section::{SECTION_SIZE, SECTION_VOLUME, Section};
 
 pub const COLUMN_SECTIONS: i32 = 8;
@@ -9,12 +10,14 @@ pub const WORLD_HEIGHT: i32 = COLUMN_SECTIONS * SECTION_SIZE;
 #[derive(Clone)]
 pub struct Column {
     sections: [Section; COLUMN_SECTIONS as usize],
+    pub mobs: Vec<MobRecord>,
 }
 
 impl Column {
     pub fn new() -> Self {
         Self {
             sections: std::array::from_fn(|_| Section::new()),
+            mobs: Vec::new(),
         }
     }
 

@@ -11,7 +11,7 @@ mod profiler;
 mod streamer;
 
 #[cfg(target_arch = "wasm32")]
-pub use engine::{Engine, block_icon};
+pub use engine::{Engine, block_icon, item_icon};
 
 #[cfg(test)]
 mod shader_constants;

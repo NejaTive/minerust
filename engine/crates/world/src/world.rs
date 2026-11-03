@@ -6,6 +6,7 @@ use crate::pos::{ColumnPos, SectionPos};
 
 use crate::block::{Block, FluidKind, fluid_height};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
+use crate::mob::MobRecord;
 use crate::section::SECTION_SIZE;
 
 pub struct World {
@@ -163,6 +164,18 @@ impl World {
 
     pub fn is_edited(&self, key: ColumnPos) -> bool {
         self.edited.contains(&key) || self.stashed.contains_key(&key)
+    }
+
+    pub fn set_mobs(&mut self, key: ColumnPos, mobs: Vec<MobRecord>) {
+        let Some(column) = self.columns.get_mut(&key) else {
+            return;
+        };
+        if column.mobs == mobs {
+            return;
+        }
+        column.mobs = mobs;
+        self.edited.insert(key);
+        self.dirty.insert(key);
     }
 
     pub fn drain_dirty(&mut self) -> Vec<ColumnPos> {

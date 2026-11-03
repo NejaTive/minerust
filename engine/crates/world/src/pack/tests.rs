@@ -289,7 +289,7 @@ fn builtin_files_are_exactly_the_mapped_ones() {
     let mut on_disk: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name != "LICENSE.txt" && name != "gui")
+        .filter(|name| !["LICENSE.txt", "gui", "entity", "items"].contains(&name.as_str()))
         .collect();
     on_disk.sort();
     let mut built_in: Vec<String> = BUILTIN.iter().map(|(name, _)| name.to_string()).collect();

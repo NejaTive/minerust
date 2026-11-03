@@ -1,25 +1,30 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use glam::{IVec3, Vec3};
+use glam::{IVec3, Vec2, Vec3};
 use world::block::{Block, FLUID_SOURCE, FluidKind};
 use world::clouds::cloud_drift;
 use world::column::{Column, WORLD_HEIGHT};
 use world::falling::Falling;
 use world::fluid::Fluid;
+use world::item::Item;
 use world::light::LightMap;
+use world::mob::{MobKind, MobRecord};
 use world::pos::{ColumnPos, SectionPos};
 use world::random_ticks::{RandomTicks, STEP_TICKS};
 use world::terrain::{Biome, DEBUG_SPAWN_Y, Terrain, WorldType};
 use world::world::{World, affected_sections};
 
 use crate::camera::Camera;
+use crate::collide::{center_xz, overlap_depth, push_away};
 use crate::daytime::{self, DayTime, SkyState};
 use crate::double_tap::DoubleTap;
 use crate::loader::DEFAULT_RADIUS;
+use crate::mob::{Mob, Pose, Surroundings};
 use crate::physics::{Clock, Collision, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
 use crate::rain_cover::RainCover;
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
+use crate::rng::Rng;
 use crate::weather::{self, Weather, WeatherState};
 
 const TIME_FAST_FACTOR: u32 = 60;
@@ -31,6 +36,20 @@ const DOUBLE_TAP_S: f32 = 0.3;
 const FLUID_STEP_TICKS: u32 = 15;
 const LAVA_STEP_TICKS: u32 = 30;
 const FALL_STEP_TICKS: u32 = 6;
+const MOB_RECORD_GRID: f32 = 8.0;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Held {
+    Block(Block),
+    Item(Item),
+}
+
+pub struct MobView {
+    pub kind: MobKind,
+    pub pose: Pose,
+    pub sky_level: u8,
+    pub block_level: u8,
+}
 
 #[derive(Default)]
 pub struct Edits {
@@ -86,7 +105,10 @@ pub struct Game {
     target: Option<IVec3>,
     breaking: Repeat,
     placing: Repeat,
-    selected: Option<Block>,
+    selected: Option<Held>,
+    mobs: Vec<Mob>,
+    adopted: HashSet<ColumnPos>,
+    mob_rng: Rng,
 }
 
 impl Game {
@@ -154,7 +176,10 @@ impl Game {
             target: None,
             breaking: Repeat::new(REPEAT_S),
             placing: Repeat::new(REPEAT_S),
-            selected: Some(DEFAULT_BLOCK),
+            selected: Some(Held::Block(DEFAULT_BLOCK)),
+            mobs: Vec::new(),
+            adopted: HashSet::new(),
+            mob_rng: Rng::new(seed as u32 ^ 0x9E37_79B9),
         })
     }
 
@@ -390,9 +415,12 @@ impl Game {
             self.selected = None;
             return true;
         }
-        match Block::from_name(name) {
-            Some(block) => {
-                self.selected = Some(block);
+        let held = Block::from_name(name)
+            .map(Held::Block)
+            .or_else(|| Item::from_name(name).map(Held::Item));
+        match held {
+            Some(held) => {
+                self.selected = Some(held);
                 true
             }
             None => false,
@@ -443,13 +471,21 @@ impl Game {
             self.apply_edit(&changed, &[], &mut dirty, &mut lit);
             target = self.pick();
         }
-        if editable
+        if let Some(Held::Item(item)) = self.selected {
+            if self.placing.fire_once()
+                && let Some(hit) = target
+            {
+                self.use_item(item, hit);
+            }
+        } else if editable
+            && let Some(Held::Block(block)) = self.selected
             && self.placing.fire(time)
-            && let Some(block) = self.selected
             && let Some((hit, pos)) = self.placement_hit(target, block)
             && let Some(data) = block.placement_data(hit.normal)
             && self.world.can_place_with_data(pos, block, data)
-            && (block.fluid().is_some() || !self.player.overlaps_block(pos))
+            && (block.fluid().is_some()
+                || !self.player.overlaps_block(pos)
+                    && (block.collision_height() == 0.0 || !self.mob_overlaps_block(pos)))
         {
             let changed = self.world.set_block_supported_with_data(pos, block, data);
             if !changed.is_empty() {
@@ -468,6 +504,9 @@ impl Game {
 
     /// `add_column` пересчитывает его заново вместе с соседями.
     pub fn import_column(&mut self, key: ColumnPos, column: Column) {
+        self.mobs
+            .retain(|mob| ColumnPos::of_block(mob.body.feet.floor().as_ivec3()) != key);
+        self.adopted.remove(&key);
         self.world.import(key, column);
         self.rain_cover.invalidate_column(key);
         if self.light.column(key).is_some() {
@@ -517,6 +556,175 @@ impl Game {
         }
     }
 
+    fn use_item(&mut self, item: Item, hit: Hit) {
+        let cell = hit.block + hit.normal;
+        let feet = Vec3::new(cell.x as f32 + 0.5, cell.y as f32, cell.z as f32 + 0.5);
+        let yaw = self.mob_rng.range(0.0, std::f32::consts::TAU);
+        let seed = self.mob_rng.next_u32();
+        let mob = Mob::new(item.def().spawns, feet, yaw, seed);
+        let (min, max) = mob.body.aabb();
+        let (lo, hi) = (
+            (min + 1e-3).floor().as_ivec3(),
+            (max - 1e-3).floor().as_ivec3(),
+        );
+        let clear = (lo.x..=hi.x).all(|x| {
+            (lo.y..=hi.y).all(|y| {
+                (lo.z..=hi.z)
+                    .all(|z| self.world.block(IVec3::new(x, y, z)).collision_height() == 0.0)
+            })
+        });
+        if clear && self.world.is_loaded(cell) {
+            self.mobs.push(mob);
+        }
+    }
+
+    pub fn mob_count(&self) -> usize {
+        self.mobs.len()
+    }
+
+    pub fn mobs(&self) -> &[Mob] {
+        &self.mobs
+    }
+
+    pub fn mob_views(&self) -> Vec<MobView> {
+        let alpha = self.clock.alpha();
+        self.mobs
+            .iter()
+            .map(|mob| {
+                let pose = mob.interpolated(alpha);
+                let cell = (pose.feet + Vec3::Y * 0.45).floor().as_ivec3();
+                MobView {
+                    kind: mob.kind,
+                    pose,
+                    sky_level: self.light.sky(cell),
+                    block_level: self.light.block(cell),
+                }
+            })
+            .collect()
+    }
+
+    fn adopt_mobs(&mut self) {
+        self.adopted.retain(|key| self.world.column(*key).is_some());
+        let loaded: HashSet<ColumnPos> = self.world.keys().collect();
+        self.mobs
+            .retain(|mob| loaded.contains(&ColumnPos::of_block(mob.body.feet.floor().as_ivec3())));
+        let fresh: Vec<ColumnPos> = loaded
+            .into_iter()
+            .filter(|key| !self.adopted.contains(key))
+            .collect();
+        for key in fresh {
+            self.adopted.insert(key);
+            let Some(column) = self.world.column(key) else {
+                continue;
+            };
+            for record in column.mobs.clone() {
+                let seed = self.mob_rng.next_u32();
+                self.mobs.push(Mob::from_record(&record, seed));
+            }
+        }
+    }
+
+    fn tick_mobs(&mut self) {
+        let world = &self.world;
+        let eye = self.player.eye();
+        let collision = |pos| {
+            let block = world.block(pos);
+            Collision {
+                height: block.collision_height(),
+                slippery: block.is_slippery(),
+            }
+        };
+        let fluid = |pos| world.fluid_height(pos);
+        let around = Surroundings {
+            collision: &collision,
+            fluid: &fluid,
+            player_eye: eye,
+        };
+        for mob in &mut self.mobs {
+            let (min, max) = mob.body.aabb();
+            let (lo, hi) = (
+                ColumnPos::of_block((min - Vec3::ONE).floor().as_ivec3()),
+                ColumnPos::of_block((max + Vec3::ONE).floor().as_ivec3()),
+            );
+            let loaded = (lo.x()..=hi.x())
+                .all(|x| (lo.z()..=hi.z()).all(|z| world.column(ColumnPos::new(x, z)).is_some()));
+            if loaded {
+                mob.tick(&around);
+            }
+        }
+    }
+
+    fn push_entities(&mut self) {
+        let world = &self.world;
+        let collision = |pos| {
+            let block = world.block(pos);
+            Collision {
+                height: block.collision_height(),
+                slippery: block.is_slippery(),
+            }
+        };
+        let bounds: Vec<_> = self.mobs.iter().map(|mob| mob.body.aabb()).collect();
+        let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+        for (i, bound) in bounds.iter().enumerate() {
+            let at = center_xz(*bound).floor();
+            grid.entry((at.x as i32, at.y as i32)).or_default().push(i);
+        }
+        let mut pushes = vec![Vec2::ZERO; bounds.len()];
+        for (i, bound) in bounds.iter().enumerate() {
+            let at = center_xz(*bound).floor();
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    let Some(cell) = grid.get(&(at.x as i32 + dx, at.y as i32 + dz)) else {
+                        continue;
+                    };
+                    for &j in cell.iter().filter(|&&j| j > i) {
+                        if let Some(depth) = overlap_depth(*bound, bounds[j]) {
+                            let push = push_away(*bound, bounds[j], depth, (i + j) as u32);
+                            pushes[i] -= push;
+                            pushes[j] += push;
+                        }
+                    }
+                }
+            }
+        }
+        let player = self.player.aabb();
+        let mut player_push = Vec2::ZERO;
+        for (i, bound) in bounds.iter().enumerate() {
+            if let Some(depth) = overlap_depth(player, *bound) {
+                let push = push_away(player, *bound, depth, i as u32);
+                pushes[i] += push;
+                player_push -= push;
+            }
+        }
+        for (mob, push) in self.mobs.iter_mut().zip(pushes) {
+            if push != Vec2::ZERO {
+                mob.body.push(push, collision);
+            }
+        }
+        if player_push != Vec2::ZERO {
+            self.player.push(player_push, collision);
+        }
+    }
+
+    fn mob_overlaps_block(&self, pos: IVec3) -> bool {
+        self.mobs.iter().any(|mob| mob.body.overlaps_block(pos))
+    }
+
+    fn sync_mobs(&mut self) {
+        let mut by_column: std::collections::HashMap<ColumnPos, Vec<MobRecord>> =
+            self.adopted.iter().map(|key| (*key, Vec::new())).collect();
+        for mob in &self.mobs {
+            let mut record = mob.record();
+            record.pos = (record.pos * MOB_RECORD_GRID).round() / MOB_RECORD_GRID;
+            record.yaw = (record.yaw * MOB_RECORD_GRID).round() / MOB_RECORD_GRID;
+            let key = ColumnPos::of_block(mob.body.feet.floor().as_ivec3());
+            by_column.entry(key).or_default().push(record);
+        }
+        for (key, records) in by_column {
+            self.world.set_mobs(key, records);
+        }
+    }
+
     fn update_player(&mut self, dt: f32) {
         let input = self.input();
         let ticks = self.clock.advance(dt);
@@ -535,6 +743,7 @@ impl Game {
             self.advance_falling(ticks);
             self.advance_random_ticks(ticks * factor);
         }
+        self.adopt_mobs();
         for _ in 0..ticks {
             if !self.body_loaded() {
                 self.clock.reset();
@@ -554,7 +763,10 @@ impl Game {
                 },
                 |pos| self.world.fluid_height(pos),
             );
+            self.tick_mobs();
+            self.push_entities();
         }
+        self.sync_mobs();
         let from = self.prev_feet - Vec3::Y * self.prev_step_offset;
         let to = self.player.feet - Vec3::Y * self.player.step_offset;
         self.camera.position = from.lerp(to, self.clock.alpha()) + Vec3::Y * EYE_HEIGHT;

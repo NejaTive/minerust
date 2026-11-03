@@ -586,6 +586,43 @@ fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(shaded_glow(in, texel.rgb, sun_vis, texel.rgb * LEAF_GLOW_TINT * glow), 1.0);
 }
 
+// Мобы: вершины в мировых координатах строит entity.rs; light = (небо, блок) в уровнях 0..15.
+@group(3) @binding(0)
+var entity_texture: texture_2d<f32>;
+@group(3) @binding(1)
+var entity_sampler: sampler;
+
+struct EntityIn {
+    @location(0) position: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) shade: f32,
+    @location(3) light: vec2<f32>,
+};
+
+@vertex
+fn vs_entity(in: EntityIn) -> VertexOut {
+    var out: VertexOut;
+    out.position = globals.view_proj * vec4<f32>(in.position, 1.0);
+    out.uv = in.uv;
+    out.shade = in.shade;
+    out.sun_light = level_brightness(in.light.x - globals.darkness);
+    out.sky_exposure = level_brightness(in.light.x);
+    out.block_light = level_brightness(in.light.y);
+    out.layer = 0u;
+    out.world_pos = in.position;
+    return out;
+}
+
+@fragment
+fn fs_entity(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(entity_texture, entity_sampler, in.uv);
+    if texel.a < 0.5 {
+        discard;
+    }
+    let normal = flat_normal(in.world_pos);
+    return vec4<f32>(shaded(in, texel.rgb, sun_visibility(in, normal, true)), 1.0);
+}
+
 // Одинаково в sky.wgsl и shader.wgsl: туман сцены сходится с горизонтом неба.
 fn dusk_glow(dir: vec3<f32>, height: f32) -> f32 {
     let sun_flat = normalize(vec2<f32>(globals.sun_dir.x, globals.sun_dir.z) + vec2<f32>(1e-4, 0.0));

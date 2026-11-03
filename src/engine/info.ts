@@ -1,4 +1,4 @@
-import init, { Engine, blocks, default_settings, settings_limits } from '@engine'
+import init, { Engine, blocks, default_settings, items, settings_limits } from '@engine'
 import type { EngineSettings, SettingsLimits } from '../settings/settings'
 
 export interface BlockInfo {
@@ -7,9 +7,15 @@ export interface BlockInfo {
   placeable: boolean
 }
 
+export interface ItemInfo {
+  name: string
+  label: string
+}
+
 export interface EngineInfo {
   formatVersion: number
   blocks: BlockInfo[]
+  items: ItemInfo[]
   limits: SettingsLimits
   defaults: EngineSettings
 }
@@ -19,11 +25,13 @@ let loaded: EngineInfo | undefined
 export async function loadEngineInfo(): Promise<EngineInfo> {
   await init()
   const list = blocks()
+  const itemList = items()
   const limits = settings_limits()
   const defaults = default_settings()
   loaded = {
     formatVersion: Engine.format_version(),
     blocks: list.map(({ name, label, placeable }) => ({ name, label, placeable })),
+    items: itemList.map(({ name, label }) => ({ name, label })),
     limits: {
       renderDistanceMin: limits.renderDistanceMin,
       renderDistanceMax: limits.renderDistanceMax,
@@ -56,6 +64,7 @@ export async function loadEngineInfo(): Promise<EngineInfo> {
     },
   }
   list.forEach((block) => block.free())
+  itemList.forEach((item) => item.free())
   limits.free()
   defaults.free()
   return loaded
@@ -67,5 +76,10 @@ export function engineInfo(): EngineInfo {
 }
 
 export function blockLabel(name: string): string {
-  return engineInfo().blocks.find((block) => block.name === name)?.label ?? name
+  const info = engineInfo()
+  return (
+    info.blocks.find((block) => block.name === name)?.label ??
+    info.items.find((item) => item.name === name)?.label ??
+    name
+  )
 }

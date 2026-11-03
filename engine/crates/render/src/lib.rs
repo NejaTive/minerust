@@ -3,6 +3,7 @@ mod biome;
 mod bloom;
 mod clouds;
 mod effects;
+pub mod entity;
 mod exposure;
 mod exposure_pass;
 pub mod fog;

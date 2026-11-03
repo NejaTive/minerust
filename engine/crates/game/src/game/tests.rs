@@ -153,3 +153,177 @@ fn rain_cover_sees_roofs_after_edits() {
     assert!(game.take_rain_cover().is_some());
     assert_eq!(game.rain_cover.height(roof.x, roof.z), 71);
 }
+
+fn load_around_origin(game: &mut Game) {
+    for x in -1..=1 {
+        for z in -1..=1 {
+            let key = ColumnPos::new(x, z);
+            let column = game.terrain.generate(key);
+            game.world.insert(key, column);
+        }
+    }
+}
+
+fn pig_above_ground(game: &Game) -> Mob {
+    let ground = (0..WORLD_HEIGHT)
+        .rev()
+        .find(|&y| game.world.block(IVec3::new(5, y, 5)) != Block::Air)
+        .unwrap();
+    Mob::new(
+        MobKind::Pig,
+        Vec3::new(5.5, ground as f32 + 1.0, 5.5),
+        0.0,
+        3,
+    )
+}
+
+#[test]
+fn mobs_are_saved_with_their_column_and_return_with_it() {
+    let mut game = Game::new(SEED, None).unwrap();
+    load_around_origin(&mut game);
+    game.mobs.push(pig_above_ground(&game));
+    run(&mut game, 2.0);
+    let key = ColumnPos::new(0, 0);
+    assert_eq!(game.world.edited_column(key).unwrap().mobs.len(), 1);
+    assert_eq!(game.mob_count(), 1);
+
+    let saved = world::save::encode_column(game.world.edited_column(key).unwrap());
+    game.world.remove(key);
+    run(&mut game, 0.5);
+    assert_eq!(game.mob_count(), 0);
+
+    let restored = world::save::decode_column(&saved).unwrap();
+    game.world.insert(key, restored);
+    run(&mut game, 0.5);
+    assert_eq!(game.mob_count(), 1);
+}
+
+#[test]
+fn unloaded_columns_freeze_and_drop_their_mobs() {
+    let mut game = Game::new(SEED, None).unwrap();
+    load_around_origin(&mut game);
+    game.mobs.push(pig_above_ground(&game));
+    run(&mut game, 1.0);
+    game.world.remove(ColumnPos::new(0, 0));
+    run(&mut game, 1.0);
+    assert!(game.mobs().is_empty());
+}
+
+#[test]
+fn spawn_egg_summons_a_pig_without_being_spent() {
+    let mut game = Game::new(SEED, None).unwrap();
+    load_around_origin(&mut game);
+    assert!(game.select_block("pig_spawn_egg"));
+    let ground = (0..WORLD_HEIGHT)
+        .rev()
+        .find(|&y| game.world.block(IVec3::new(5, y, 5)) != Block::Air)
+        .unwrap();
+    let hit = Hit {
+        block: IVec3::new(5, ground, 5),
+        normal: IVec3::Y,
+        distance: 1.0,
+    };
+    game.use_item(Item::PigSpawnEgg, hit);
+    assert_eq!(game.mob_count(), 1);
+    assert_eq!(game.selected, Some(Held::Item(Item::PigSpawnEgg)));
+    assert!(!game.select_block("nope"));
+}
+
+const FLOOR: i32 = 10;
+
+fn floor_game() -> Game {
+    let mut game = Game::new(1, None).unwrap();
+    for x in -1..=1 {
+        for z in -1..=1 {
+            let mut column = Column::new();
+            for lx in 0..16 {
+                for lz in 0..16 {
+                    column.set(IVec3::new(lx, FLOOR, lz), Block::Stone);
+                }
+            }
+            let key = ColumnPos::new(x, z);
+            game.world.insert(key, column);
+            game.light.add_column(&game.world, key);
+        }
+    }
+    game
+}
+
+fn pig_at(x: f32, z: f32, seed: u32) -> Mob {
+    Mob::new(MobKind::Pig, Vec3::new(x, FLOOR as f32 + 1.0, z), 0.0, seed)
+}
+
+fn mob_distance(game: &Game) -> f32 {
+    game.mobs[0].body.feet.distance(game.mobs[1].body.feet)
+}
+
+#[test]
+fn two_pigs_in_one_spot_drift_apart() {
+    let mut game = floor_game();
+    game.mobs.push(pig_at(8.5, 8.5, 1));
+    game.mobs.push(pig_at(8.5, 8.5, 2));
+    game.set_camera_state(&[8.5, 20.0, 30.0, 0.0, 0.0, 1.0])
+        .unwrap();
+    run(&mut game, 1.0);
+    assert!(mob_distance(&game) > 0.85, "{}", mob_distance(&game));
+}
+
+#[test]
+fn overlapping_pigs_are_pushed_gently() {
+    let mut game = floor_game();
+    game.mobs.push(pig_at(8.5, 8.5, 1));
+    game.mobs.push(pig_at(8.9, 8.5, 2));
+    game.set_camera_state(&[8.5, 20.0, 30.0, 0.0, 0.0, 1.0])
+        .unwrap();
+    let before = mob_distance(&game);
+    game.update(0.0);
+    game.update(TICK);
+    let after = mob_distance(&game);
+    assert!(after > before && after - before < 0.2);
+}
+
+fn walk_forward(game: &mut Game, seconds: f32) -> f32 {
+    let start = game.player().feet.x;
+    game.set_key("KeyW", true);
+    run(game, seconds);
+    game.player().feet.x - start
+}
+
+#[test]
+fn walking_into_a_pig_pushes_it_and_slows_the_player() {
+    let state = [4.5, FLOOR as f32 + 1.0 + EYE_HEIGHT, 8.5, 0.0, 0.0, 0.0];
+    let mut free = floor_game();
+    free.set_camera_state(&state).unwrap();
+    let unobstructed = walk_forward(&mut free, 1.0);
+
+    let mut game = floor_game();
+    game.set_camera_state(&state).unwrap();
+    game.mobs.push(pig_at(7.0, 8.5, 1));
+    let start = game.mobs[0].body.feet.x;
+    let obstructed = walk_forward(&mut game, 1.0);
+    assert!(obstructed < unobstructed, "{obstructed} {unobstructed}");
+    assert!(obstructed > 0.0);
+    assert!(game.mobs[0].body.feet.x > start + 0.3);
+}
+
+fn try_place(game: &mut Game, name: &str) -> Block {
+    game.set_camera_state(&[8.5, 14.5, 8.5, 0.0, -std::f32::consts::FRAC_PI_2, 1.0])
+        .unwrap();
+    assert!(game.select_block(name));
+    game.update(0.0);
+    game.mouse_button(2, true);
+    game.interact(0.0);
+    game.mouse_button(2, false);
+    game.world.block(IVec3::new(8, FLOOR + 1, 8))
+}
+
+#[test]
+fn solid_blocks_are_not_placed_into_a_pig_but_flowers_are() {
+    let mut game = floor_game();
+    game.mobs.push(pig_at(8.5, 8.5, 1));
+    assert_eq!(try_place(&mut game, "stone"), Block::Air);
+    assert_eq!(try_place(&mut game, "poppy"), Block::Poppy);
+
+    let mut empty = floor_game();
+    assert_eq!(try_place(&mut empty, "stone"), Block::Stone);
+}
