@@ -317,7 +317,7 @@ impl Game {
 
     pub fn rain_drops(&self) -> f32 {
         let rain = self.weather.rain();
-        if rain > 0.0 && self.camera_biome() != Biome::Desert {
+        if rain > 0.0 && self.camera_biome().rainfall() > 0.0 {
             rain
         } else {
             0.0

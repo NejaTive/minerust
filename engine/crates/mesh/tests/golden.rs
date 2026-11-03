@@ -10,7 +10,7 @@ use world::terrain::{Terrain, WorldType};
 use world::world::World;
 
 const SEED: i32 = 1337;
-const KEYS: [(i32, i32); 5] = [(-4, -11), (6, -12), (0, -12), (0, -7), (19, -36)];
+const KEYS: [(i32, i32); 5] = [(-19, 3), (36, 6), (22, 12), (-19, 31), (-37, 30)];
 
 fn fnv(hash: &mut u64, bytes: &[u8]) {
     for &b in bytes {
@@ -174,17 +174,17 @@ fn oriented_scene_matches_golden() {
 
 const GOLDEN_ORIENTED: u64 = 0xdf81dc4645d46957;
 const GOLDEN_BLOCKS: [u64; 5] = [
-    0xedd2b7ab40b4715b,
-    0x3733450abdefd83b,
-    0x87a769a9d634dde3,
-    0x6cf9254a2f7f2be4,
-    0x4029873d321096d7,
+    0x614935aaae0ac814,
+    0x8feb2848b215374,
+    0xd3aa8223dfa4c9ab,
+    0x36fd2994779b24c8,
+    0xc570dee6e60ac81e,
 ];
 const GOLDEN_MESHES: [u64; 5] = [
-    0xb9f77a891fa4a83e,
-    0xca8bb681691dd67c,
-    0x930cb69ab3c0d375,
-    0xa5baa5a0ff6a4445,
-    0x9db59cb4b61a453b,
+    0x5abde8a58449fb5,
+    0x5c88a5cce230575a,
+    0xf690d3b8f4ab03a6,
+    0x763bcbc062b73db0,
+    0x2875c73c5a350b40,
 ];
 const GOLDEN_FLAT: u64 = 0x37dceff88f4c0f25;

@@ -315,7 +315,10 @@ impl Streamer {
                 self.queue_sections(changed, game, renderer);
             }
             Progress::Mesh(key) => {
-                renderer.set_biome_column(key, &game.terrain.column_biome_bytes(key));
+                let tints = game
+                    .terrain
+                    .column_tint_bytes(key, renderer.biome_palette());
+                renderer.set_biome_column(key, &tints);
                 if self.can_start() && self.backlog.is_empty() {
                     self.mesh_column(game, renderer, profiler, key);
                 } else {

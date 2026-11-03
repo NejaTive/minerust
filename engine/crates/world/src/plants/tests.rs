@@ -1,9 +1,9 @@
 use super::*;
 
 fn columns_of(terrain: &Terrain, biome: Biome, count: usize) -> Vec<ColumnPos> {
-    (-40..40)
-        .flat_map(|z| (-40..40).map(move |x| ColumnPos::new(x, z)))
-        .filter(|k| terrain.biome_at(k.origin().x + 8, k.origin().z + 8) == biome)
+    (-300..300)
+        .flat_map(|z| (-300..300).map(move |x| ColumnPos::new(x, z)))
+        .filter(|k| terrain.sample_biome(k.origin().x + 8, k.origin().z + 8) == biome)
         .take(count)
         .collect()
 }

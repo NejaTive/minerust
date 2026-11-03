@@ -124,7 +124,10 @@ fn locate_finds_each_biome_at_reported_spot() {
         ("desert", Biome::Desert),
         ("forest", Biome::Forest),
         ("taiga", Biome::Taiga),
-        ("tundra", Biome::Tundra),
+        ("ice_plains", Biome::IcePlains),
+        ("ocean", Biome::Ocean),
+        ("river", Biome::River),
+        ("beach", Biome::Beach),
     ] {
         let out = g.run_command(&format!("/locate biome {name}"));
         if !out.ok {
@@ -151,14 +154,7 @@ fn locate_current_biome_is_distance_zero() {
     let mut g = game();
     let eye = g.player().eye().floor().as_ivec3();
     let here = g.terrain.biome_at(eye.x, eye.z);
-    let name = match here {
-        Biome::Plains => "plains",
-        Biome::Desert => "desert",
-        Biome::Forest => "forest",
-        Biome::Taiga => "taiga",
-        Biome::Tundra => "tundra",
-    };
-    assert!(ok(&mut g, &format!("/locate biome {name}")).contains("(0 блоков)"));
+    assert!(ok(&mut g, &format!("/locate biome {}", here.name())).contains("(0 блоков)"));
 }
 
 #[test]
@@ -168,19 +164,11 @@ fn locate_in_debug_world_reports_not_found() {
         let eye = g.player().eye().floor().as_ivec3();
         g.terrain.biome_at(eye.x, eye.z)
     };
-    let other = ["plains", "desert", "forest", "taiga", "tundra"]
-        .into_iter()
-        .find(|name| {
-            let biome = match *name {
-                "plains" => Biome::Plains,
-                "desert" => Biome::Desert,
-                "forest" => Biome::Forest,
-                "taiga" => Biome::Taiga,
-                _ => Biome::Tundra,
-            };
-            biome != here
-        })
-        .unwrap();
+    let other = if here == Biome::Forest {
+        "plains"
+    } else {
+        "forest"
+    };
     assert!(err(&mut g, &format!("/locate biome {other}")).contains("не найден"));
 }
 
@@ -190,7 +178,7 @@ fn locate_errors() {
     for line in [
         "/locate",
         "/locate biome",
-        "/locate biome ocean",
+        "/locate biome atlantis",
         "/locate structure x",
     ] {
         assert!(err(&mut g, line).contains("/locate"), "{line}");
@@ -235,7 +223,15 @@ fn complete_commands_and_arguments() {
     let c = g.complete_command("/weather ra");
     assert_eq!(c.options, vec!["rain".to_owned()]);
     let c = g.complete_command("/locate biome ta");
-    assert_eq!((c.start, c.options), (14, vec!["taiga".to_owned()]));
+    assert_eq!(
+        (c.start, c.options),
+        (
+            14,
+            ["taiga", "taiga_hills", "taiga_m"]
+                .map(str::to_owned)
+                .to_vec()
+        )
+    );
     assert!(g.complete_command("/time add ").options.is_empty());
     assert!(g.complete_command("/time set zzz").options.is_empty());
 }
@@ -390,4 +386,12 @@ fn speed_completes_modes() {
             .options
             .contains(&"speed".to_owned())
     );
+}
+
+#[test]
+fn every_biome_has_a_locate_name_and_a_label() {
+    for &biome in Biome::ALL {
+        assert_eq!(super::biome_entry(biome.name()), Some(biome));
+        assert!(!super::biome_label(biome).is_empty());
+    }
 }

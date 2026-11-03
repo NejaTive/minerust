@@ -169,6 +169,7 @@ impl Engine {
     pub fn load_texture_pack(&mut self, zip: &[u8]) -> Result<PackInfo, JsError> {
         let pack = world::pack::load(zip).map_err(|e| JsError::new(&e))?;
         self.renderer.set_textures(&pack.textures);
+        self.retint_loaded_columns();
         let info = PackInfo::of(&pack);
         self.renderer.set_entity_textures(&pack.entities);
         ICON_ENTITIES.with(|icons| *icons.borrow_mut() = pack.entities);
@@ -176,10 +177,21 @@ impl Engine {
         Ok(info)
     }
 
+    fn retint_loaded_columns(&self) {
+        for key in self.game.world.keys() {
+            let tints = self
+                .game
+                .terrain
+                .column_tint_bytes(key, self.renderer.biome_palette());
+            self.renderer.set_biome_column(key, &tints);
+        }
+    }
+
     #[wasm_bindgen(js_name = resetTexturePack)]
     pub fn reset_texture_pack(&mut self) {
         let standard = TextureSet::standard();
         self.renderer.set_textures(&standard);
+        self.retint_loaded_columns();
         ICON_TEXTURES.with(|icons| *icons.borrow_mut() = standard);
         let entities = world::pack::builtin_entities();
         self.renderer.set_entity_textures(&entities);
