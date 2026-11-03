@@ -24,3 +24,17 @@ fn icon_is_tinted_from_both_layers() {
     assert!(!opaque.is_empty());
     assert!(opaque.iter().all(|p| p[0] >= p[2]));
 }
+
+#[test]
+fn each_egg_summons_its_own_mob_with_its_own_colors() {
+    let entities = builtin_entities();
+    let kinds: Vec<MobKind> = Item::ALL.iter().map(|item| item.def().spawns).collect();
+    assert_eq!(kinds, MobKind::ALL);
+    let icons: Vec<Vec<u8>> = Item::ALL
+        .iter()
+        .map(|item| item.icon_pixels(&entities))
+        .collect();
+    for (i, a) in icons.iter().enumerate() {
+        assert!(icons[i + 1..].iter().all(|b| a != b));
+    }
+}

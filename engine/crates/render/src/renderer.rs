@@ -171,7 +171,7 @@ fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGrou
 
 #[derive(Default)]
 struct MobDraw {
-    mobs: u32,
+    sheets: [u32; entity::TEXTURES],
     blob_offset: u64,
     blobs: u32,
 }
@@ -218,7 +218,7 @@ pub struct Renderer {
     entity_buffer: wgpu::Buffer,
     entity_capacity: u64,
     entity_layout: wgpu::BindGroupLayout,
-    entity_group: wgpu::BindGroup,
+    entity_groups: Vec<wgpu::BindGroup>,
     outline_buffer: wgpu::Buffer,
     outline_block: Option<(IVec3, Block, u8)>,
     globals_buffer: wgpu::Buffer,
@@ -553,7 +553,7 @@ impl Renderer {
                 bind_group_layouts: &[Some(&globals_layout), None, None, Some(&entity_layout)],
                 ..Default::default()
             });
-        let entity_group = entity::create_texture_group(
+        let entity_groups = entity::create_texture_groups(
             &device,
             &queue,
             &entity_layout,
@@ -655,7 +655,7 @@ impl Renderer {
             entity_buffer,
             entity_capacity: ENTITY_BUFFER_START,
             entity_layout,
-            entity_group,
+            entity_groups,
             outline_buffer,
             outline_block: None,
             globals_buffer,
@@ -778,8 +778,8 @@ impl Renderer {
     }
 
     pub fn set_entity_textures(&mut self, images: &world::pack::EntityImages) {
-        self.entity_group =
-            entity::create_texture_group(&self.device, &self.queue, &self.entity_layout, images);
+        self.entity_groups =
+            entity::create_texture_groups(&self.device, &self.queue, &self.entity_layout, images);
     }
 
     fn upload_mobs(&mut self, params: &FrameParams) -> MobDraw {
@@ -789,6 +789,7 @@ impl Renderer {
         let blobs = entity::visible_blobs(&params.mobs, visible);
         let bytes: Vec<u8> = mobs
             .iter()
+            .flatten()
             .chain(&blobs)
             .flat_map(|f| f.to_le_bytes())
             .collect();
@@ -800,9 +801,10 @@ impl Renderer {
             self.entity_buffer = create_entity_buffer(&self.device, self.entity_capacity);
         }
         self.queue.write_buffer(&self.entity_buffer, 0, &bytes);
+        let mob_floats: usize = mobs.iter().map(Vec::len).sum();
         MobDraw {
-            mobs: (mobs.len() / entity::VERTEX_FLOATS) as u32,
-            blob_offset: (mobs.len() * 4) as u64,
+            sheets: mobs.map(|vertices| (vertices.len() / entity::VERTEX_FLOATS) as u32),
+            blob_offset: (mob_floats * 4) as u64,
             blobs: (blobs.len() / entity::BLOB_FLOATS) as u32,
         }
     }
@@ -1151,13 +1153,20 @@ impl Renderer {
             }
             self.drawn_sections = visible.len() as u32;
 
-            if mob_draw.mobs > 0 {
+            if mob_draw.sheets.iter().any(|&count| count > 0) {
                 pass.set_pipeline(&pipes.entity);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_bind_group(3, &self.entity_group, &[]);
                 pass.set_vertex_buffer(0, self.entity_buffer.slice(..mob_draw.blob_offset));
-                pass.draw(0..mob_draw.mobs, 0..1);
-                counts.draw_calls += 1;
+                let mut first = 0;
+                for (group, &count) in self.entity_groups.iter().zip(&mob_draw.sheets) {
+                    if count == 0 {
+                        continue;
+                    }
+                    pass.set_bind_group(3, group, &[]);
+                    pass.draw(first..first + count, 0..1);
+                    counts.draw_calls += 1;
+                    first += count;
+                }
             }
             if mob_draw.blobs > 0 {
                 pass.set_pipeline(&pipes.blob);

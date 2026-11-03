@@ -14,8 +14,12 @@ fn dry(_: IVec3) -> Option<(FluidKind, f32)> {
     None
 }
 
+fn mob(kind: MobKind, seed: u32) -> Mob {
+    Mob::new(kind, Vec3::new(0.5, 64.0, 0.5), 0.0, seed)
+}
+
 fn pig(seed: u32) -> Mob {
-    Mob::new(MobKind::Pig, Vec3::new(0.5, 64.0, 0.5), 0.0, seed)
+    mob(MobKind::Pig, seed)
 }
 
 fn run<C, F>(mob: &mut Mob, ticks: u32, collision: &C, fluid: &F)
@@ -34,10 +38,20 @@ where
 }
 
 #[test]
-fn hitbox_is_nine_tenths_of_a_block() {
-    let mob = pig(1);
-    let (min, max) = mob.body.aabb();
-    assert!((max - min - Vec3::splat(PIG_SIZE)).abs().max_element() < 1e-4);
+fn hitboxes_match_minecraft() {
+    for (kind, width, height) in [
+        (MobKind::Pig, 0.9, 0.9),
+        (MobKind::Chicken, 0.4, 0.7),
+        (MobKind::Cow, 0.9, 1.4),
+        (MobKind::Sheep, 0.9, 1.3),
+    ] {
+        let (min, max) = mob(kind, 1).body.aabb();
+        let expected = Vec3::new(width, height, width);
+        assert!(
+            (max - min - expected).abs().max_element() < 1e-4,
+            "{kind:?}"
+        );
+    }
 }
 
 #[test]
@@ -204,4 +218,61 @@ fn does_not_jump_under_a_ceiling() {
     }
     assert!(mob.body.feet.x < 3.0);
     assert_eq!(peak, 64.0);
+}
+
+#[test]
+fn every_kind_wanders_and_stays_on_the_ground() {
+    for kind in MobKind::ALL {
+        let mut mob = mob(kind, 7);
+        run(&mut mob, 3000, &flat, &dry);
+        assert_eq!(mob.body.feet.y, 64.0, "{kind:?}");
+        assert!(
+            mob.body.feet.distance(Vec3::new(0.5, 64.0, 0.5)) > 1.0,
+            "{kind:?}"
+        );
+    }
+}
+
+fn fall_speed(kind: MobKind) -> f32 {
+    let mut mob = mob(kind, 3);
+    mob.body.feet.y = 200.0;
+    let mut fastest = 0.0_f32;
+    let around = Surroundings {
+        collision: &flat,
+        fluid: &dry,
+        player_eye: Vec3::ZERO,
+    };
+    for _ in 0..90 {
+        mob.tick(&around);
+        fastest = fastest.max(-mob.body.velocity.y);
+    }
+    fastest
+}
+
+#[test]
+fn chicken_falls_slowly() {
+    assert!(fall_speed(MobKind::Chicken) <= 3.9 + 1e-3);
+    assert!(fall_speed(MobKind::Pig) > 10.0);
+}
+
+#[test]
+fn chicken_flaps_in_the_air_and_settles_on_the_ground() {
+    let mut chicken = mob(MobKind::Chicken, 3);
+    chicken.body.feet.y = 70.0;
+    run(&mut chicken, 20, &flat, &dry);
+    let airborne = chicken.pose();
+    assert!(airborne.flap_amount > 0.9);
+    assert!(airborne.flap_phase > 1.0);
+    run(&mut chicken, 200, &flat, &dry);
+    assert!(chicken.body.on_ground);
+    assert_eq!(chicken.pose().flap_amount, 0.0);
+}
+
+#[test]
+fn other_kinds_never_flap() {
+    let mut cow = mob(MobKind::Cow, 3);
+    cow.body.feet.y = 70.0;
+    run(&mut cow, 40, &flat, &dry);
+    assert_eq!(cow.pose().flap_amount, 0.0);
+    assert_eq!(cow.pose().flap_phase, 0.0);
 }

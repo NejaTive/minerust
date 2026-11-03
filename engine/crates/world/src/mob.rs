@@ -4,10 +4,13 @@ use glam::Vec3;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MobKind {
     Pig,
+    Chicken,
+    Cow,
+    Sheep,
 }
 
 impl MobKind {
-    pub const ALL: [MobKind; 1] = [MobKind::Pig];
+    pub const ALL: [MobKind; 4] = [MobKind::Pig, MobKind::Chicken, MobKind::Cow, MobKind::Sheep];
 }
 
 impl TryFrom<u8> for MobKind {

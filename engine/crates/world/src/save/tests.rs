@@ -315,6 +315,22 @@ fn mobs_round_trip() {
 }
 
 #[test]
+fn every_mob_kind_round_trips() {
+    let mut column = filled(Block::Stone);
+    column.mobs = MobKind::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(i, kind)| MobRecord {
+            kind,
+            pos: glam::Vec3::new(i as f32 + 0.5, 70.0, -2.25),
+            yaw: i as f32 * 0.5,
+        })
+        .collect();
+    let decoded = decode_column(&encode_column(&column)).expect("decodes");
+    assert_eq!(decoded.mobs, column.mobs);
+}
+
+#[test]
 fn unknown_mob_kind_is_rejected() {
     let mut column = Column::new();
     column.mobs.push(MobRecord {

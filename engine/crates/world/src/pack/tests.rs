@@ -377,3 +377,17 @@ fn builtin_gui_files_are_exactly_the_mapped_ones() {
     built_in.sort();
     assert_eq!(on_disk, built_in);
 }
+
+#[test]
+fn builtin_entity_sheets_are_two_to_one() {
+    let entities = builtin_entities();
+    for sheet in [
+        &entities.pig,
+        &entities.chicken,
+        &entities.cow,
+        &entities.sheep,
+        &entities.sheep_fur,
+    ] {
+        assert!(sheet.width >= 64 && sheet.width == 2 * sheet.height);
+    }
+}

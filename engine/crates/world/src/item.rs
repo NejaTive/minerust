@@ -5,6 +5,9 @@ use crate::textures::{DecodedImage, scale_nearest};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Item {
     PigSpawnEgg,
+    ChickenSpawnEgg,
+    CowSpawnEgg,
+    SheepSpawnEgg,
 }
 
 pub struct ItemDef {
@@ -15,16 +18,44 @@ pub struct ItemDef {
     pub egg_secondary: [u8; 3],
 }
 
-pub const ITEMS: [ItemDef; 1] = [ItemDef {
-    name: "pig_spawn_egg",
-    label: "яйцо призыва свиньи",
-    spawns: MobKind::Pig,
-    egg_primary: [0xF0, 0xA5, 0xA2],
-    egg_secondary: [0xDB, 0x63, 0x5F],
-}];
+pub const ITEMS: [ItemDef; 4] = [
+    ItemDef {
+        name: "pig_spawn_egg",
+        label: "яйцо призыва свиньи",
+        spawns: MobKind::Pig,
+        egg_primary: [0xF0, 0xA5, 0xA2],
+        egg_secondary: [0xDB, 0x63, 0x5F],
+    },
+    ItemDef {
+        name: "chicken_spawn_egg",
+        label: "яйцо призыва курицы",
+        spawns: MobKind::Chicken,
+        egg_primary: [0xA1, 0xA1, 0xA1],
+        egg_secondary: [0xFF, 0x00, 0x00],
+    },
+    ItemDef {
+        name: "cow_spawn_egg",
+        label: "яйцо призыва коровы",
+        spawns: MobKind::Cow,
+        egg_primary: [0x44, 0x36, 0x26],
+        egg_secondary: [0xA1, 0xA1, 0xA1],
+    },
+    ItemDef {
+        name: "sheep_spawn_egg",
+        label: "яйцо призыва овцы",
+        spawns: MobKind::Sheep,
+        egg_primary: [0xE7, 0xE7, 0xE7],
+        egg_secondary: [0xFF, 0xB5, 0xB5],
+    },
+];
 
 impl Item {
-    pub const ALL: [Item; 1] = [Item::PigSpawnEgg];
+    pub const ALL: [Item; 4] = [
+        Item::PigSpawnEgg,
+        Item::ChickenSpawnEgg,
+        Item::CowSpawnEgg,
+        Item::SheepSpawnEgg,
+    ];
 
     pub fn def(self) -> &'static ItemDef {
         &ITEMS[self as usize]

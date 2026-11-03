@@ -10,6 +10,10 @@ use crate::tile::Tile;
 
 const BLOCKS_DIR: &str = "assets/minecraft/textures/blocks/";
 const ENTITY_PIG: &str = "assets/minecraft/textures/entity/pig/pig.png";
+const ENTITY_CHICKEN: &str = "assets/minecraft/textures/entity/chicken.png";
+const ENTITY_COW: &str = "assets/minecraft/textures/entity/cow/cow.png";
+const ENTITY_SHEEP: &str = "assets/minecraft/textures/entity/sheep/sheep.png";
+const ENTITY_SHEEP_FUR: &str = "assets/minecraft/textures/entity/sheep/sheep_fur.png";
 const ITEM_SPAWN_EGG: &str = "assets/minecraft/textures/items/spawn_egg.png";
 const ITEM_SPAWN_EGG_OVERLAY: &str = "assets/minecraft/textures/items/spawn_egg_overlay.png";
 const GUI_DIR: &str = "assets/minecraft/textures/gui/";
@@ -53,6 +57,10 @@ pub struct TexturePack {
 pub struct EntityImages {
     /// Лист 2:1 (в ванильном паке 64×32); UV модели нормализованы по размеру листа.
     pub pig: DecodedImage,
+    pub chicken: DecodedImage,
+    pub cow: DecodedImage,
+    pub sheep: DecodedImage,
+    pub sheep_fur: DecodedImage,
     pub spawn_egg: DecodedImage,
     pub spawn_egg_overlay: DecodedImage,
 }
@@ -167,7 +175,12 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
                 decode_png(bytes).expect("built-in entity textures are valid")
             })
     };
-    let pig = image(ENTITY_PIG, |i| i.width >= 64 && i.width == 2 * i.height);
+    let sheet = |i: &DecodedImage| i.width >= 64 && i.width == 2 * i.height;
+    let pig = image(ENTITY_PIG, sheet);
+    let chicken = image(ENTITY_CHICKEN, sheet);
+    let cow = image(ENTITY_COW, sheet);
+    let sheep = image(ENTITY_SHEEP, sheet);
+    let sheep_fur = image(ENTITY_SHEEP_FUR, sheet);
     let spawn_egg = image(ITEM_SPAWN_EGG, |i| {
         i.width >= MIN_TILE_SIZE && i.width == i.height
     });
@@ -176,6 +189,10 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
     });
     EntityImages {
         pig,
+        chicken,
+        cow,
+        sheep,
+        sheep_fur,
         spawn_egg,
         spawn_egg_overlay,
     }
@@ -324,6 +341,34 @@ const BUILTIN_ENTITIES: &[(&str, &[u8])] = &[
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/assets/textures/entity/pig/pig.png"
+        )),
+    ),
+    (
+        ENTITY_CHICKEN,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/chicken.png"
+        )),
+    ),
+    (
+        ENTITY_COW,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/cow/cow.png"
+        )),
+    ),
+    (
+        ENTITY_SHEEP,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/sheep/sheep.png"
+        )),
+    ),
+    (
+        ENTITY_SHEEP_FUR,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/sheep/sheep_fur.png"
         )),
     ),
     (

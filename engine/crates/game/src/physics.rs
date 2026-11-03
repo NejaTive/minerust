@@ -114,6 +114,7 @@ pub struct Player {
     pub sprinting: bool,
     pub auto_step: bool,
     pub step_offset: f32,
+    pub terminal_speed: f32,
 }
 
 impl Player {
@@ -132,6 +133,7 @@ impl Player {
             sprinting: false,
             auto_step: true,
             step_offset: 0.0,
+            terminal_speed: TERMINAL_SPEED,
         }
     }
 
@@ -299,7 +301,7 @@ impl Player {
                 if self.on_ground && input.jump {
                     self.velocity.y = JUMP_SPEED;
                 }
-                self.velocity.y = (self.velocity.y - GRAVITY * TICK).max(-TERMINAL_SPEED);
+                self.velocity.y = (self.velocity.y - GRAVITY * TICK).max(-self.terminal_speed);
             }
             Mode::Flying | Mode::Noclip => {
                 let speed = if self.sprinting {

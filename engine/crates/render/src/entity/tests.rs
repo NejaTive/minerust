@@ -9,6 +9,8 @@ fn instance() -> MobInstance {
         head_pitch: 0.0,
         limb_phase: 0.0,
         limb_swing: 0.0,
+        flap_phase: 0.0,
+        flap_amount: 0.0,
         sky_level: 15.0,
         block_level: 0.0,
         shadow_radius: 0.7,
@@ -21,10 +23,33 @@ fn instance() -> MobInstance {
     }
 }
 
-fn vertices(instance: &MobInstance) -> Vec<[f32; VERTEX_FLOATS]> {
-    let mut out = Vec::new();
+fn sheets(instance: &MobInstance) -> MobVertices {
+    let mut out = MobVertices::default();
     push_mob(instance, &mut out);
-    out.as_chunks::<VERTEX_FLOATS>().0.to_vec()
+    out
+}
+
+fn vertices(instance: &MobInstance) -> Vec<[f32; VERTEX_FLOATS]> {
+    sheets(instance)
+        .iter()
+        .flat_map(|sheet| sheet.as_chunks::<VERTEX_FLOATS>().0.to_vec())
+        .collect()
+}
+
+fn of_kind(kind: ModelKind) -> MobInstance {
+    MobInstance { kind, ..instance() }
+}
+
+fn bounds(instance: &MobInstance) -> (Vec3, Vec3) {
+    let points: Vec<Vec3> = vertices(instance).iter().map(position).collect();
+    (
+        points.iter().copied().reduce(Vec3::min).unwrap(),
+        points.iter().copied().reduce(Vec3::max).unwrap(),
+    )
+}
+
+fn boxes_on(instance: &MobInstance, sheet: EntityTexture) -> usize {
+    sheets(instance)[sheet as usize].len() / VERTEX_FLOATS / 36
 }
 
 fn position(v: &[f32; VERTEX_FLOATS]) -> Vec3 {
@@ -118,8 +143,16 @@ fn light_levels_ride_along_the_vertices() {
 
 #[test]
 fn culled_mobs_emit_nothing() {
-    assert!(visible_vertices(&[instance()], |_, _| false).is_empty());
-    assert!(!visible_vertices(&[instance()], |_, _| true).is_empty());
+    assert!(
+        visible_vertices(&[instance()], |_, _| false)
+            .iter()
+            .all(Vec::is_empty)
+    );
+    assert!(
+        visible_vertices(&[instance()], |_, _| true)
+            .iter()
+            .any(|v| !v.is_empty())
+    );
 }
 
 #[test]
@@ -141,4 +174,156 @@ fn blob_vertices_carry_local_coordinates_and_opacity() {
 fn culled_mobs_emit_no_blobs() {
     assert!(visible_blobs(&[instance()], |_, _| false).is_empty());
     assert!(!visible_blobs(&[instance()], |_, _| true).is_empty());
+}
+
+#[test]
+fn models_have_the_minecraft_box_counts() {
+    let count = |kind| vertices(&of_kind(kind)).len() / 36;
+    assert_eq!(count(ModelKind::Pig), 7);
+    assert_eq!(count(ModelKind::Chicken), 8);
+    assert_eq!(count(ModelKind::Cow), 9);
+    assert_eq!(count(ModelKind::Sheep), 12);
+}
+
+#[test]
+fn each_model_draws_from_its_own_sheets() {
+    for (kind, sheet, boxes) in [
+        (ModelKind::Pig, EntityTexture::Pig, 7),
+        (ModelKind::Chicken, EntityTexture::Chicken, 8),
+        (ModelKind::Cow, EntityTexture::Cow, 9),
+        (ModelKind::Sheep, EntityTexture::Sheep, 6),
+        (ModelKind::Sheep, EntityTexture::SheepFur, 6),
+    ] {
+        let model = of_kind(kind);
+        assert_eq!(boxes_on(&model, sheet), boxes, "{kind:?} {sheet:?}");
+        let others: usize = EntityTexture::ALL
+            .into_iter()
+            .filter(|&other| other != sheet)
+            .map(|other| boxes_on(&model, other))
+            .sum();
+        assert_eq!(others + boxes, vertices(&model).len() / 36);
+    }
+}
+
+#[test]
+fn standing_models_match_their_hitboxes() {
+    for (kind, width, height, length) in [
+        (ModelKind::Chicken, 0.4, 0.7, 0.5),
+        (ModelKind::Cow, 0.9, 1.4, 1.3),
+        (ModelKind::Sheep, 0.9, 1.3, 1.1),
+    ] {
+        let model = of_kind(kind);
+        let (min, max) = bounds(&model);
+        assert!((min.y - model.feet.y).abs() < 1e-4, "{kind:?} {min}");
+        assert!(max.y - model.feet.y <= height + 0.3, "{kind:?} {max}");
+        assert!(max.y - model.feet.y >= height - 0.3, "{kind:?} {max}");
+        assert!(max.z - min.z <= width + 0.4, "{kind:?} {min} {max}");
+        assert!(max.x - min.x >= length - 0.4, "{kind:?} {min} {max}");
+    }
+}
+
+#[test]
+fn every_model_stays_on_its_sheet_and_faces_outward() {
+    for kind in [
+        ModelKind::Pig,
+        ModelKind::Chicken,
+        ModelKind::Cow,
+        ModelKind::Sheep,
+    ] {
+        let model = of_kind(kind);
+        let verts = vertices(&model);
+        for v in &verts {
+            assert!(
+                (0.0..=1.0).contains(&v[3]) && (0.0..=1.0).contains(&v[4]),
+                "{kind:?} {v:?}"
+            );
+        }
+        for tri in verts.as_chunks::<3>().0 {
+            let [a, b, c] = [position(&tri[0]), position(&tri[1]), position(&tri[2])];
+            assert!((b - a).cross(c - a).length() > 0.0, "{kind:?}");
+        }
+    }
+}
+
+#[test]
+fn sheep_fur_is_larger_than_the_body_under_it() {
+    let sheep = of_kind(ModelKind::Sheep);
+    let extent = |sheet: EntityTexture| {
+        let points: Vec<Vec3> = sheets(&sheep)[sheet as usize]
+            .as_chunks::<VERTEX_FLOATS>()
+            .0
+            .iter()
+            .map(position)
+            .collect();
+        let min = points.iter().copied().reduce(Vec3::min).unwrap();
+        let max = points.iter().copied().reduce(Vec3::max).unwrap();
+        max - min
+    };
+    let (fur, skin) = (
+        extent(EntityTexture::SheepFur),
+        extent(EntityTexture::Sheep),
+    );
+    assert!(fur.z > skin.z && fur.x > skin.x * 0.8);
+}
+
+#[test]
+fn chicken_wings_spread_while_flapping() {
+    let wings = |instance: &MobInstance| {
+        sheets(instance)[EntityTexture::Chicken as usize]
+            .as_chunks::<VERTEX_FLOATS>()
+            .0[6 * 36..]
+            .iter()
+            .map(position)
+            .collect::<Vec<_>>()
+    };
+    let rest = wings(&of_kind(ModelKind::Chicken));
+    let flapping = wings(&MobInstance {
+        flap_phase: 1.2,
+        flap_amount: 1.0,
+        ..of_kind(ModelKind::Chicken)
+    });
+    assert!(
+        rest.iter()
+            .zip(&flapping)
+            .any(|(a, b)| a.distance(*b) > 0.1)
+    );
+    let width = |points: &[Vec3]| {
+        let zs = points.iter().map(|p| p.z);
+        zs.clone().fold(f32::MIN, f32::max) - zs.fold(f32::MAX, f32::min)
+    };
+    assert!(width(&flapping) > width(&rest));
+}
+
+#[test]
+fn bottom_face_uv_matches_model_box() {
+    let (u0, v0) = (10.0, 20.0);
+    let (dx, dy, dz) = (4.0, 6.0, 2.0);
+    let model = instance();
+    let cube = part(
+        EntityTexture::Pig,
+        (u0, v0),
+        [0.0, 0.0, 0.0],
+        [dx, dy, dz],
+        [0.0, 0.0, 0.0],
+        Mat3::IDENTITY,
+    );
+    let mut out = Vec::new();
+    push_box(&cube, &model, &mut out);
+    let verts: Vec<[f32; VERTEX_FLOATS]> = out.as_chunks::<VERTEX_FLOATS>().0.to_vec();
+    let uv_at = |corner: Vec3| {
+        let at = to_world(corner, &model);
+        let v = verts
+            .iter()
+            .find(|v| position(v).distance(at) < 1e-5 && (v[4] * 32.0 - v0).abs() <= dz + 1e-3)
+            .expect("corner");
+        Vec2::new(v[3] * 64.0, v[4] * 32.0)
+    };
+    let expect = |corner: Vec3, u: f32, v: f32| {
+        let got = uv_at(corner);
+        assert!((got - Vec2::new(u, v)).length() < 1e-3, "{corner}: {got}");
+    };
+    expect(Vec3::new(dx, dy, dz), u0 + dz + 2.0 * dx, v0);
+    expect(Vec3::new(0.0, dy, dz), u0 + dz + dx, v0);
+    expect(Vec3::new(0.0, dy, 0.0), u0 + dz + dx, v0 + dz);
+    expect(Vec3::new(dx, dy, 0.0), u0 + dz + 2.0 * dx, v0 + dz);
 }

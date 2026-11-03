@@ -73,6 +73,9 @@ pub(crate) fn frame_params(
             .map(|view| MobInstance {
                 kind: match view.kind {
                     MobKind::Pig => ModelKind::Pig,
+                    MobKind::Chicken => ModelKind::Chicken,
+                    MobKind::Cow => ModelKind::Cow,
+                    MobKind::Sheep => ModelKind::Sheep,
                 },
                 feet: view.pose.feet,
                 yaw: view.pose.yaw,
@@ -80,6 +83,8 @@ pub(crate) fn frame_params(
                 head_pitch: view.pose.head_pitch,
                 limb_phase: view.pose.limb_phase,
                 limb_swing: view.pose.limb_swing,
+                flap_phase: view.pose.flap_phase,
+                flap_amount: view.pose.flap_amount,
                 sky_level: f32::from(view.sky_level),
                 block_level: f32::from(view.block_level),
                 shadow_radius: view.shadow_radius,
