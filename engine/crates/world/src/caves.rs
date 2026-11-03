@@ -203,6 +203,8 @@ fn carvable(block: Block) -> bool {
             | Block::Grass
             | Block::SnowyGrass
             | Block::Mycelium
+            | Block::Podzol
+            | Block::CoarseDirt
     )
 }
 

@@ -64,6 +64,8 @@ pub(crate) const FACES: [Face; 6] = [
 pub(crate) const WATER_SURFACE_UNITS: i32 = 14;
 const _: () = assert!(WATER_SURFACE_UNITS as f32 == WATER_SURFACE * POSITION_UNITS as f32);
 
+const SUNFLOWER_HEAD_X: u8 = 10;
+
 pub(crate) const CROSS_SHADE: f32 = 1.0;
 
 pub(crate) const TORCH_BOX: ([i32; 3], [i32; 3]) = (
@@ -97,7 +99,8 @@ pub const SNOW_SIDE: u8 = 59;
 pub const CACTUS: u8 = 63;
 pub const VINE: u8 = 69;
 pub const LILY: u8 = 79;
-pub const TEMPLATE_COUNT: usize = 81;
+pub const SUNFLOWER_HEAD: u8 = 81;
+pub const TEMPLATE_COUNT: usize = 83;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -237,6 +240,14 @@ fn torch_wall(turns: u32) -> impl Iterator<Item = Template> {
         })
 }
 
+fn sunflower_head(face: &Face) -> Template {
+    let mut template = cube_face(face, POSITION_UNITS);
+    for corner in &mut template.corners {
+        corner.pos[0] = SUNFLOWER_HEAD_X;
+    }
+    template
+}
+
 fn cactus_face(face: &Face) -> Template {
     let mut template = cube_face(face, POSITION_UNITS);
     let inset = i32::from(CACTUS_INSET_UNITS);
@@ -323,6 +334,7 @@ fn build() -> [Template; TEMPLATE_COUNT] {
         out.extend([front, back]);
     }
     out.extend([&FACES[0], &FACES[1]].map(|f| cube_face(f, i32::from(LILY_UNITS))));
+    out.extend([&FACES[2], &FACES[3]].map(sunflower_head));
     out.try_into().expect("template count")
 }
 

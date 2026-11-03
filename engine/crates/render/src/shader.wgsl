@@ -128,7 +128,7 @@ struct TileAnim {
     tint: vec4<f32>,
 };
 @group(0) @binding(3)
-var<uniform> animation: array<TileAnim, 69>;
+var<uniform> animation: array<TileAnim, 97>;
 
 // Цвет травы (верхняя половина) и листвы (нижняя, на BIOME_MAP_SIZE ниже) на блок, тор
 // BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
@@ -180,7 +180,7 @@ struct Shape {
     shade: vec4<f32>,
 };
 struct ShapeTable {
-    shapes: array<Shape, 81>,
+    shapes: array<Shape, 83>,
     ao: vec4<f32>,
 };
 @group(1) @binding(1)

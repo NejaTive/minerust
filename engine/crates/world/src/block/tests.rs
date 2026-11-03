@@ -9,7 +9,37 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard())
 }
 
-const ALL: [Block; 55] = Block::ALL;
+const ALL: [Block; 80] = Block::ALL;
+
+const FLOWERS: [Block; 8] = [
+    Block::Allium,
+    Block::BlueOrchid,
+    Block::Houstonia,
+    Block::OxeyeDaisy,
+    Block::RedTulip,
+    Block::OrangeTulip,
+    Block::WhiteTulip,
+    Block::PinkTulip,
+];
+
+const DOUBLE_HALVES: [Block; 12] = [
+    Block::DoubleGrassLower,
+    Block::DoubleGrassUpper,
+    Block::DoubleFernLower,
+    Block::DoubleFernUpper,
+    Block::SunflowerLower,
+    Block::SunflowerUpper,
+    Block::LilacLower,
+    Block::LilacUpper,
+    Block::RoseBushLower,
+    Block::RoseBushUpper,
+    Block::PeonyLower,
+    Block::PeonyUpper,
+];
+
+fn is_new_plant(block: Block) -> bool {
+    block == Block::Fern || FLOWERS.contains(&block) || DOUBLE_HALVES.contains(&block)
+}
 
 #[test]
 fn byte_round_trip() {
@@ -17,7 +47,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(55), Err(55));
+    assert_eq!(Block::try_from(80), Err(80));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -71,7 +101,7 @@ fn solid_and_opaque() {
                 | Block::Waterlily
                 | Block::BrownMushroom
                 | Block::RedMushroom
-        );
+        ) || is_new_plant(block);
         let solid =
             !matches!(block, Block::Air | Block::Water | Block::Lava | Block::Snow) && !plant;
         assert_eq!(block.is_solid(), solid, "{block:?}");
@@ -127,6 +157,7 @@ fn render_layers() {
             | Block::Waterlily
             | Block::BrownMushroom
             | Block::RedMushroom => RenderLayer::Cutout,
+            block if is_new_plant(block) => RenderLayer::Cutout,
             Block::Water | Block::Ice => RenderLayer::Translucent,
             _ => RenderLayer::Opaque,
         };
@@ -421,7 +452,11 @@ fn collision_height_is_full_for_solids_only() {
 #[test]
 fn only_ice_is_slippery() {
     for block in ALL {
-        assert_eq!(block.is_slippery(), block == Block::Ice, "{block:?}");
+        assert_eq!(
+            block.is_slippery(),
+            matches!(block, Block::Ice | Block::IcePacked),
+            "{block:?}"
+        );
     }
     let ice = Block::Ice;
     assert!(ice.is_solid() && !ice.is_opaque());
@@ -566,7 +601,7 @@ fn only_dead_bush_and_reeds_are_new_crosses() {
                     | Block::Reeds
                     | Block::BrownMushroom
                     | Block::RedMushroom
-            ),
+            ) || (is_new_plant(block) && block != Block::SunflowerUpper),
             "{block:?}"
         );
     }
@@ -732,5 +767,89 @@ fn mushrooms_stand_on_any_solid_block() {
             assert!(mushroom.stands_on(support), "{support:?}");
         }
         assert!(!mushroom.stands_on(Block::Water) && !mushroom.stands_on(Block::Air));
+    }
+}
+
+#[test]
+fn stage_five_blocks_are_appended_after_clay() {
+    let names = [
+        "ice_packed",
+        "podzol",
+        "coarse_dirt",
+        "mossy_cobblestone",
+        "fern",
+        "double_grass_lower",
+        "double_grass_upper",
+        "double_fern_lower",
+        "double_fern_upper",
+        "sunflower_lower",
+        "sunflower_upper",
+        "lilac_lower",
+        "lilac_upper",
+        "rose_bush_lower",
+        "rose_bush_upper",
+        "peony_lower",
+        "peony_upper",
+        "allium",
+        "blue_orchid",
+        "houstonia",
+        "oxeye_daisy",
+        "red_tulip",
+        "orange_tulip",
+        "white_tulip",
+        "pink_tulip",
+    ];
+    for (i, name) in names.into_iter().enumerate() {
+        assert_eq!(BLOCKS[Block::Clay as usize + 1 + i].name, name);
+    }
+}
+
+#[test]
+fn packed_ice_is_an_opaque_slippery_cube_and_ice_stays_translucent() {
+    let ice = Block::IcePacked;
+    assert!(ice.is_solid() && ice.is_opaque() && ice.is_slippery());
+    assert_eq!(ice.render_layer(), RenderLayer::Opaque);
+    assert_eq!(ice.tile(Facing::Side), Some(Tile::IcePacked));
+    assert_eq!(Block::Ice.render_layer(), RenderLayer::Translucent);
+}
+
+#[test]
+fn podzol_and_coarse_dirt_are_plain_solid_cubes() {
+    assert_eq!(Block::Podzol.tile(Facing::Top), Some(Tile::PodzolTop));
+    assert_eq!(Block::Podzol.tile(Facing::Side), Some(Tile::PodzolSide));
+    assert_eq!(Block::Podzol.tile(Facing::Bottom), Some(Tile::Dirt));
+    assert_eq!(Block::CoarseDirt.tile(Facing::Top), Some(Tile::CoarseDirt));
+    assert_eq!(
+        Block::MossyCobblestone.tile(Facing::Side),
+        Some(Tile::MossyCobblestone)
+    );
+    for block in [Block::Podzol, Block::CoarseDirt, Block::MossyCobblestone] {
+        assert!(block.is_solid() && block.is_opaque() && !block.is_slippery());
+    }
+}
+
+#[test]
+fn double_plants_pair_up_and_only_the_sunflower_top_has_a_head() {
+    for lower in Block::DOUBLE_PLANTS {
+        let upper = lower.double_upper().expect("upper half");
+        assert_eq!(upper.double_lower(), Some(lower));
+        assert!(!lower.is_solid() && !upper.is_solid());
+        assert!(upper.stands_on(lower) && !upper.stands_on(Block::Grass));
+        assert!(lower.stands_on(Block::Grass));
+        assert!(!lower.def().selectable && !upper.def().selectable);
+        assert_eq!(
+            upper.shape() == Shape::Sunflower,
+            upper == Block::SunflowerUpper
+        );
+    }
+    assert_eq!(Block::Fern.double_upper(), None);
+}
+
+#[test]
+fn flowers_are_selectable_non_solid_crosses_with_their_own_tiles() {
+    let tiles: Vec<_> = FLOWERS.iter().map(|b| b.tile(Facing::Side)).collect();
+    for (i, flower) in FLOWERS.into_iter().enumerate() {
+        assert!(flower.def().selectable && !flower.is_solid() && flower.needs_support());
+        assert!(!tiles[..i].contains(&tiles[i]), "{flower:?}");
     }
 }

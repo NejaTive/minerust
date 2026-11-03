@@ -62,6 +62,31 @@ pub enum Block {
     BrownMushroom,
     RedMushroom,
     Clay,
+    IcePacked,
+    Podzol,
+    CoarseDirt,
+    MossyCobblestone,
+    Fern,
+    DoubleGrassLower,
+    DoubleGrassUpper,
+    DoubleFernLower,
+    DoubleFernUpper,
+    SunflowerLower,
+    SunflowerUpper,
+    LilacLower,
+    LilacUpper,
+    RoseBushLower,
+    RoseBushUpper,
+    PeonyLower,
+    PeonyUpper,
+    Allium,
+    BlueOrchid,
+    Houstonia,
+    OxeyeDaisy,
+    RedTulip,
+    OrangeTulip,
+    WhiteTulip,
+    PinkTulip,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -104,6 +129,7 @@ pub enum Shape {
     Cactus,
     Vine,
     Lily,
+    Sunflower,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -260,7 +286,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 55] = [
+pub const BLOCKS: [BlockDef; 80] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -507,10 +533,104 @@ pub const BLOCKS: [BlockDef; 55] = [
     BlockDef::plant("brown_mushroom", "коричневый гриб", Tile::BrownMushroom),
     BlockDef::plant("red_mushroom", "красный гриб", Tile::RedMushroom),
     BlockDef::uniform("clay", "глина", Tile::Clay),
+    BlockDef {
+        slippery: true,
+        ..BlockDef::uniform("ice_packed", "плотный лёд", Tile::IcePacked)
+    },
+    BlockDef {
+        top: Some(Tile::PodzolTop),
+        side: Some(Tile::PodzolSide),
+        bottom: Some(Tile::Dirt),
+        ..BlockDef::uniform("podzol", "подзол", Tile::PodzolSide)
+    },
+    BlockDef::uniform("coarse_dirt", "крупнозём", Tile::CoarseDirt),
+    BlockDef::uniform(
+        "mossy_cobblestone",
+        "замшелый булыжник",
+        Tile::MossyCobblestone,
+    ),
+    BlockDef::plant("fern", "папоротник", Tile::Fern),
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant(
+            "double_grass_lower",
+            "высокая трава (низ)",
+            Tile::DoubleGrassBottom,
+        )
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant(
+            "double_grass_upper",
+            "высокая трава (верх)",
+            Tile::DoubleGrassTop,
+        )
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant(
+            "double_fern_lower",
+            "большой папоротник (низ)",
+            Tile::DoubleFernBottom,
+        )
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant(
+            "double_fern_upper",
+            "большой папоротник (верх)",
+            Tile::DoubleFernTop,
+        )
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant("sunflower_lower", "подсолнух (низ)", Tile::SunflowerBottom)
+    },
+    BlockDef {
+        selectable: false,
+        shape: Shape::Sunflower,
+        ..BlockDef::plant("sunflower_upper", "подсолнух (верх)", Tile::SunflowerTop)
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant("lilac_lower", "сирень (низ)", Tile::SyringaBottom)
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant("lilac_upper", "сирень (верх)", Tile::SyringaTop)
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant(
+            "rose_bush_lower",
+            "розовый куст (низ)",
+            Tile::RoseBushBottom,
+        )
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant("rose_bush_upper", "розовый куст (верх)", Tile::RoseBushTop)
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant("peony_lower", "пион (низ)", Tile::PeonyBottom)
+    },
+    BlockDef {
+        selectable: false,
+        ..BlockDef::plant("peony_upper", "пион (верх)", Tile::PeonyTop)
+    },
+    BlockDef::plant("allium", "аллиум", Tile::Allium),
+    BlockDef::plant("blue_orchid", "синяя орхидея", Tile::BlueOrchid),
+    BlockDef::plant("houstonia", "хоустония", Tile::Houstonia),
+    BlockDef::plant("oxeye_daisy", "ромашка", Tile::OxeyeDaisy),
+    BlockDef::plant("red_tulip", "красный тюльпан", Tile::TulipRed),
+    BlockDef::plant("orange_tulip", "оранжевый тюльпан", Tile::TulipOrange),
+    BlockDef::plant("white_tulip", "белый тюльпан", Tile::TulipWhite),
+    BlockDef::plant("pink_tulip", "розовый тюльпан", Tile::TulipPink),
 ];
 
 impl Block {
-    pub const ALL: [Block; 55] = [
+    pub const ALL: [Block; 80] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -566,6 +686,31 @@ impl Block {
         Block::BrownMushroom,
         Block::RedMushroom,
         Block::Clay,
+        Block::IcePacked,
+        Block::Podzol,
+        Block::CoarseDirt,
+        Block::MossyCobblestone,
+        Block::Fern,
+        Block::DoubleGrassLower,
+        Block::DoubleGrassUpper,
+        Block::DoubleFernLower,
+        Block::DoubleFernUpper,
+        Block::SunflowerLower,
+        Block::SunflowerUpper,
+        Block::LilacLower,
+        Block::LilacUpper,
+        Block::RoseBushLower,
+        Block::RoseBushUpper,
+        Block::PeonyLower,
+        Block::PeonyUpper,
+        Block::Allium,
+        Block::BlueOrchid,
+        Block::Houstonia,
+        Block::OxeyeDaisy,
+        Block::RedTulip,
+        Block::OrangeTulip,
+        Block::WhiteTulip,
+        Block::PinkTulip,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -782,6 +927,33 @@ impl Block {
         self.is_solid() && (self.is_opaque() || self.is_leaves())
     }
 
+    pub fn double_upper(self) -> Option<Block> {
+        Some(match self {
+            Block::DoubleGrassLower => Block::DoubleGrassUpper,
+            Block::DoubleFernLower => Block::DoubleFernUpper,
+            Block::SunflowerLower => Block::SunflowerUpper,
+            Block::LilacLower => Block::LilacUpper,
+            Block::RoseBushLower => Block::RoseBushUpper,
+            Block::PeonyLower => Block::PeonyUpper,
+            _ => return None,
+        })
+    }
+
+    pub fn double_lower(self) -> Option<Block> {
+        Block::DOUBLE_PLANTS
+            .into_iter()
+            .find(|lower| lower.double_upper() == Some(self))
+    }
+
+    pub const DOUBLE_PLANTS: [Block; 6] = [
+        Block::DoubleGrassLower,
+        Block::DoubleFernLower,
+        Block::SunflowerLower,
+        Block::LilacLower,
+        Block::RoseBushLower,
+        Block::PeonyLower,
+    ];
+
     pub fn is_mushroom(self) -> bool {
         matches!(self, Block::BrownMushroom | Block::RedMushroom)
     }
@@ -798,7 +970,9 @@ impl Block {
         match self {
             Block::Cactus => support.is_sand() || support == Block::Cactus,
             Block::DeadBush => {
-                support.is_sand() || support.is_terracotta() || support == Block::Dirt
+                support.is_sand()
+                    || support.is_terracotta()
+                    || matches!(support, Block::Dirt | Block::Podzol | Block::CoarseDirt)
             }
             Block::Reeds => {
                 support.is_sand()
@@ -806,6 +980,7 @@ impl Block {
                     || matches!(support, Block::Dirt | Block::Grass)
             }
             Block::Waterlily => support == Block::Water,
+            _ if self.double_lower().is_some() => self.double_lower() == Some(support),
             _ => support.is_solid(),
         }
     }

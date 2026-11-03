@@ -36,6 +36,12 @@ const SALT_BEDROCK: u64 = 30;
 const SALT_SCREE: u64 = 31;
 const SALT_SANDSTONE: u64 = 32;
 const SWAMP_NOISE_SALT: i32 = 2345;
+const MEGA_NOISE_SALT: i32 = 3456;
+const COLOR_NOISE_SALT: i32 = 4567;
+const MEGA_NOISE_FREQUENCY: f32 = 0.0625;
+const MEGA_NOISE_SCALE: f32 = 4.0;
+const MEGA_COARSE_ABOVE: f32 = 1.75;
+const MEGA_PODZOL_ABOVE: f32 = -0.95;
 const SWAMP_NOISE_FREQUENCY: f32 = 0.25;
 const SWAMP_LILY_BELOW: f32 = 0.12;
 const SANDSTONE_JITTER: u32 = 4;
@@ -83,6 +89,8 @@ pub struct Terrain {
     map: BiomeMap,
     mesa: Mesa,
     swamp: FastNoiseLite,
+    mega: FastNoiseLite,
+    color: FastNoiseLite,
     climate: Mutex<HashMap<(i32, i32), Arc<ColumnClimate>>>,
     pub(crate) caves: Caves,
 }
@@ -103,11 +111,23 @@ impl Terrain {
         swamp.set_noise_type(Some(NoiseType::Perlin));
         swamp.set_frequency(Some(SWAMP_NOISE_FREQUENCY));
 
+        let mut mega = FastNoiseLite::with_seed(seed ^ MEGA_NOISE_SALT);
+        mega.set_noise_type(Some(NoiseType::OpenSimplex2));
+        mega.set_fractal_type(Some(FractalType::FBm));
+        mega.set_fractal_octaves(Some(4));
+        mega.set_frequency(Some(MEGA_NOISE_FREQUENCY));
+
+        let mut color = FastNoiseLite::with_seed(seed ^ COLOR_NOISE_SALT);
+        color.set_noise_type(Some(NoiseType::Perlin));
+        color.set_frequency(Some(1.0));
+
         Self {
             seed,
             world_type,
             height,
             swamp,
+            mega,
+            color,
             map: BiomeMap::new(seed),
             mesa: Mesa::new(seed),
             climate: Mutex::new(HashMap::new()),
@@ -135,6 +155,10 @@ impl Terrain {
             return Biome::Plains;
         }
         self.map.blocks(x, z, 1, 1)[0]
+    }
+
+    pub(crate) fn color_noise(&self, x: i32, z: i32, scale: f32) -> f32 {
+        self.color.get_noise_2d(x as f32 / scale, z as f32 / scale)
     }
 
     fn swamp_noise(&self, x: i32, z: i32) -> f32 {
@@ -333,7 +357,10 @@ impl Terrain {
                         }
                     }
                 }
-                if column.get(IVec3::new(x, surface, z)) == Block::SnowyGrass {
+                let ground = column.get(IVec3::new(x, surface, z));
+                let snow_bound = ground == Block::SnowyGrass
+                    || (snowy && surface >= WATER_LEVEL && ground.is_sand());
+                if snow_bound {
                     column.set(IVec3::new(x, surface + 1, z), Block::Snow);
                 }
             }
@@ -367,6 +394,17 @@ impl Terrain {
             if scree {
                 return (Block::Gravel, Block::Stone);
             }
+        }
+        if biome.is_mega_taiga() {
+            let noise = self.mega.get_noise_2d(x as f32, z as f32) * MEGA_NOISE_SCALE;
+            let top = if noise > MEGA_COARSE_ABOVE {
+                Block::CoarseDirt
+            } else if noise > MEGA_PODZOL_ABOVE {
+                Block::Podzol
+            } else {
+                Block::Grass
+            };
+            return (top, blocks.filler);
         }
         if blocks.top == Block::Grass && biome.is_snowy() {
             return (Block::SnowyGrass, blocks.filler);

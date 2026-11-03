@@ -76,10 +76,38 @@ pub enum Tile {
     BrownMushroom,
     RedMushroom,
     Clay,
+    IcePacked,
+    PodzolTop,
+    PodzolSide,
+    CoarseDirt,
+    MossyCobblestone,
+    Fern,
+    DoubleGrassBottom,
+    DoubleGrassTop,
+    DoubleFernBottom,
+    DoubleFernTop,
+    SunflowerBottom,
+    SunflowerTop,
+    SunflowerFront,
+    SunflowerBack,
+    SyringaBottom,
+    SyringaTop,
+    RoseBushBottom,
+    RoseBushTop,
+    PeonyBottom,
+    PeonyTop,
+    Allium,
+    BlueOrchid,
+    Houstonia,
+    OxeyeDaisy,
+    TulipRed,
+    TulipOrange,
+    TulipWhite,
+    TulipPink,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 69] = [
+    pub const ALL: [Tile; 97] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -149,6 +177,34 @@ impl Tile {
         Tile::BrownMushroom,
         Tile::RedMushroom,
         Tile::Clay,
+        Tile::IcePacked,
+        Tile::PodzolTop,
+        Tile::PodzolSide,
+        Tile::CoarseDirt,
+        Tile::MossyCobblestone,
+        Tile::Fern,
+        Tile::DoubleGrassBottom,
+        Tile::DoubleGrassTop,
+        Tile::DoubleFernBottom,
+        Tile::DoubleFernTop,
+        Tile::SunflowerBottom,
+        Tile::SunflowerTop,
+        Tile::SunflowerFront,
+        Tile::SunflowerBack,
+        Tile::SyringaBottom,
+        Tile::SyringaTop,
+        Tile::RoseBushBottom,
+        Tile::RoseBushTop,
+        Tile::PeonyBottom,
+        Tile::PeonyTop,
+        Tile::Allium,
+        Tile::BlueOrchid,
+        Tile::Houstonia,
+        Tile::OxeyeDaisy,
+        Tile::TulipRed,
+        Tile::TulipOrange,
+        Tile::TulipWhite,
+        Tile::TulipPink,
     ];
 
     pub fn sway(self) -> f32 {
@@ -159,7 +215,32 @@ impl Tile {
             | Tile::JungleLeaves
             | Tile::AcaciaLeaves
             | Tile::DarkOakLeaves => 1.0,
-            Tile::TallGrass | Tile::Poppy | Tile::Dandelion | Tile::DeadBush | Tile::Reeds => 2.0,
+            Tile::TallGrass
+            | Tile::Poppy
+            | Tile::Dandelion
+            | Tile::DeadBush
+            | Tile::Reeds
+            | Tile::Fern
+            | Tile::DoubleGrassBottom
+            | Tile::DoubleGrassTop
+            | Tile::DoubleFernBottom
+            | Tile::DoubleFernTop
+            | Tile::SunflowerBottom
+            | Tile::SunflowerTop
+            | Tile::SyringaBottom
+            | Tile::SyringaTop
+            | Tile::RoseBushBottom
+            | Tile::RoseBushTop
+            | Tile::PeonyBottom
+            | Tile::PeonyTop
+            | Tile::Allium
+            | Tile::BlueOrchid
+            | Tile::Houstonia
+            | Tile::OxeyeDaisy
+            | Tile::TulipRed
+            | Tile::TulipOrange
+            | Tile::TulipWhite
+            | Tile::TulipPink => 2.0,
             _ => 0.0,
         }
     }
@@ -194,6 +275,29 @@ impl Tile {
                 | Tile::Waterlily
                 | Tile::BrownMushroom
                 | Tile::RedMushroom
+                | Tile::Fern
+                | Tile::DoubleGrassBottom
+                | Tile::DoubleGrassTop
+                | Tile::DoubleFernBottom
+                | Tile::DoubleFernTop
+                | Tile::SunflowerBottom
+                | Tile::SunflowerTop
+                | Tile::SyringaBottom
+                | Tile::SyringaTop
+                | Tile::RoseBushBottom
+                | Tile::RoseBushTop
+                | Tile::PeonyBottom
+                | Tile::PeonyTop
+                | Tile::Allium
+                | Tile::BlueOrchid
+                | Tile::Houstonia
+                | Tile::OxeyeDaisy
+                | Tile::TulipRed
+                | Tile::TulipOrange
+                | Tile::TulipWhite
+                | Tile::TulipPink
+                | Tile::SunflowerFront
+                | Tile::SunflowerBack
         )
     }
 }

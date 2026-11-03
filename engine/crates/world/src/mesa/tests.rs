@@ -30,5 +30,5 @@ fn layers_start_with_red_sand_or_clay_and_end_in_stone() {
     assert!(layers.iter().all(|&b| b != Block::Air));
     let mut forest = [Block::Air; LAYER_SPAN];
     mesa.layers(Biome::MesaPlateauF, 120, 3, 4, &mut forest);
-    assert!(matches!(forest[0], Block::Grass | Block::Dirt));
+    assert!(matches!(forest[0], Block::Grass | Block::CoarseDirt));
 }

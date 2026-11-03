@@ -742,3 +742,40 @@ fn debug_world_has_no_features_and_plains_biome() {
     let column = terrain.generate_trees(ColumnPos::new(3, 3));
     assert_eq!(column.get(IVec3::new(0, 1, 0)), Block::Air);
 }
+
+#[test]
+fn cold_beach_is_snow_covered_sand() {
+    const SPAN: i32 = 256;
+    let terrain = Terrain::new(1337);
+    let (mut snowy_sand, mut bare_sand) = (0, 0);
+    'scan: for rz in -40..40 {
+        for rx in -40..40 {
+            let (x0, z0) = (rx * SPAN, rz * SPAN);
+            let blocks = terrain.map.blocks(x0, z0, SPAN as usize, SPAN as usize);
+            for (i, biome) in blocks.iter().enumerate() {
+                if *biome != Biome::ColdBeach {
+                    continue;
+                }
+                let (x, z) = (x0 + i as i32 % SPAN, z0 + i as i32 / SPAN);
+                let surface = terrain.surface_height(x, z);
+                let key = ColumnPos::of_block(IVec3::new(x, 0, z));
+                let (lx, lz) = (x - key.origin().x, z - key.origin().z);
+                let column = terrain.generate_ground(key);
+                if column.get([lx, surface, lz].into()) != Block::Sand || surface < WATER_LEVEL {
+                    continue;
+                }
+                match column.get([lx, surface + 1, lz].into()) {
+                    Block::Snow => snowy_sand += 1,
+                    _ => bare_sand += 1,
+                }
+                if snowy_sand + bare_sand >= 40 {
+                    break 'scan;
+                }
+            }
+        }
+    }
+    assert!(
+        snowy_sand >= 10 && bare_sand == 0,
+        "{snowy_sand} {bare_sand}"
+    );
+}

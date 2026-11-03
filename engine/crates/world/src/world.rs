@@ -104,6 +104,11 @@ impl World {
         if block == Block::Vine {
             return self.vine_sides(pos, data) != 0;
         }
+        if let Some(upper) = block.double_upper()
+            && self.block(pos + IVec3::Y) != upper
+        {
+            return false;
+        }
         let Some(dir) = block.support_dir(data) else {
             return true;
         };
@@ -182,7 +187,8 @@ impl World {
                     continue;
                 }
                 let depends = neighbor.support_dir(data) == Some(-dir)
-                    || (neighbor.checks_sides() && dir.y == 0);
+                    || (neighbor.checks_sides() && dir.y == 0)
+                    || (neighbor.double_upper().is_some() && dir == IVec3::NEG_Y);
                 if depends
                     && !self.is_supported(around, neighbor, data)
                     && self.set_block(around, Block::Air)

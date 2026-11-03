@@ -140,7 +140,11 @@ impl Mesa {
                         Block::OrangeTerracotta
                     }
                 } else if forest && y > FOREST_Y + depth * 2 {
-                    if striped { Block::Dirt } else { Block::Grass }
+                    if striped {
+                        Block::CoarseDirt
+                    } else {
+                        Block::Grass
+                    }
                 } else if y > WATER_LEVEL + 3 + depth {
                     if !(64..=127).contains(&y) {
                         Block::OrangeTerracotta

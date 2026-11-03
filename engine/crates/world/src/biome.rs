@@ -183,6 +183,44 @@ impl Biome {
         matches!(self, Biome::RoofedForest | Biome::RoofedForestM)
     }
 
+    pub fn is_forest(self) -> bool {
+        matches!(
+            self,
+            Biome::Forest
+                | Biome::ForestHills
+                | Biome::FlowerForest
+                | Biome::BirchForest
+                | Biome::BirchForestHills
+                | Biome::BirchForestM
+                | Biome::BirchForestHillsM
+                | Biome::RoofedForest
+                | Biome::RoofedForestM
+        )
+    }
+
+    pub fn is_mega_taiga(self) -> bool {
+        matches!(
+            self,
+            Biome::MegaTaiga
+                | Biome::MegaTaigaHills
+                | Biome::MegaSpruceTaiga
+                | Biome::MegaSpruceTaigaHills
+        )
+    }
+
+    pub fn is_taiga(self) -> bool {
+        self.is_mega_taiga()
+            || matches!(
+                self,
+                Biome::Taiga
+                    | Biome::TaigaHills
+                    | Biome::TaigaM
+                    | Biome::ColdTaiga
+                    | Biome::ColdTaigaHills
+                    | Biome::ColdTaigaM
+            )
+    }
+
     pub fn is_jungle(self) -> bool {
         matches!(
             self,
@@ -237,8 +275,7 @@ impl Biome {
         self.id() >= 128
     }
 
-    /// Блоки поверхности без снега; блока, которого ещё нет (подзол),
-    /// заменён ближайшим — этап 5 плана `biomes-1.12` подставит свой.
+    /// Блоки поверхности без снега; подзол и крупнозём мега-тайги выбирает шум в `Terrain`.
     pub fn surface_blocks(self) -> SurfaceBlocks {
         let (top, filler) = match self {
             Biome::Desert
