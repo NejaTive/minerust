@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use glam::{IVec3, Mat4, Vec2, Vec3};
 use mesh::mesher::SectionMeshes;
 use world::biome_color::BiomePalette;
-use world::block::{Block, FluidKind};
+use world::block::FluidKind;
 use world::clouds::{CloudMask, cloud_threshold, coverage_for_rain};
 use world::column::WORLD_HEIGHT;
 use world::pos::{ColumnPos, SectionPos};
@@ -226,7 +226,7 @@ pub struct Renderer {
     entity_layout: wgpu::BindGroupLayout,
     entity_groups: Vec<wgpu::BindGroup>,
     outline_buffer: wgpu::Buffer,
-    outline_block: Option<(IVec3, Block, u8)>,
+    outline_block: Option<(IVec3, (Vec3, Vec3))>,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     global_sources: GlobalSources,
@@ -915,14 +915,11 @@ impl Renderer {
         self.frame_counts
     }
 
-    pub fn set_outline(&mut self, outline: Option<(IVec3, Block, u8)>) {
+    pub fn set_outline(&mut self, outline: Option<(IVec3, (Vec3, Vec3))>) {
         if outline != self.outline_block {
-            if let Some((pos, block, data)) = outline {
-                self.queue.write_buffer(
-                    &self.outline_buffer,
-                    0,
-                    &outline_bytes(pos, block.bounds(data)),
-                );
+            if let Some((pos, bounds)) = outline {
+                self.queue
+                    .write_buffer(&self.outline_buffer, 0, &outline_bytes(pos, bounds));
             }
             self.outline_block = outline;
         }

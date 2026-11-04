@@ -83,7 +83,7 @@ fn column_cover(world: &World, x: i32, z: i32) -> Option<u8> {
     let (lx, lz) = (x.rem_euclid(SECTION_SIZE), z.rem_euclid(SECTION_SIZE));
     let top = (0..WORLD_HEIGHT)
         .rev()
-        .find(|&y| column.get(IVec3::new(lx, y, lz)).is_opaque());
+        .find(|&y| column.get(IVec3::new(lx, y, lz)).blocks_light());
     Some(top.map_or(0, |y| (y + 1) as u8))
 }
 

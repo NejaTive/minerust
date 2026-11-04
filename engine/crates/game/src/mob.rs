@@ -499,7 +499,14 @@ impl Mob {
                 (from + HOP_EPS).floor() as i32,
                 (to - HOP_EPS).floor() as i32,
             );
-            (lo..=hi).all(|y| (around.collision)(IVec3::new(column.x, y, column.z)).height <= 0.0)
+            (lo..=hi).all(|y| {
+                let cell = IVec3::new(column.x, y, column.z);
+                let mut clear = true;
+                (around.collision)(cell).for_each_box(cell, |min, max| {
+                    clear &= max.y <= from + HOP_EPS || min.y >= to - HOP_EPS;
+                });
+                clear
+            })
         };
         free(ahead, top, top + spec.height)
             && free(

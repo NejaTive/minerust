@@ -60,13 +60,13 @@ impl Channel {
     }
 
     fn step(self, level: u8, down: bool, block: Block) -> u8 {
-        if block.is_opaque() {
+        if block.blocks_light() {
             return 0;
         }
         if self == Channel::Sky
             && down
             && level == MAX_LIGHT
-            && (block == Block::Air || block.shape() != Shape::Cube)
+            && (block == Block::Air || block == Block::Glass || block.shape() != Shape::Cube)
         {
             return MAX_LIGHT;
         }

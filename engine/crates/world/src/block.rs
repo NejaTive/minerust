@@ -1,5 +1,8 @@
+use std::sync::LazyLock;
+
 use glam::{IVec3, Vec3};
 
+use crate::boxes::{BoxList, VoxelBox};
 use crate::textures::TextureSet;
 use crate::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW, Tile};
 
@@ -102,6 +105,49 @@ pub enum Block {
     SnowBlock,
     MonsterEgg,
     BoneBlock,
+    OakPlanks,
+    SprucePlanks,
+    BirchPlanks,
+    JunglePlanks,
+    AcaciaPlanks,
+    DarkOakPlanks,
+    StoneBricks,
+    MossyStoneBricks,
+    CrackedStoneBricks,
+    ChiseledStoneBricks,
+    ChiseledSandstone,
+    SmoothSandstone,
+    ChiseledRedSandstone,
+    SmoothRedSandstone,
+    Bricks,
+    Glass,
+    Wool,
+    Bookshelf,
+    CraftingTable,
+    OakSlab,
+    SpruceSlab,
+    BirchSlab,
+    JungleSlab,
+    AcaciaSlab,
+    DarkOakSlab,
+    StoneSlab,
+    SandstoneSlab,
+    CobblestoneSlab,
+    BrickSlab,
+    StoneBrickSlab,
+    RedSandstoneSlab,
+    OakStairs,
+    SpruceStairs,
+    BirchStairs,
+    JungleStairs,
+    AcaciaStairs,
+    DarkOakStairs,
+    CobblestoneStairs,
+    BrickStairs,
+    StoneBrickStairs,
+    SandstoneStairs,
+    RedSandstoneStairs,
+    Carpet,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -146,6 +192,15 @@ pub enum Shape {
     Lily,
     Sunflower,
     Cocoa,
+    Boxes,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoxKind {
+    None,
+    Slab,
+    Stairs,
+    Carpet,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -157,6 +212,9 @@ pub enum DataKind {
     Sides,
     Facing,
     Cocoa,
+    Color,
+    Slab,
+    Stairs,
 }
 
 pub const AXIS_Y: u8 = 0;
@@ -167,6 +225,92 @@ pub const FACING_NEG_Z: u8 = 0;
 pub const FACING_POS_X: u8 = 1;
 pub const FACING_POS_Z: u8 = 2;
 pub const FACING_NEG_X: u8 = 3;
+
+pub const SLAB_BOTTOM: u8 = 0;
+pub const SLAB_TOP: u8 = 1;
+pub const SLAB_DOUBLE: u8 = 2;
+
+pub const STAIRS_FACING_MASK: u8 = 3;
+pub const STAIRS_TOP: u8 = 4;
+
+pub const COLOR_COUNT: u8 = 16;
+pub const CARPET_UNITS: u8 = 1;
+
+pub const COLOR_NAMES: [&str; COLOR_COUNT as usize] = [
+    "white",
+    "orange",
+    "magenta",
+    "light_blue",
+    "yellow",
+    "lime",
+    "pink",
+    "gray",
+    "silver",
+    "cyan",
+    "purple",
+    "blue",
+    "brown",
+    "green",
+    "red",
+    "black",
+];
+
+pub const WOOL_LABELS: [&str; COLOR_COUNT as usize] = [
+    "белая шерсть",
+    "оранжевая шерсть",
+    "пурпурная шерсть",
+    "голубая шерсть",
+    "жёлтая шерсть",
+    "лаймовая шерсть",
+    "розовая шерсть",
+    "серая шерсть",
+    "светло-серая шерсть",
+    "бирюзовая шерсть",
+    "фиолетовая шерсть",
+    "синяя шерсть",
+    "коричневая шерсть",
+    "зелёная шерсть",
+    "красная шерсть",
+    "чёрная шерсть",
+];
+
+pub const CARPET_LABELS: [&str; COLOR_COUNT as usize] = [
+    "белый ковёр",
+    "оранжевый ковёр",
+    "пурпурный ковёр",
+    "голубой ковёр",
+    "жёлтый ковёр",
+    "лаймовый ковёр",
+    "розовый ковёр",
+    "серый ковёр",
+    "светло-серый ковёр",
+    "бирюзовый ковёр",
+    "фиолетовый ковёр",
+    "синий ковёр",
+    "коричневый ковёр",
+    "зелёный ковёр",
+    "красный ковёр",
+    "чёрный ковёр",
+];
+
+pub const WOOL_TILES: [Tile; COLOR_COUNT as usize] = [
+    Tile::WoolWhite,
+    Tile::WoolOrange,
+    Tile::WoolMagenta,
+    Tile::WoolLightBlue,
+    Tile::WoolYellow,
+    Tile::WoolLime,
+    Tile::WoolPink,
+    Tile::WoolGray,
+    Tile::WoolSilver,
+    Tile::WoolCyan,
+    Tile::WoolPurple,
+    Tile::WoolBlue,
+    Tile::WoolBrown,
+    Tile::WoolGreen,
+    Tile::WoolRed,
+    Tile::WoolBlack,
+];
 
 pub const COCOA_STAGES: u8 = 3;
 pub const COCOA_DIRECTION_MASK: u8 = 3;
@@ -270,6 +414,9 @@ pub struct BlockDef {
     pub emission: u8,
     pub layer: RenderLayer,
     pub shape: Shape,
+    pub boxes: BoxKind,
+    pub light_blocking: bool,
+    pub joins_same: bool,
     pub top: Option<Tile>,
     pub side: Option<Tile>,
     pub bottom: Option<Tile>,
@@ -294,6 +441,9 @@ impl BlockDef {
         emission: 0,
         layer: RenderLayer::Opaque,
         shape: Shape::Cube,
+        boxes: BoxKind::None,
+        light_blocking: false,
+        joins_same: false,
         top: None,
         side: None,
         bottom: None,
@@ -319,6 +469,57 @@ impl BlockDef {
         }
     }
 
+    const fn boxed(
+        name: &'static str,
+        label: &'static str,
+        kind: BoxKind,
+        data: DataKind,
+        (top, side, bottom): (Tile, Tile, Tile),
+    ) -> BlockDef {
+        BlockDef {
+            opaque: false,
+            light_blocking: true,
+            data,
+            shape: Shape::Boxes,
+            boxes: kind,
+            top: Some(top),
+            bottom: Some(bottom),
+            ..Self::uniform(name, label, side)
+        }
+    }
+
+    const fn slab(
+        name: &'static str,
+        label: &'static str,
+        top: Tile,
+        side: Tile,
+        bottom: Tile,
+    ) -> BlockDef {
+        Self::boxed(
+            name,
+            label,
+            BoxKind::Slab,
+            DataKind::Slab,
+            (top, side, bottom),
+        )
+    }
+
+    const fn stairs(
+        name: &'static str,
+        label: &'static str,
+        top: Tile,
+        side: Tile,
+        bottom: Tile,
+    ) -> BlockDef {
+        Self::boxed(
+            name,
+            label,
+            BoxKind::Stairs,
+            DataKind::Stairs,
+            (top, side, bottom),
+        )
+    }
+
     const fn leaves(name: &'static str, label: &'static str, tile: Tile) -> BlockDef {
         BlockDef {
             opaque: false,
@@ -341,7 +542,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 95] = [
+pub const BLOCKS: [BlockDef; 138] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -716,10 +917,258 @@ pub const BLOCKS: [BlockDef; 95] = [
         Tile::BoneBlockSide,
         Tile::BoneBlockTop,
     ),
+    BlockDef::uniform("oak_planks", "дубовые доски", Tile::PlanksOak),
+    BlockDef::uniform("spruce_planks", "еловые доски", Tile::PlanksSpruce),
+    BlockDef::uniform("birch_planks", "берёзовые доски", Tile::PlanksBirch),
+    BlockDef::uniform("jungle_planks", "тропические доски", Tile::PlanksJungle),
+    BlockDef::uniform("acacia_planks", "доски акации", Tile::PlanksAcacia),
+    BlockDef::uniform("dark_oak_planks", "доски тёмного дуба", Tile::PlanksDarkOak),
+    BlockDef::uniform("stone_bricks", "каменные кирпичи", Tile::StoneBrick),
+    BlockDef::uniform(
+        "mossy_stone_bricks",
+        "замшелые каменные кирпичи",
+        Tile::StoneBrickMossy,
+    ),
+    BlockDef::uniform(
+        "cracked_stone_bricks",
+        "треснутые каменные кирпичи",
+        Tile::StoneBrickCracked,
+    ),
+    BlockDef::uniform(
+        "chiseled_stone_bricks",
+        "резные каменные кирпичи",
+        Tile::StoneBrickCarved,
+    ),
+    BlockDef {
+        top: Some(Tile::SandstoneTop),
+        bottom: Some(Tile::SandstoneBottom),
+        ..BlockDef::uniform(
+            "chiseled_sandstone",
+            "резной песчаник",
+            Tile::SandstoneCarved,
+        )
+    },
+    BlockDef {
+        top: Some(Tile::SandstoneTop),
+        bottom: Some(Tile::SandstoneBottom),
+        ..BlockDef::uniform(
+            "smooth_sandstone",
+            "гладкий песчаник",
+            Tile::SandstoneSmooth,
+        )
+    },
+    BlockDef {
+        top: Some(Tile::RedSandstoneTop),
+        bottom: Some(Tile::RedSandstoneBottom),
+        ..BlockDef::uniform(
+            "chiseled_red_sandstone",
+            "резной красный песчаник",
+            Tile::RedSandstoneCarved,
+        )
+    },
+    BlockDef {
+        top: Some(Tile::RedSandstoneTop),
+        bottom: Some(Tile::RedSandstoneBottom),
+        ..BlockDef::uniform(
+            "smooth_red_sandstone",
+            "гладкий красный песчаник",
+            Tile::RedSandstoneSmooth,
+        )
+    },
+    BlockDef::uniform("bricks", "кирпичи", Tile::Brick),
+    BlockDef {
+        opaque: false,
+        joins_same: true,
+        layer: RenderLayer::Cutout,
+        ..BlockDef::uniform("glass", "стекло", Tile::Glass)
+    },
+    BlockDef {
+        data: DataKind::Color,
+        ..BlockDef::uniform("wool", "шерсть", Tile::WoolWhite)
+    },
+    BlockDef {
+        top: Some(Tile::PlanksOak),
+        bottom: Some(Tile::PlanksOak),
+        ..BlockDef::uniform("bookshelf", "книжная полка", Tile::Bookshelf)
+    },
+    BlockDef {
+        top: Some(Tile::CraftingTableTop),
+        bottom: Some(Tile::PlanksOak),
+        ..BlockDef::uniform("crafting_table", "верстак", Tile::CraftingTableSide)
+    },
+    BlockDef::slab(
+        "oak_slab",
+        "дубовая плита",
+        Tile::PlanksOak,
+        Tile::PlanksOak,
+        Tile::PlanksOak,
+    ),
+    BlockDef::slab(
+        "spruce_slab",
+        "еловая плита",
+        Tile::PlanksSpruce,
+        Tile::PlanksSpruce,
+        Tile::PlanksSpruce,
+    ),
+    BlockDef::slab(
+        "birch_slab",
+        "берёзовая плита",
+        Tile::PlanksBirch,
+        Tile::PlanksBirch,
+        Tile::PlanksBirch,
+    ),
+    BlockDef::slab(
+        "jungle_slab",
+        "тропическая плита",
+        Tile::PlanksJungle,
+        Tile::PlanksJungle,
+        Tile::PlanksJungle,
+    ),
+    BlockDef::slab(
+        "acacia_slab",
+        "плита акации",
+        Tile::PlanksAcacia,
+        Tile::PlanksAcacia,
+        Tile::PlanksAcacia,
+    ),
+    BlockDef::slab(
+        "dark_oak_slab",
+        "плита тёмного дуба",
+        Tile::PlanksDarkOak,
+        Tile::PlanksDarkOak,
+        Tile::PlanksDarkOak,
+    ),
+    BlockDef::slab(
+        "stone_slab",
+        "каменная плита",
+        Tile::StoneSlabTop,
+        Tile::StoneSlabSide,
+        Tile::StoneSlabTop,
+    ),
+    BlockDef::slab(
+        "sandstone_slab",
+        "плита из песчаника",
+        Tile::SandstoneTop,
+        Tile::SandstoneSide,
+        Tile::SandstoneBottom,
+    ),
+    BlockDef::slab(
+        "cobblestone_slab",
+        "плита из булыжника",
+        Tile::Cobblestone,
+        Tile::Cobblestone,
+        Tile::Cobblestone,
+    ),
+    BlockDef::slab(
+        "brick_slab",
+        "кирпичная плита",
+        Tile::Brick,
+        Tile::Brick,
+        Tile::Brick,
+    ),
+    BlockDef::slab(
+        "stone_brick_slab",
+        "плита из каменных кирпичей",
+        Tile::StoneBrick,
+        Tile::StoneBrick,
+        Tile::StoneBrick,
+    ),
+    BlockDef::slab(
+        "red_sandstone_slab",
+        "плита из красного песчаника",
+        Tile::RedSandstoneTop,
+        Tile::RedSandstoneSide,
+        Tile::RedSandstoneBottom,
+    ),
+    BlockDef::stairs(
+        "oak_stairs",
+        "дубовые ступени",
+        Tile::PlanksOak,
+        Tile::PlanksOak,
+        Tile::PlanksOak,
+    ),
+    BlockDef::stairs(
+        "spruce_stairs",
+        "еловые ступени",
+        Tile::PlanksSpruce,
+        Tile::PlanksSpruce,
+        Tile::PlanksSpruce,
+    ),
+    BlockDef::stairs(
+        "birch_stairs",
+        "берёзовые ступени",
+        Tile::PlanksBirch,
+        Tile::PlanksBirch,
+        Tile::PlanksBirch,
+    ),
+    BlockDef::stairs(
+        "jungle_stairs",
+        "тропические ступени",
+        Tile::PlanksJungle,
+        Tile::PlanksJungle,
+        Tile::PlanksJungle,
+    ),
+    BlockDef::stairs(
+        "acacia_stairs",
+        "ступени акации",
+        Tile::PlanksAcacia,
+        Tile::PlanksAcacia,
+        Tile::PlanksAcacia,
+    ),
+    BlockDef::stairs(
+        "dark_oak_stairs",
+        "ступени тёмного дуба",
+        Tile::PlanksDarkOak,
+        Tile::PlanksDarkOak,
+        Tile::PlanksDarkOak,
+    ),
+    BlockDef::stairs(
+        "cobblestone_stairs",
+        "ступени из булыжника",
+        Tile::Cobblestone,
+        Tile::Cobblestone,
+        Tile::Cobblestone,
+    ),
+    BlockDef::stairs(
+        "brick_stairs",
+        "кирпичные ступени",
+        Tile::Brick,
+        Tile::Brick,
+        Tile::Brick,
+    ),
+    BlockDef::stairs(
+        "stone_brick_stairs",
+        "ступени из каменных кирпичей",
+        Tile::StoneBrick,
+        Tile::StoneBrick,
+        Tile::StoneBrick,
+    ),
+    BlockDef::stairs(
+        "sandstone_stairs",
+        "ступени из песчаника",
+        Tile::SandstoneTop,
+        Tile::SandstoneSide,
+        Tile::SandstoneBottom,
+    ),
+    BlockDef::stairs(
+        "red_sandstone_stairs",
+        "ступени из красного песчаника",
+        Tile::RedSandstoneTop,
+        Tile::RedSandstoneSide,
+        Tile::RedSandstoneBottom,
+    ),
+    BlockDef {
+        opaque: false,
+        needs_support: true,
+        data: DataKind::Color,
+        shape: Shape::Boxes,
+        boxes: BoxKind::Carpet,
+        ..BlockDef::uniform("carpet", "ковёр", Tile::WoolWhite)
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 95] = [
+    pub const ALL: [Block; 138] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -815,6 +1264,49 @@ impl Block {
         Block::SnowBlock,
         Block::MonsterEgg,
         Block::BoneBlock,
+        Block::OakPlanks,
+        Block::SprucePlanks,
+        Block::BirchPlanks,
+        Block::JunglePlanks,
+        Block::AcaciaPlanks,
+        Block::DarkOakPlanks,
+        Block::StoneBricks,
+        Block::MossyStoneBricks,
+        Block::CrackedStoneBricks,
+        Block::ChiseledStoneBricks,
+        Block::ChiseledSandstone,
+        Block::SmoothSandstone,
+        Block::ChiseledRedSandstone,
+        Block::SmoothRedSandstone,
+        Block::Bricks,
+        Block::Glass,
+        Block::Wool,
+        Block::Bookshelf,
+        Block::CraftingTable,
+        Block::OakSlab,
+        Block::SpruceSlab,
+        Block::BirchSlab,
+        Block::JungleSlab,
+        Block::AcaciaSlab,
+        Block::DarkOakSlab,
+        Block::StoneSlab,
+        Block::SandstoneSlab,
+        Block::CobblestoneSlab,
+        Block::BrickSlab,
+        Block::StoneBrickSlab,
+        Block::RedSandstoneSlab,
+        Block::OakStairs,
+        Block::SpruceStairs,
+        Block::BirchStairs,
+        Block::JungleStairs,
+        Block::AcaciaStairs,
+        Block::DarkOakStairs,
+        Block::CobblestoneStairs,
+        Block::BrickStairs,
+        Block::StoneBrickStairs,
+        Block::SandstoneStairs,
+        Block::RedSandstoneStairs,
+        Block::Carpet,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -840,6 +1332,7 @@ impl Block {
         match self.shape() {
             Shape::Layer => SNOW_HEIGHT,
             Shape::Cactus => CACTUS_HEIGHT,
+            Shape::Boxes => 1.0,
             _ if self.is_solid() => 1.0,
             _ => 0.0,
         }
@@ -912,6 +1405,7 @@ impl Block {
                 let (a, b) = (rotate(min), rotate(max));
                 (a.min(b), a.max(b))
             }
+            Shape::Boxes => self.boxes(data, |_| (Block::Air, 0)).bounds(),
             Shape::Layer => (Vec3::ZERO, Vec3::new(1.0, SNOW_HEIGHT, 1.0)),
             Shape::Lily => (Vec3::ZERO, Vec3::new(1.0, LILY_HEIGHT, 1.0)),
             Shape::Cactus => (
@@ -940,6 +1434,114 @@ impl Block {
         }
     }
 
+    pub fn box_kind(self) -> BoxKind {
+        self.def().boxes
+    }
+
+    pub fn is_stairs(self) -> bool {
+        self.box_kind() == BoxKind::Stairs
+    }
+
+    pub fn is_slab(self) -> bool {
+        self.box_kind() == BoxKind::Slab
+    }
+
+    /// Коробки блока в 1/16; `around` отдаёт блок и `data` соседа по смещению от клетки,
+    /// нужен только ступеням для формы углов.
+    pub fn boxes(self, data: u8, around: impl Fn(IVec3) -> (Block, u8)) -> BoxList {
+        let unit = |min, max| BoxList::of(&[VoxelBox::new(min, max)]);
+        match self.box_kind() {
+            BoxKind::None => BoxList::of(&[VoxelBox::FULL]),
+            BoxKind::Carpet => unit([0, 0, 0], [16, CARPET_UNITS, 16]),
+            BoxKind::Slab => match data {
+                SLAB_DOUBLE => BoxList::of(&[VoxelBox::FULL]),
+                SLAB_TOP => unit([0, 8, 0], [16, 16, 16]),
+                _ => unit([0, 0, 0], [16, 8, 16]),
+            },
+            BoxKind::Stairs => {
+                let turns = ((data & STAIRS_FACING_MASK) + 3) % 4;
+                let top = data & STAIRS_TOP != 0;
+                let base = VoxelBox::new([0, 0, 0], [16, 8, 16]);
+                let (back, front_side) = match self.stair_shape(data, around) {
+                    StairShape::Straight => (VoxelBox::new([8, 8, 0], [16, 16, 16]), None),
+                    StairShape::OuterLeft => (VoxelBox::new([8, 8, 0], [16, 16, 8]), None),
+                    StairShape::OuterRight => (VoxelBox::new([8, 8, 8], [16, 16, 16]), None),
+                    StairShape::InnerLeft => (
+                        VoxelBox::new([8, 8, 0], [16, 16, 16]),
+                        Some(VoxelBox::new([0, 8, 0], [8, 16, 8])),
+                    ),
+                    StairShape::InnerRight => (
+                        VoxelBox::new([8, 8, 0], [16, 16, 16]),
+                        Some(VoxelBox::new([0, 8, 8], [8, 16, 16])),
+                    ),
+                };
+                let mut list = BoxList::of(&[base, back]);
+                if let Some(extra) = front_side {
+                    list.push(extra);
+                }
+                list.map(|b| {
+                    let b = b.turned(turns);
+                    if top { b.flipped_y() } else { b }
+                })
+            }
+        }
+    }
+
+    /// Форма углов ступени по соседям, как `BlockStairs.getActualState`.
+    pub fn stair_shape(self, data: u8, around: impl Fn(IVec3) -> (Block, u8)) -> StairShape {
+        let facing = self.facing_dir(data & STAIRS_FACING_MASK);
+        let left = IVec3::new(facing.z, 0, -facing.x);
+        let half = data & STAIRS_TOP;
+        let stairs = |offset: IVec3| {
+            let (block, other) = around(offset);
+            (block.is_stairs() && other & STAIRS_TOP == half)
+                .then(|| block.facing_dir(other & STAIRS_FACING_MASK))
+        };
+        let differs = |offset: IVec3| {
+            let (block, other) = around(offset);
+            !block.is_stairs()
+                || other & STAIRS_TOP != half
+                || block.facing_dir(other & STAIRS_FACING_MASK) != facing
+        };
+        if let Some(side) = stairs(facing)
+            && side.dot(facing) == 0
+            && differs(-side)
+        {
+            return if side == left {
+                StairShape::OuterLeft
+            } else {
+                StairShape::OuterRight
+            };
+        }
+        if let Some(side) = stairs(-facing)
+            && side.dot(facing) == 0
+            && differs(side)
+        {
+            return if side == left {
+                StairShape::InnerLeft
+            } else {
+                StairShape::InnerRight
+            };
+        }
+        StairShape::Straight
+    }
+
+    /// Соседние блоки одного вида не рисуют общую грань.
+    pub fn joins_same(self) -> bool {
+        self.def().joins_same
+    }
+
+    pub fn blocks_light(self) -> bool {
+        let def = self.def();
+        def.opaque || def.light_blocking
+    }
+
+    /// Плиты и ступени: свет клетки берётся у соседей (`useNeighborBrightness`).
+    pub fn lights_from_neighbors(self) -> bool {
+        let def = self.def();
+        def.light_blocking && !def.opaque
+    }
+
     pub fn data_kind(self) -> DataKind {
         self.def().data
     }
@@ -963,9 +1565,26 @@ impl Block {
         })
     }
 
+    pub fn placement_state(self, placement: &Placement) -> Option<u8> {
+        let upper = placement.normal != IVec3::Y
+            && (placement.normal == IVec3::NEG_Y || placement.hit_y > 0.5);
+        match self.data_kind() {
+            DataKind::Color => Some(placement.variant % COLOR_COUNT),
+            DataKind::Slab => Some(if upper { SLAB_TOP } else { SLAB_BOTTOM }),
+            DataKind::Stairs => {
+                Some(facing_code(placement.look) | if upper { STAIRS_TOP } else { 0 })
+            }
+            _ => self.placement_data(placement.normal),
+        }
+    }
+
     pub fn placement_data(self, normal: IVec3) -> Option<u8> {
         match self.data_kind() {
-            DataKind::None | DataKind::Fluid => Some(0),
+            DataKind::None
+            | DataKind::Fluid
+            | DataKind::Color
+            | DataKind::Slab
+            | DataKind::Stairs => Some(0),
             DataKind::Sides => match normal {
                 IVec3::X => Some(VINE_NEG_X),
                 IVec3::NEG_X => Some(VINE_POS_X),
@@ -1017,6 +1636,9 @@ impl Block {
             ],
             DataKind::Facing => &[FACING_NEG_Z, FACING_POS_X, FACING_POS_Z, FACING_NEG_X],
             DataKind::Cocoa => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            DataKind::Color => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            DataKind::Slab => &[SLAB_BOTTOM, SLAB_TOP, SLAB_DOUBLE],
+            DataKind::Stairs => &[0, 1, 2, 3, 4, 5, 6, 7],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
                 FLUID_SOURCE,
@@ -1141,6 +1763,7 @@ impl Block {
             }
             Block::Waterlily => support == Block::Water,
             Block::Cocoa => support == Block::JungleLog,
+            Block::Carpet => support != Block::Air,
             Block::Snow => {
                 support.is_leaves()
                     || (support.is_solid() && !matches!(support, Block::Ice | Block::IcePacked))
@@ -1159,7 +1782,7 @@ impl Block {
     }
 
     pub fn lights_like(self, other: Block) -> bool {
-        self.is_opaque() == other.is_opaque() && self.emission() == other.emission()
+        self.blocks_light() == other.blocks_light() && self.emission() == other.emission()
     }
 
     pub fn emission(self) -> u8 {
@@ -1196,9 +1819,67 @@ impl Block {
             .find(|block| block.def().selectable && block.def().name == name)
     }
 
-    pub fn icon_pixels(self, textures: &TextureSet) -> Option<Vec<u8>> {
-        self.tile(Facing::Side)
+    pub fn icon_pixels(self, textures: &TextureSet, data: u8) -> Option<Vec<u8>> {
+        self.tile_for(Facing::Side, data)
             .map(|tile| textures.icon_pixels(tile))
+    }
+
+    pub fn tile_for(self, facing: Facing, data: u8) -> Option<Tile> {
+        if self.data_kind() == DataKind::Color {
+            return Some(WOOL_TILES[usize::from(data % COLOR_COUNT)]);
+        }
+        self.tile(facing)
+    }
+
+    pub fn face_tile(self, facing: Facing, normal: IVec3, data: u8) -> Option<Tile> {
+        if self == Block::CraftingTable
+            && facing == Facing::Side
+            && (normal == IVec3::NEG_Z || normal == IVec3::NEG_X)
+        {
+            return Some(Tile::CraftingTableFront);
+        }
+        self.tile_for(facing, data)
+    }
+
+    pub fn stacks() -> &'static [Stack] {
+        static STACKS: LazyLock<Vec<Stack>> = LazyLock::new(|| {
+            let mut out = Vec::new();
+            for block in Block::ALL {
+                let def = block.def();
+                if def.data != DataKind::Color {
+                    out.push(Stack {
+                        name: def.name.to_owned(),
+                        label: def.label.to_owned(),
+                        block,
+                        data: 0,
+                        placeable: def.selectable,
+                    });
+                    continue;
+                }
+                let labels = if block == Block::Carpet {
+                    &CARPET_LABELS
+                } else {
+                    &WOOL_LABELS
+                };
+                for color in 0..COLOR_COUNT {
+                    out.push(Stack {
+                        name: format!("{}_{}", COLOR_NAMES[usize::from(color)], def.name),
+                        label: labels[usize::from(color)].to_owned(),
+                        block,
+                        data: color,
+                        placeable: def.selectable,
+                    });
+                }
+            }
+            out
+        });
+        &STACKS
+    }
+
+    pub fn stack_from_name(name: &str) -> Option<&'static Stack> {
+        Block::stacks()
+            .iter()
+            .find(|stack| stack.placeable && stack.name == name)
     }
 
     pub fn tile(self, facing: Facing) -> Option<Tile> {
@@ -1208,6 +1889,44 @@ impl Block {
             Facing::Bottom => def.bottom,
             Facing::Side => def.side,
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StairShape {
+    Straight,
+    InnerLeft,
+    InnerRight,
+    OuterLeft,
+    OuterRight,
+}
+
+/// Вариант блока в инвентаре: блок и его `data` (цвет шерсти и ковра).
+#[derive(Clone, Debug)]
+pub struct Stack {
+    pub name: String,
+    pub label: String,
+    pub block: Block,
+    pub data: u8,
+    pub placeable: bool,
+}
+
+/// Контекст установки: клик по грани `normal`, `hit_y` — высота точки клика в клетке,
+/// `look` — горизонтальное направление взгляда, `variant` — `data` предмета.
+#[derive(Clone, Copy, Debug)]
+pub struct Placement {
+    pub normal: IVec3,
+    pub hit_y: f32,
+    pub look: IVec3,
+    pub variant: u8,
+}
+
+pub fn facing_code(dir: IVec3) -> u8 {
+    match dir {
+        IVec3::X => FACING_POS_X,
+        IVec3::Z => FACING_POS_Z,
+        IVec3::NEG_X => FACING_NEG_X,
+        _ => FACING_NEG_Z,
     }
 }
 

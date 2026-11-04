@@ -6,10 +6,10 @@ fn tile_pixels(tile: Tile) -> Vec<u8> {
 }
 
 fn icon_pixels(block: Block) -> Option<Vec<u8>> {
-    block.icon_pixels(&TextureSet::standard())
+    block.icon_pixels(&TextureSet::standard(), 0)
 }
 
-const ALL: [Block; 95] = Block::ALL;
+const ALL: [Block; 138] = Block::ALL;
 
 const FLOWERS: [Block; 8] = [
     Block::Allium,
@@ -47,7 +47,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(95), Err(95));
+    assert_eq!(Block::try_from(138), Err(138));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -121,7 +121,9 @@ fn solid_and_opaque() {
                 | Block::Ice
                 | Block::Barrier
                 | Block::Cactus
-        ) && !plant;
+                | Block::Glass
+        ) && !plant
+            && block.shape() != Shape::Boxes;
         assert_eq!(
             block.is_targetable(),
             solid || plant || block == Block::Snow,
@@ -129,7 +131,8 @@ fn solid_and_opaque() {
         );
         assert_eq!(
             block.needs_support(),
-            (plant && block != Block::Vine) || matches!(block, Block::Snow | Block::Cactus),
+            (plant && block != Block::Vine)
+                || matches!(block, Block::Snow | Block::Cactus | Block::Carpet),
             "{block:?}"
         );
         assert_eq!(block.is_opaque(), opaque, "{block:?}");
@@ -158,7 +161,8 @@ fn render_layers() {
             | Block::Waterlily
             | Block::BrownMushroom
             | Block::RedMushroom
-            | Block::Cocoa => RenderLayer::Cutout,
+            | Block::Cocoa
+            | Block::Glass => RenderLayer::Cutout,
             block if is_new_plant(block) => RenderLayer::Cutout,
             Block::Water | Block::Ice => RenderLayer::Translucent,
             _ => RenderLayer::Opaque,
@@ -265,7 +269,7 @@ fn air_has_no_tiles_and_others_have_all() {
 fn support_is_for_non_solid_blocks() {
     for def in &BLOCKS {
         assert!(
-            !(def.needs_support && def.solid) || def.shape == Shape::Cactus,
+            !(def.needs_support && def.solid) || matches!(def.shape, Shape::Cactus | Shape::Boxes),
             "{}",
             def.name
         );
@@ -318,6 +322,9 @@ fn only_log_torch_and_water_use_data() {
             Block::Pumpkin => DataKind::Facing,
             Block::Torch => DataKind::Attachment,
             Block::Water | Block::Lava => DataKind::Fluid,
+            Block::Wool | Block::Carpet => DataKind::Color,
+            block if block.is_slab() => DataKind::Slab,
+            block if block.is_stairs() => DataKind::Stairs,
             _ => DataKind::None,
         };
         assert_eq!(block.data_kind(), expected, "{block:?}");
@@ -529,6 +536,9 @@ fn states_cover_every_data_kind() {
             DataKind::Sides => 5,
             DataKind::Facing => 4,
             DataKind::Cocoa => usize::from(COCOA_STAGES) * 4,
+            DataKind::Color => 16,
+            DataKind::Slab => 3,
+            DataKind::Stairs => 8,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -920,5 +930,246 @@ fn snow_block_monster_egg_and_bone_block_look_like_their_sources() {
     assert_eq!(
         Block::BoneBlock.tile(Facing::Side),
         Some(Tile::BoneBlockSide)
+    );
+}
+
+fn no_neighbors(_: IVec3) -> (Block, u8) {
+    (Block::Air, 0)
+}
+
+fn stairs_at(facing: u8, top: bool) -> u8 {
+    facing | if top { STAIRS_TOP } else { 0 }
+}
+
+fn stair_with(neighbors: &[(IVec3, u8)]) -> impl Fn(IVec3) -> (Block, u8) + use<'_> {
+    move |offset| {
+        neighbors
+            .iter()
+            .find(|(at, _)| *at == offset)
+            .map_or((Block::Air, 0), |&(_, data)| (Block::OakStairs, data))
+    }
+}
+
+fn volume(block: Block, data: u8, around: impl Fn(IVec3) -> (Block, u8)) -> u32 {
+    block
+        .boxes(data, around)
+        .iter()
+        .map(|b| {
+            (0..3)
+                .map(|k| u32::from(b.max[k] - b.min[k]))
+                .product::<u32>()
+        })
+        .sum()
+}
+
+#[test]
+fn slab_boxes_for_all_three_halves() {
+    let boxes = |data| Block::OakSlab.boxes(data, no_neighbors);
+    assert_eq!(
+        boxes(SLAB_BOTTOM).as_slice(),
+        [VoxelBox::new([0, 0, 0], [16, 8, 16])]
+    );
+    assert_eq!(
+        boxes(SLAB_TOP).as_slice(),
+        [VoxelBox::new([0, 8, 0], [16, 16, 16])]
+    );
+    assert_eq!(boxes(SLAB_DOUBLE).as_slice(), [VoxelBox::FULL]);
+}
+
+#[test]
+fn carpet_is_one_sixteenth_high() {
+    let list = Block::Carpet.boxes(3, no_neighbors);
+    assert_eq!(list.as_slice(), [VoxelBox::new([0, 0, 0], [16, 1, 16])]);
+    assert_eq!(list.top(), 1.0 / 16.0);
+}
+
+#[test]
+fn straight_stairs_have_the_high_half_on_the_facing_side() {
+    let east = Block::OakStairs.boxes(stairs_at(FACING_POS_X, false), no_neighbors);
+    assert_eq!(
+        east.as_slice(),
+        [
+            VoxelBox::new([0, 0, 0], [16, 8, 16]),
+            VoxelBox::new([8, 8, 0], [16, 16, 16]),
+        ]
+    );
+    let north = Block::OakStairs.boxes(stairs_at(FACING_NEG_Z, false), no_neighbors);
+    assert_eq!(north.as_slice()[1], VoxelBox::new([0, 8, 0], [16, 16, 8]));
+    let west_top = Block::OakStairs.boxes(stairs_at(FACING_NEG_X, true), no_neighbors);
+    assert_eq!(
+        west_top.as_slice()[0],
+        VoxelBox::new([0, 8, 0], [16, 16, 16])
+    );
+    assert_eq!(west_top.as_slice()[1], VoxelBox::new([0, 0, 0], [8, 8, 16]));
+}
+
+#[test]
+fn stair_corners_follow_the_neighbors() {
+    let data = stairs_at(FACING_POS_X, false);
+    let at = |neighbors: &[(IVec3, u8)]| Block::OakStairs.stair_shape(data, stair_with(neighbors));
+    assert_eq!(at(&[]), StairShape::Straight);
+    // сосед за высокой стороной смотрит на север, то есть влево от взгляда на восток
+    assert_eq!(
+        at(&[(IVec3::X, stairs_at(FACING_NEG_Z, false))]),
+        StairShape::OuterLeft
+    );
+    assert_eq!(
+        at(&[(IVec3::X, stairs_at(FACING_POS_Z, false))]),
+        StairShape::OuterRight
+    );
+    assert_eq!(
+        at(&[(IVec3::NEG_X, stairs_at(FACING_NEG_Z, false))]),
+        StairShape::InnerLeft
+    );
+    assert_eq!(
+        at(&[(IVec3::NEG_X, stairs_at(FACING_POS_Z, false))]),
+        StairShape::InnerRight
+    );
+    assert_eq!(
+        at(&[(IVec3::X, stairs_at(FACING_NEG_Z, true))]),
+        StairShape::Straight
+    );
+    assert_eq!(
+        at(&[(IVec3::X, stairs_at(FACING_POS_X, false))]),
+        StairShape::Straight
+    );
+}
+
+#[test]
+fn stair_corner_boxes_have_the_expected_volume() {
+    let data = stairs_at(FACING_POS_X, false);
+    let volume_with =
+        |neighbors: &[(IVec3, u8)]| volume(Block::OakStairs, data, stair_with(neighbors));
+    let slab = 16 * 8 * 16;
+    assert_eq!(volume_with(&[]), slab + 8 * 8 * 16);
+    let outer = volume_with(&[(IVec3::X, stairs_at(FACING_NEG_Z, false))]);
+    assert_eq!(outer, slab + 8 * 8 * 8);
+    let inner = volume_with(&[(IVec3::NEG_X, stairs_at(FACING_NEG_Z, false))]);
+    assert_eq!(inner, slab + 8 * 8 * 16 + 8 * 8 * 8);
+}
+
+#[test]
+fn inner_corner_adds_the_front_quarter_on_the_neighbor_side() {
+    let data = stairs_at(FACING_POS_X, false);
+    let list = Block::OakStairs.boxes(
+        data,
+        stair_with(&[(IVec3::NEG_X, stairs_at(FACING_NEG_Z, false))]),
+    );
+    assert_eq!(list.len(), 3);
+    assert_eq!(list.as_slice()[2], VoxelBox::new([0, 8, 0], [8, 16, 8]));
+}
+
+#[test]
+fn slab_and_stairs_block_light_but_are_not_opaque() {
+    for block in [Block::OakSlab, Block::OakStairs, Block::StoneSlab] {
+        assert!(!block.is_opaque() && block.blocks_light(), "{block:?}");
+        assert!(block.lights_from_neighbors());
+    }
+    assert!(!Block::Carpet.blocks_light());
+    assert!(!Block::Glass.blocks_light() && !Block::Glass.is_opaque());
+    assert!(Block::Stone.blocks_light() && !Block::Stone.lights_from_neighbors());
+}
+
+fn placement(normal: IVec3, hit_y: f32, look: IVec3) -> Placement {
+    Placement {
+        normal,
+        hit_y,
+        look,
+        variant: 0,
+    }
+}
+
+#[test]
+fn slab_half_follows_the_clicked_face_and_height() {
+    let state = |normal, hit_y| {
+        Block::OakSlab
+            .placement_state(&placement(normal, hit_y, IVec3::X))
+            .unwrap()
+    };
+    assert_eq!(state(IVec3::Y, 0.0), SLAB_BOTTOM);
+    assert_eq!(state(IVec3::Y, 0.99), SLAB_BOTTOM);
+    assert_eq!(state(IVec3::NEG_Y, 0.0), SLAB_TOP);
+    assert_eq!(state(IVec3::X, 0.5), SLAB_BOTTOM);
+    assert_eq!(state(IVec3::X, 0.51), SLAB_TOP);
+}
+
+#[test]
+fn stairs_face_where_the_player_looks() {
+    let state = |look, normal, hit_y| {
+        Block::OakStairs
+            .placement_state(&placement(normal, hit_y, look))
+            .unwrap()
+    };
+    assert_eq!(state(IVec3::X, IVec3::Y, 0.0), FACING_POS_X);
+    assert_eq!(state(IVec3::NEG_X, IVec3::Y, 0.0), FACING_NEG_X);
+    assert_eq!(state(IVec3::Z, IVec3::Y, 0.0), FACING_POS_Z);
+    assert_eq!(state(IVec3::NEG_Z, IVec3::Y, 0.0), FACING_NEG_Z);
+    assert_eq!(
+        state(IVec3::Z, IVec3::NEG_Y, 0.0),
+        FACING_POS_Z | STAIRS_TOP
+    );
+    assert_eq!(state(IVec3::Z, IVec3::X, 0.8), FACING_POS_Z | STAIRS_TOP);
+}
+
+#[test]
+fn colored_blocks_place_with_the_item_color() {
+    for block in [Block::Wool, Block::Carpet] {
+        let state = |variant| {
+            block.placement_state(&Placement {
+                variant,
+                ..placement(IVec3::Y, 0.0, IVec3::X)
+            })
+        };
+        assert_eq!(state(14), Some(14));
+        assert_eq!(state(3), Some(3));
+    }
+}
+
+#[test]
+fn colors_are_separate_stacks_with_their_own_tiles() {
+    let stacks: Vec<_> = Block::stacks()
+        .iter()
+        .filter(|stack| stack.block == Block::Wool)
+        .collect();
+    assert_eq!(stacks.len(), 16);
+    assert_eq!(stacks[14].name, "red_wool");
+    assert_eq!(stacks[14].data, 14);
+    let red = Block::stack_from_name("red_carpet").unwrap();
+    assert_eq!((red.block, red.data), (Block::Carpet, 14));
+    assert_eq!(red.label, "красный ковёр");
+    assert!(Block::stack_from_name("wool").is_none());
+    assert_eq!(Block::Wool.tile_for(Facing::Side, 14), Some(Tile::WoolRed));
+    let names: std::collections::HashSet<_> =
+        Block::stacks().iter().map(|stack| &stack.name).collect();
+    assert_eq!(names.len(), Block::stacks().len());
+}
+
+#[test]
+fn carpet_stands_on_anything_but_air() {
+    assert!(Block::Carpet.stands_on(Block::OakSlab));
+    assert!(Block::Carpet.stands_on(Block::Stone));
+    assert!(!Block::Carpet.stands_on(Block::Air));
+}
+
+#[test]
+fn bookshelf_and_crafting_table_use_planks_and_different_faces() {
+    assert_eq!(Block::Bookshelf.tile(Facing::Top), Some(Tile::PlanksOak));
+    assert_eq!(Block::Bookshelf.tile(Facing::Bottom), Some(Tile::PlanksOak));
+    assert_eq!(Block::Bookshelf.tile(Facing::Side), Some(Tile::Bookshelf));
+    let table = |normal| Block::CraftingTable.face_tile(Facing::Side, normal, 0);
+    assert_eq!(table(IVec3::NEG_Z), Some(Tile::CraftingTableFront));
+    assert_eq!(table(IVec3::Z), Some(Tile::CraftingTableSide));
+    assert_eq!(
+        Block::CraftingTable.tile(Facing::Top),
+        Some(Tile::CraftingTableTop)
+    );
+}
+
+#[test]
+fn stone_slab_uses_its_own_top_and_side_tiles() {
+    assert_eq!(Block::StoneSlab.tile(Facing::Top), Some(Tile::StoneSlabTop));
+    assert_eq!(
+        Block::StoneSlab.tile(Facing::Side),
+        Some(Tile::StoneSlabSide)
     );
 }

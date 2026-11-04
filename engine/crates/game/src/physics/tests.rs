@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::f32::consts::FRAC_PI_2;
 use std::f32::consts::FRAC_PI_4;
 
-use world::block::{FluidKind, WATER_SURFACE};
+use world::block::{
+    Block, FACING_NEG_X, FACING_POS_X, FluidKind, SLAB_BOTTOM, SLAB_TOP, STAIRS_TOP, WATER_SURFACE,
+};
 
 use super::*;
 
@@ -774,11 +776,13 @@ fn layered(snow: impl Fn(IVec3) -> bool, ice: bool) -> impl Fn(IVec3) -> Collisi
     move |pos| {
         if pos.y <= FLOOR {
             Collision {
+                boxes: None,
                 height: 1.0,
                 slippery: ice,
             }
         } else if pos.y == FLOOR + 1 && snow(pos) {
             Collision {
+                boxes: None,
                 height: SNOW_HEIGHT,
                 slippery: false,
             }
@@ -829,17 +833,13 @@ fn auto_step_climbs_onto_a_snow_layer() {
 }
 
 #[test]
-fn without_auto_step_a_snow_layer_blocks_the_walk() {
+fn without_auto_step_a_snow_layer_is_still_stepped_onto() {
     let collision = layered(|pos| pos.x >= 2, false);
     let mut player = standing();
     player.auto_step = false;
     run_with(&mut player, FORWARD, 90, &collision);
-    assert!(
-        player.feet.x < 2.0 - PLAYER_WIDTH / 2.0 + 0.01,
-        "{}",
-        player.feet.x
-    );
-    assert_eq!(player.feet.y, GROUND);
+    assert!(player.feet.x > 3.0, "{}", player.feet.x);
+    assert_eq!(player.feet.y, GROUND + SNOW_HEIGHT);
 }
 
 #[test]
@@ -963,4 +963,179 @@ fn max_speed_walk_does_not_tunnel_through_thin_wall() {
         "{}",
         player.feet.x
     );
+}
+
+fn placed(blocks: &[(IVec3, Block, u8)]) -> impl Fn(IVec3) -> Collision + use<> {
+    let blocks = blocks.to_vec();
+    move |pos| {
+        if pos.y <= FLOOR {
+            return Collision::FULL;
+        }
+        let Some(&(_, block, data)) = blocks.iter().find(|(at, ..)| *at == pos) else {
+            return Collision::NONE;
+        };
+        let around = |offset: IVec3| {
+            blocks
+                .iter()
+                .find(|(at, ..)| *at == pos + offset)
+                .map_or((Block::Air, 0), |&(_, block, data)| (block, data))
+        };
+        Collision::of_boxes(block.boxes(data, around), false)
+    }
+}
+
+fn cell(x: i32) -> IVec3 {
+    IVec3::new(x, GROUND as i32, 0)
+}
+
+#[test]
+fn lands_on_a_bottom_slab_half_a_block_up() {
+    let collision = placed(&[(cell(0), Block::OakSlab, SLAB_BOTTOM)]);
+    let mut player = Player::new(Vec3::new(0.5, GROUND + 3.0, 0.5), Mode::Walking);
+    run_with(&mut player, Input::default(), 120, &collision);
+    assert!(player.on_ground);
+    assert_eq!(player.feet.y, GROUND + 0.5);
+}
+
+#[test]
+fn lands_on_a_top_slab_at_the_full_height() {
+    let collision = placed(&[(cell(0), Block::OakSlab, SLAB_TOP)]);
+    let mut player = Player::new(Vec3::new(0.5, GROUND + 3.0, 0.5), Mode::Walking);
+    run_with(&mut player, Input::default(), 120, &collision);
+    assert_eq!(player.feet.y, GROUND + 1.0);
+}
+
+#[test]
+fn walks_under_a_top_slab_only_when_it_is_high_enough() {
+    let collision = placed(&[(cell(2) + IVec3::Y * 2, Block::OakSlab, SLAB_BOTTOM)]);
+    let mut player = standing();
+    player.auto_step = false;
+    run_with(&mut player, FORWARD, 90, &collision);
+    assert!(player.feet.x > 3.0, "{}", player.feet.x);
+    let low = placed(&[(cell(2), Block::OakSlab, SLAB_TOP)]);
+    let mut player = standing();
+    player.auto_step = false;
+    run_with(&mut player, FORWARD, 90, &low);
+    assert!(player.feet.x < 2.0 - PLAYER_WIDTH / 2.0 + 0.01);
+}
+
+#[test]
+fn climbs_a_stair_without_jumping() {
+    let stairs = stairs_data(FACING_POS_X, false);
+    let collision = placed(&[(cell(2), Block::OakStairs, stairs)]);
+    let mut player = standing();
+    run_with(&mut player, FORWARD, 30, &collision);
+    assert_eq!(player.feet.y, GROUND + 1.0);
+    assert!(player.feet.x > 2.4, "{}", player.feet.x);
+    assert!(player.on_ground);
+}
+
+#[test]
+fn stair_front_half_is_a_half_block_step() {
+    let stairs = stairs_data(FACING_POS_X, false);
+    let collision = placed(&[(cell(2), Block::OakStairs, stairs)]);
+    let mut player = Player::new(Vec3::new(2.2, GROUND + 3.0, 0.5), Mode::Walking);
+    run_with(&mut player, Input::default(), 120, &collision);
+    assert_eq!(player.feet.y, GROUND + 0.5);
+}
+
+#[test]
+fn high_side_of_a_stair_blocks_without_auto_step() {
+    let stairs = stairs_data(FACING_NEG_X, false);
+    let collision = placed(&[(cell(2), Block::OakStairs, stairs)]);
+    let mut player = standing();
+    player.auto_step = false;
+    run_with(&mut player, FORWARD, 90, &collision);
+    assert_eq!(player.feet.y, GROUND);
+    assert!(
+        player.feet.x < 2.0 - PLAYER_WIDTH / 2.0 + 0.01,
+        "{}",
+        player.feet.x
+    );
+}
+
+#[test]
+fn upside_down_stair_blocks_the_body_at_head_height() {
+    let stairs = stairs_data(FACING_POS_X, true);
+    let collision = placed(&[(cell(2), Block::OakStairs, stairs)]);
+    let mut player = standing();
+    player.auto_step = false;
+    run_with(&mut player, FORWARD, 90, &collision);
+    assert!(
+        player.feet.x < 2.0 - PLAYER_WIDTH / 2.0 + 0.01,
+        "{}",
+        player.feet.x
+    );
+}
+
+#[test]
+fn jumping_into_the_underside_of_a_top_slab_stops_the_head() {
+    let collision = placed(&[(cell(0) + IVec3::Y * 2, Block::OakSlab, SLAB_TOP)]);
+    let mut player = standing();
+    let jump = Input {
+        jump: true,
+        ..Input::default()
+    };
+    run_with(&mut player, jump, 30, &collision);
+    assert!(player.feet.y + PLAYER_HEIGHT <= GROUND + 2.5 + 1e-3);
+}
+
+#[test]
+fn walks_over_a_carpet_and_stands_a_sixteenth_up() {
+    let collision = placed(&[(cell(0), Block::Carpet, 2), (cell(1), Block::Carpet, 2)]);
+    let mut player = Player::new(Vec3::new(0.5, GROUND + 1.0 / 16.0, 0.5), Mode::Walking);
+    player.on_ground = true;
+    run_with(&mut player, FORWARD, 12, &collision);
+    assert!(player.on_ground);
+    assert!(player.feet.x > 1.0);
+    assert!((player.feet.y - (GROUND + 1.0 / 16.0)).abs() < 1e-4);
+}
+
+#[test]
+fn stair_boxes_are_found_from_either_side() {
+    let stairs = stairs_data(FACING_POS_X, false);
+    let collision = placed(&[(cell(2), Block::OakStairs, stairs)]);
+    let mut player = Player::new(Vec3::new(4.5, GROUND, 0.5), Mode::Walking);
+    player.on_ground = true;
+    player.auto_step = false;
+    let back = Input {
+        forward: -1.0,
+        ..Input::default()
+    };
+    run_with(&mut player, back, 90, &collision);
+    assert!(
+        player.feet.x > 3.0 + PLAYER_WIDTH / 2.0 - 0.01,
+        "{}",
+        player.feet.x
+    );
+}
+
+fn stairs_data(facing: u8, top: bool) -> u8 {
+    facing | if top { STAIRS_TOP } else { 0 }
+}
+
+fn slab_ledge(block: Block, data: u8) -> Vec<(IVec3, Block, u8)> {
+    (2..8)
+        .flat_map(|x| (-1..=1).map(move |z| (IVec3::new(x, GROUND as i32, z), block, data)))
+        .collect()
+}
+
+#[test]
+fn a_slab_is_stepped_onto_without_auto_step() {
+    let collision = placed(&slab_ledge(Block::OakSlab, SLAB_BOTTOM));
+    let mut player = standing();
+    player.auto_step = false;
+    run_with(&mut player, FORWARD, 40, &collision);
+    assert_eq!(player.feet.y, GROUND + 0.5);
+    assert!(player.feet.x > 2.3);
+}
+
+#[test]
+fn a_full_block_is_not_stepped_onto_without_auto_step() {
+    let collision = placed(&slab_ledge(Block::OakPlanks, 0));
+    let mut player = standing();
+    player.auto_step = false;
+    run_with(&mut player, FORWARD, 40, &collision);
+    assert_eq!(player.feet.y, GROUND);
+    assert!(player.feet.x < 2.0);
 }

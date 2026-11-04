@@ -223,6 +223,7 @@ fn spawn_egg_summons_a_pig_without_being_spent() {
         block: IVec3::new(5, ground, 5),
         normal: IVec3::Y,
         distance: 1.0,
+        bounds: None,
     };
     game.use_item(Item::PigSpawnEgg, hit);
     assert_eq!(game.mob_count(), 1);

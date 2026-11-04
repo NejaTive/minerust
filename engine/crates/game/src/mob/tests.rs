@@ -1,3 +1,5 @@
+use world::block::Block;
+
 use super::*;
 
 const FLOOR: i32 = 63;
@@ -612,4 +614,63 @@ fn flight_targets_are_dry_and_within_reach() {
         player_eye: Vec3::ZERO,
     };
     assert!((0..50).all(|_| parrot.pick_flight(&void).is_none()));
+}
+
+fn built(blocks: &'static [(IVec3, Block, u8)]) -> impl Fn(IVec3) -> Collision {
+    move |pos| {
+        if pos.y <= FLOOR {
+            return Collision::FULL;
+        }
+        let Some(&(_, block, data)) = blocks.iter().find(|(at, ..)| *at == pos) else {
+            return Collision::NONE;
+        };
+        let around = |offset: IVec3| {
+            blocks
+                .iter()
+                .find(|(at, ..)| *at == pos + offset)
+                .map_or((Block::Air, 0), |&(_, block, data)| (block, data))
+        };
+        Collision::of_boxes(block.boxes(data, around), false)
+    }
+}
+
+fn walk_over(blocks: &'static [(IVec3, Block, u8)], target: Vec2, ticks: u32) -> Mob {
+    let collision = built(blocks);
+    let mut mob = pig(1);
+    mob.plan = Plan::Walk {
+        target,
+        ticks: 0,
+        checkpoint: Vec2::new(0.5, 0.5),
+    };
+    let around = Surroundings {
+        collision: &collision,
+        fluid: &dry,
+        player_eye: Vec3::new(0.5, 65.6, 0.5),
+    };
+    for _ in 0..ticks {
+        mob.tick(&around);
+    }
+    mob
+}
+
+#[test]
+fn a_mob_walks_over_a_row_of_slabs() {
+    static ROW: [(IVec3, Block, u8); 3] = [
+        (IVec3::new(2, 64, 0), Block::OakSlab, 0),
+        (IVec3::new(3, 64, 0), Block::OakSlab, 0),
+        (IVec3::new(4, 64, 0), Block::OakSlab, 0),
+    ];
+    let mob = walk_over(&ROW, Vec2::new(6.0, 0.5), 400);
+    assert!(mob.body.feet.x > 4.9, "{}", mob.body.feet.x);
+}
+
+#[test]
+fn a_mob_climbs_a_stair_up_to_its_high_side() {
+    static STAIR: [(IVec3, Block, u8); 2] = [
+        (IVec3::new(2, 64, 0), Block::OakStairs, 1),
+        (IVec3::new(3, 64, 0), Block::OakStairs, 1),
+    ];
+    let mob = walk_over(&STAIR, Vec2::new(3.5, 0.5), 100);
+    assert!(mob.body.feet.x > 2.7, "{}", mob.body.feet.x);
+    assert_eq!(mob.body.feet.y, 65.0);
 }

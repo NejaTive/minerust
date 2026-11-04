@@ -5,6 +5,7 @@ use glam::{IVec2, IVec3};
 use crate::pos::{ColumnPos, SectionPos};
 
 use crate::block::{Block, FLUID_SOURCE, FluidKind, VINE_SIDES, VINE_TOP, fluid_height};
+use crate::boxes::BoxList;
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::mob::MobRecord;
 use crate::section::SECTION_SIZE;
@@ -59,6 +60,12 @@ impl World {
 
     pub fn neighborhood(&self, key: ColumnPos) -> [Option<&Column>; 9] {
         std::array::from_fn(|i| self.column(key + IVec2::new(i as i32 % 3 - 1, i as i32 / 3 - 1)))
+    }
+
+    pub fn boxes_at(&self, pos: IVec3) -> BoxList {
+        self.block(pos).boxes(self.block_data(pos), |offset| {
+            (self.block(pos + offset), self.block_data(pos + offset))
+        })
     }
 
     pub fn block_data(&self, pos: IVec3) -> u8 {

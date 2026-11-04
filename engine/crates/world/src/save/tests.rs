@@ -388,3 +388,20 @@ fn parrot_plumage_and_squid_survive_the_save() {
     let decoded = decode_column(&encode_column(&column)).expect("decodes");
     assert_eq!(decoded.mobs, column.mobs);
 }
+
+#[test]
+fn box_shape_data_survives_a_round_trip() {
+    let mut column = Column::new();
+    for (i, color) in (0..16u8).enumerate() {
+        column.set_with_data(IVec3::new(i as i32, 70, 0), Block::Wool, color);
+        column.set_with_data(IVec3::new(i as i32, 71, 0), Block::Carpet, color);
+    }
+    column.set_with_data(IVec3::new(0, 72, 3), Block::OakSlab, 2);
+    column.set_with_data(IVec3::new(1, 72, 3), Block::StoneBrickStairs, 7);
+    let bytes = round_trip(&column);
+    let back = decode_column(&bytes).unwrap();
+    assert_same(&column, &back);
+    assert_eq!(back.get_data(IVec3::new(14, 70, 0)), 14);
+    assert_eq!(back.get(IVec3::new(11, 71, 0)), Block::Carpet);
+    assert_eq!(back.get_data(IVec3::new(1, 72, 3)), 7);
+}

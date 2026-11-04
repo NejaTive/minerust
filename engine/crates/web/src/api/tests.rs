@@ -4,11 +4,10 @@ use world::block::Block;
 #[test]
 fn blocks_follow_the_table_order() {
     let list = blocks();
-    assert_eq!(list.len(), BLOCKS.len());
-    assert_eq!(list.len(), Block::ALL.len());
-    for (i, info) in list.iter().enumerate() {
-        assert_eq!(info.name, BLOCKS[i].name);
-        assert_eq!(info.label, BLOCKS[i].label);
+    assert_eq!(list.len(), Block::stacks().len());
+    for (info, stack) in list.iter().zip(Block::stacks()) {
+        assert_eq!(info.name, stack.name);
+        assert_eq!(info.label, stack.label);
     }
     assert_eq!(list[0].name, "air");
 }
@@ -18,7 +17,7 @@ fn placeable_matches_select_block_names() {
     for info in blocks() {
         assert_eq!(
             info.placeable,
-            Block::from_name(&info.name).is_some(),
+            Block::stack_from_name(&info.name).is_some(),
             "{}",
             info.name
         );
