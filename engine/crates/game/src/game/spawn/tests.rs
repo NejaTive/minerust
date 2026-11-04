@@ -4,7 +4,7 @@ use world::column::Column;
 use world::item::Item;
 use world::mob::{MobKind, PARROT_COLOURS, RABBIT_GOLD, RABBIT_SPLOTCHED, RABBIT_WHITE};
 use world::pos::ColumnPos;
-use world::terrain::Biome;
+use world::terrain::{Biome, WorldType};
 
 use super::*;
 use crate::raycast::Hit;

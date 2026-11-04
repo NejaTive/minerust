@@ -3,7 +3,7 @@ use world::block::Block;
 use world::column::WORLD_HEIGHT;
 use world::mob::{MobKind, MobRecord};
 use world::pos::ColumnPos;
-use world::terrain::{WATER_LEVEL, WorldType};
+use world::terrain::WATER_LEVEL;
 
 use super::Game;
 use crate::daytime::sky_state;
@@ -38,7 +38,7 @@ impl Game {
 
     pub(super) fn populate_column(&mut self, key: ColumnPos) -> Vec<MobRecord> {
         let mut records = Vec::new();
-        if self.terrain.world_type() != WorldType::Debug {
+        if self.terrain.world_type().spawns_mobs() {
             records = self.generation_herds(key);
         }
         self.world.populate(key, records.clone());
@@ -130,7 +130,7 @@ impl Game {
     }
 
     fn spawn_cycle(&mut self) {
-        if self.terrain.world_type() == WorldType::Debug {
+        if !self.terrain.world_type().spawns_mobs() {
             return;
         }
         let keys = self.spawn_columns();
@@ -146,7 +146,7 @@ impl Game {
     }
 
     fn spawn_water_cycle(&mut self) {
-        if self.terrain.world_type() == WorldType::Debug {
+        if !self.terrain.world_type().spawns_mobs() {
             return;
         }
         let keys = self.spawn_columns();

@@ -12,6 +12,7 @@ use crate::column::{Column, WORLD_HEIGHT};
 use crate::mesa::{LAYER_SPAN, Mesa};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
+use crate::structure::{self, Structures};
 use crate::trees::hash;
 use crate::{plants, trees};
 
@@ -55,6 +56,8 @@ pub const DEBUG_GRID_Y: i32 = 70;
 pub const DEBUG_FLOOR_Y: i32 = 60;
 pub const DEBUG_SPAWN_Y: i32 = 72;
 const DEBUG_STEP: i32 = 2;
+const SHOWCASE_FILLER: i32 = 3;
+const SHOWCASE_BEDROCK: i32 = BEDROCK_SCATTER;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum WorldType {
@@ -62,6 +65,7 @@ pub enum WorldType {
     Standard,
     Flat,
     Debug,
+    Structures,
 }
 
 impl WorldType {
@@ -70,8 +74,13 @@ impl WorldType {
             "standard" => Some(Self::Standard),
             "flat" => Some(Self::Flat),
             "debug" => Some(Self::Debug),
+            "structures" => Some(Self::Structures),
             _ => None,
         }
+    }
+
+    pub fn spawns_mobs(self) -> bool {
+        matches!(self, Self::Standard | Self::Flat)
     }
 }
 
@@ -100,6 +109,7 @@ pub struct Terrain {
     color: FastNoiseLite,
     climate: Mutex<HashMap<(i32, i32), Arc<ColumnClimate>>>,
     lakes: Mutex<LakeCache>,
+    structures: Structures,
     pub(crate) caves: Caves,
 }
 
@@ -134,6 +144,7 @@ impl Terrain {
             mesa: Mesa::new(seed),
             climate: Mutex::new(HashMap::new()),
             lakes: Mutex::new(HashMap::new()),
+            structures: Structures::default(),
             caves: Caves::new(seed),
         }
     }
@@ -146,16 +157,26 @@ impl Terrain {
         self.world_type
     }
 
+    pub(crate) fn structures(&self) -> &Structures {
+        &self.structures
+    }
+
+    pub(crate) fn biome_map(&self) -> &BiomeMap {
+        &self.map
+    }
+
     pub fn biome_at(&self, x: i32, z: i32) -> Biome {
-        if self.world_type != WorldType::Standard {
-            return Biome::Plains;
+        match self.world_type {
+            WorldType::Standard => {}
+            WorldType::Structures => return structure::plot_biome(x, z),
+            WorldType::Flat | WorldType::Debug => return Biome::Plains,
         }
         self.climate(x >> 4, z >> 4).biomes[ColumnClimate::index(x, z)]
     }
 
     pub fn sample_biome(&self, x: i32, z: i32) -> Biome {
         if self.world_type != WorldType::Standard {
-            return Biome::Plains;
+            return self.biome_at(x, z);
         }
         self.map.blocks(x, z, 1, 1)[0]
     }
@@ -180,6 +201,7 @@ impl Terrain {
         match self.world_type {
             WorldType::Flat => FLAT_SURFACE,
             WorldType::Debug => DEBUG_GRID_Y,
+            WorldType::Structures => structure::plot_surface(x, z),
             WorldType::Standard => self.climate(x >> 4, z >> 4).surface[ColumnClimate::index(x, z)],
         }
     }
@@ -188,11 +210,13 @@ impl Terrain {
     pub fn column_tint_bytes(&self, key: ColumnPos, palette: &BiomePalette) -> Vec<u8> {
         let side = SECTION_SIZE as usize + 2 * BLEND_RADIUS as usize;
         let origin = key.origin();
-        let biomes = if self.world_type == WorldType::Standard {
-            self.map
-                .blocks(origin.x - BLEND_RADIUS, origin.z - BLEND_RADIUS, side, side)
-        } else {
-            vec![Biome::Plains; side * side]
+        let (x0, z0) = (origin.x - BLEND_RADIUS, origin.z - BLEND_RADIUS);
+        let biomes = match self.world_type {
+            WorldType::Standard => self.map.blocks(x0, z0, side, side),
+            WorldType::Structures => (0..side * side)
+                .map(|i| self.biome_at(x0 + (i % side) as i32, z0 + (i / side) as i32))
+                .collect(),
+            WorldType::Flat | WorldType::Debug => vec![Biome::Plains; side * side],
         };
         palette.column_bytes(&biomes, origin.x, origin.z)
     }
@@ -254,11 +278,13 @@ impl Terrain {
             return Self::generate_debug(key);
         }
         let mut column = self.generate_carved(key);
+        self.place_structures(key, &mut column);
         self.grow_lakes(key, &mut column);
         self.grow_ores(key, &mut column);
         self.grow_fossils(key, &mut column);
         trees::plant_where(self, key, &mut column, |tree| {
             !self.lake_covers(tree.base.x, tree.base.z)
+                && !self.structure_covers(tree.base.x, tree.base.z)
         });
         plants::plant(self, key, &mut column);
         self.decorate(key, &mut column);
@@ -293,6 +319,7 @@ impl Terrain {
         match self.world_type {
             WorldType::Flat => return Self::generate_flat(),
             WorldType::Debug => return Self::generate_debug(key),
+            WorldType::Structures => return self.generate_showcase(key),
             WorldType::Standard => {}
         }
         let mut column = Column::new();
@@ -530,6 +557,29 @@ impl Terrain {
             let (x, z) = (wx - origin.x, wz - origin.z);
             if (0..SECTION_SIZE).contains(&x) && (0..SECTION_SIZE).contains(&z) {
                 column.set_with_data(IVec3::new(x, DEBUG_GRID_Y, z), block, data);
+            }
+        }
+        column
+    }
+
+    fn generate_showcase(&self, key: ColumnPos) -> Column {
+        let mut column = Column::new();
+        let origin = key.origin();
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                let (wx, wz) = (origin.x + x, origin.z + z);
+                let surface = structure::plot_surface(wx, wz);
+                let ground = self.biome_at(wx, wz).surface_blocks();
+                let blocks: Vec<Block> = (0..=WATER_LEVEL.max(surface))
+                    .map(|y| match y {
+                        _ if y <= SHOWCASE_BEDROCK && self.is_bedrock(wx, y, wz) => Block::Bedrock,
+                        _ if y == surface => ground.top,
+                        _ if y > surface => Block::Water,
+                        _ if y >= surface - SHOWCASE_FILLER => ground.filler,
+                        _ => Block::Stone,
+                    })
+                    .collect();
+                column.set_stack(x, z, &blocks);
             }
         }
         column

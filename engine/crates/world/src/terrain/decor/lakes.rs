@@ -160,7 +160,13 @@ impl Terrain {
         {
             return Arc::clone(found);
         }
-        let planned = Arc::new(self.plan_lakes(sx, sz));
+        let near_village = (sz..=sz + 1)
+            .any(|z| (sx..=sx + 1).any(|x| self.village_touches(ColumnPos::new(x, z))));
+        let planned = Arc::new(if near_village {
+            Vec::new()
+        } else {
+            self.plan_lakes(sx, sz)
+        });
         let mut cache = self.lakes.lock().expect("lake cache poisoned");
         if cache.len() >= CLIMATE_CACHE_COLUMNS {
             cache.clear();

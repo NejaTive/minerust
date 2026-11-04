@@ -268,6 +268,15 @@ impl Terrain {
         self.grow_springs(key, column);
     }
 
+    fn free(&self, key: ColumnPos, at: &Spot) -> bool {
+        let origin = key.origin();
+        inside(at) && !self.structure_covers(origin.x + at.x, origin.z + at.z)
+    }
+
+    fn covered_spot(&self, source: &Source, spot: &Spot) -> bool {
+        self.structure_covers(source.origin.x + spot.x, source.origin.z + spot.z)
+    }
+
     fn source_stream(&self, source: &Source, kind: u64) -> Stream {
         let salt = SALT_DECOR + 2 * kind;
         let state = u64::from(hash(self.seed, source.sx, source.sz, salt))
@@ -299,7 +308,7 @@ impl Terrain {
             for _ in 0..CACTUS_TRIES {
                 let height = 1 + tries.taper() as i32;
                 let at = source.target(&around(&mut tries, &spot, CACTUS_SPREAD));
-                if inside(&at) {
+                if self.free(key, &at) {
                     self.plant_cactus(key, column, climate, &at, height);
                 }
             }
@@ -320,7 +329,7 @@ impl Terrain {
             }
             for _ in 0..BUSH_TRIES {
                 let at = source.target(&around(&mut tries, &spot, BUSH_SPREAD));
-                if inside(&at) {
+                if self.free(key, &at) {
                     let ground = IVec3::new(
                         at.x,
                         climate.surface[ColumnClimate::index(at.x, at.z)],
@@ -349,7 +358,7 @@ impl Terrain {
             for _ in 0..REED_TRIES {
                 let height = 2 + tries.taper() as i32;
                 let at = source.target(&around(&mut tries, &spot, REED_SPREAD));
-                if inside(&at) {
+                if self.free(key, &at) {
                     self.plant_reeds(key, column, climate, &at, height);
                 }
             }
@@ -441,7 +450,7 @@ impl Terrain {
         for _ in 0..counts.spikes {
             let spot = pick(&mut rng);
             let mut shape = rng.fork();
-            if source.touches(&spot, SPIKE_REACH as u32) {
+            if source.touches(&spot, SPIKE_REACH as u32) && !self.covered_spot(source, &spot) {
                 self.grow_ice_spike(&mut shape, column, source, &spot);
             }
         }
@@ -458,7 +467,8 @@ impl Terrain {
             for _ in 0..rng.below(BOULDER_MAX) {
                 let spot = pick(&mut rng);
                 let mut blob = rng.fork();
-                if source.touches(&spot, BOULDER_REACH as u32) {
+                if source.touches(&spot, BOULDER_REACH as u32) && !self.covered_spot(source, &spot)
+                {
                     self.grow_boulder(&mut blob, column, source, &spot);
                 }
             }
