@@ -564,11 +564,6 @@ fn debug_cell_origin(cell: usize, side: i32) -> (i32, i32) {
     (cell % side * DEBUG_STEP, cell / side * DEBUG_STEP)
 }
 
-pub(crate) fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
-    let t = ((v - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
 #[doc(hidden)]
 pub fn lake_key(terrain: &Terrain) -> ColumnPos {
     let deep = |x, z| terrain.surface_height(x, z) < WATER_LEVEL - 2;
