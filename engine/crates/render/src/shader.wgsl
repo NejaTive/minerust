@@ -131,7 +131,7 @@ struct TileAnim {
     tint: vec4<f32>,
 };
 @group(0) @binding(3)
-var<uniform> animation: array<TileAnim, 206>;
+var<uniform> animation: array<TileAnim, 274>;
 
 // Цвет травы, листвы (на BIOME_MAP_SIZE ниже) и воды (ещё на BIOME_MAP_SIZE ниже) на блок, тор BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
 @group(0) @binding(11)
@@ -277,6 +277,20 @@ fn block_vertex(in: VertexIn) -> VertexOut {
         u = select(16.0 - q[ua], q[ua], u == src[ua]);
         v = select(16.0 - q[va], q[va], v == src[va]);
         offset = q;
+        // поворот текстуры по часовой стрелке сверху (`Quad::with_turn`): верх кровати лежит в плитке изголовьем на север
+        let turn = (w2 >> 28u) & 3u;
+        if turn == 1u {
+            let t = u;
+            u = v;
+            v = 16.0 - t;
+        } else if turn == 2u {
+            u = 16.0 - u;
+            v = 16.0 - v;
+        } else if turn == 3u {
+            let t = u;
+            u = 16.0 - v;
+            v = t;
+        }
     }
     // y = 30 и 31 — маркеры SIDE_TOP_CORNER / TOP_CORNER из templates.rs: высота угла берётся из квада
     if offset.y >= 30.0 {

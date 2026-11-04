@@ -1,3 +1,5 @@
+pub mod bed;
+mod beds;
 pub mod biome;
 pub mod biome_color;
 pub mod biome_map;

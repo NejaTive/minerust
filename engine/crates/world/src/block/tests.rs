@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard(), 0)
 }
 
-const ALL: [Block; 175] = Block::ALL;
+const ALL: [Block; 179] = Block::ALL;
 
 fn is_connected_family(block: Block) -> bool {
     block as usize >= Block::OakFence as usize
@@ -51,7 +51,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(175), Err(175));
+    assert_eq!(Block::try_from(179), Err(179));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -336,6 +336,7 @@ fn only_log_torch_and_water_use_data() {
             Block::Torch => DataKind::Attachment,
             Block::Water | Block::Lava => DataKind::Fluid,
             Block::Wool | Block::Carpet => DataKind::Color,
+            Block::MonsterEgg => DataKind::Egg,
             block if block.is_slab() => DataKind::Slab,
             block if block.is_stairs() => DataKind::Stairs,
             _ => DataKind::None,
@@ -562,6 +563,9 @@ fn states_cover_every_data_kind() {
             DataKind::Furnace | DataKind::Cauldron => 4,
             DataKind::Pot => 16,
             DataKind::Spawner => 4,
+            DataKind::Bed => 128,
+            DataKind::Trapdoor => 16,
+            DataKind::Egg => 6,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -1439,4 +1443,29 @@ fn pot_remembers_one_plant_from_the_list() {
     }
     assert_eq!(Block::pot_code(Block::Stone), None);
     assert_eq!(POT_PLANTS.len(), 15);
+}
+
+#[test]
+fn monster_eggs_look_like_their_variant_and_each_has_an_item() {
+    for (data, &(name, _, tile)) in EGG_VARIANTS.iter().enumerate() {
+        let data = data as u8;
+        assert_eq!(Block::MonsterEgg.tile_for(Facing::Side, data), Some(tile));
+        let stack = Block::stack_from_name(name).unwrap();
+        assert_eq!((stack.block, stack.data), (Block::MonsterEgg, data));
+    }
+    assert_eq!(
+        Block::MonsterEgg.tile_for(Facing::Top, 0),
+        Some(Tile::Stone)
+    );
+    assert_eq!(
+        Block::MonsterEgg.placement_state(&Placement {
+            normal: IVec3::Y,
+            hit_x: 0.5,
+            hit_y: 1.0,
+            hit_z: 0.5,
+            look: IVec3::X,
+            variant: 4,
+        }),
+        Some(4)
+    );
 }

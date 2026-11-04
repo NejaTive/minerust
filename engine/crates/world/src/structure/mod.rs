@@ -10,6 +10,7 @@ use crate::section::SECTION_SIZE;
 use crate::stream::Stream;
 use crate::terrain::Terrain;
 
+mod igloo;
 mod piece;
 mod placement;
 mod showcase;
@@ -17,8 +18,8 @@ mod swamp_hut;
 
 pub use piece::{BlockBox, Facing, Piece, PieceKind, PieceWriter};
 pub use showcase::{
-    FIRST_PLOT_X, Ground, LAND_SURFACE, PLOT_HALF, PLOT_STEP, Plot, SEABED_SURFACE,
-    biome as plot_biome, plot_at, plots, surface as plot_surface,
+    FIRST_PLOT_X, Ground, LAND_SURFACE, Plot, SEABED_SURFACE, biome as plot_biome, plot_at, plots,
+    surface as plot_surface,
 };
 
 const START_CACHE_LIMIT: usize = 1024;
@@ -111,7 +112,7 @@ impl Variant {
 
 impl TempleKind {
     pub fn ready(self) -> bool {
-        matches!(self, TempleKind::SwampHut)
+        matches!(self, TempleKind::SwampHut | TempleKind::Igloo)
     }
 
     pub fn name(self) -> &'static str {
@@ -244,6 +245,7 @@ fn layout(
 ) -> Vec<Piece> {
     match variant {
         Variant::Temple(TempleKind::SwampHut) => swamp_hut::layout(terrain, anchor, rng),
+        Variant::Temple(TempleKind::Igloo) => igloo::layout(terrain, anchor, rng),
         #[cfg(test)]
         _ => tests::layout(terrain, kind, variant, anchor, rng),
         #[cfg(not(test))]

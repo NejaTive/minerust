@@ -20,7 +20,7 @@ import { NoWebGpuError, hasWebGpu } from './gpu'
 import { FrameLoop, createEngine } from './host'
 import { MeshPool } from './mesh-pool'
 import { engineInfo } from './info'
-import { bindConsole, resetConsole, resetConsoleInput } from './console'
+import { bindConsole, postMessage, resetConsole, resetConsoleInput } from './console'
 import { gameState as state, notify, resetGameState } from './state'
 import { engineTarget, texturePacks } from './useTexturePack'
 
@@ -200,6 +200,8 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
       afterRender: () => {
         pool?.pump()
         if (created.takeContainerOpened()) openContainer()
+        const message = created.takeMessage()
+        if (message) postMessage(message)
       },
     })
     loop.start()

@@ -485,6 +485,12 @@ impl Engine {
         self.game.take_container_opened()
     }
 
+    /// Сообщение игроку (например, отказ лечь спать), пустая строка — нет.
+    #[wasm_bindgen(js_name = takeMessage)]
+    pub fn take_message(&mut self) -> String {
+        self.game.take_message().unwrap_or_default()
+    }
+
     /// Предметы открытого сундука по слотам, пустой слот — пустая строка.
     #[wasm_bindgen(js_name = containerSlots)]
     pub fn container_slots(&self) -> Vec<String> {

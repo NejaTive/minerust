@@ -213,10 +213,78 @@ pub enum Tile {
     ChestDoubleBottomR,
     ChestDoubleEndL,
     ChestDoubleEndR,
+    BedHeadTopWhite,
+    BedHeadTopOrange,
+    BedHeadTopMagenta,
+    BedHeadTopLightBlue,
+    BedHeadTopYellow,
+    BedHeadTopLime,
+    BedHeadTopPink,
+    BedHeadTopGray,
+    BedHeadTopSilver,
+    BedHeadTopCyan,
+    BedHeadTopPurple,
+    BedHeadTopBlue,
+    BedHeadTopBrown,
+    BedHeadTopGreen,
+    BedHeadTopRed,
+    BedHeadTopBlack,
+    BedFootTopWhite,
+    BedFootTopOrange,
+    BedFootTopMagenta,
+    BedFootTopLightBlue,
+    BedFootTopYellow,
+    BedFootTopLime,
+    BedFootTopPink,
+    BedFootTopGray,
+    BedFootTopSilver,
+    BedFootTopCyan,
+    BedFootTopPurple,
+    BedFootTopBlue,
+    BedFootTopBrown,
+    BedFootTopGreen,
+    BedFootTopRed,
+    BedFootTopBlack,
+    BedHeadSideWhite,
+    BedHeadSideOrange,
+    BedHeadSideMagenta,
+    BedHeadSideLightBlue,
+    BedHeadSideYellow,
+    BedHeadSideLime,
+    BedHeadSidePink,
+    BedHeadSideGray,
+    BedHeadSideSilver,
+    BedHeadSideCyan,
+    BedHeadSidePurple,
+    BedHeadSideBlue,
+    BedHeadSideBrown,
+    BedHeadSideGreen,
+    BedHeadSideRed,
+    BedHeadSideBlack,
+    BedFootSideWhite,
+    BedFootSideOrange,
+    BedFootSideMagenta,
+    BedFootSideLightBlue,
+    BedFootSideYellow,
+    BedFootSideLime,
+    BedFootSidePink,
+    BedFootSideGray,
+    BedFootSideSilver,
+    BedFootSideCyan,
+    BedFootSidePurple,
+    BedFootSideBlue,
+    BedFootSideBrown,
+    BedFootSideGreen,
+    BedFootSideRed,
+    BedFootSideBlack,
+    RedstoneTorchOn,
+    BrewingStand,
+    BrewingStandBase,
+    TrapdoorOak,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 206] = [
+    pub const ALL: [Tile; 274] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -423,6 +491,74 @@ impl Tile {
         Tile::ChestDoubleBottomR,
         Tile::ChestDoubleEndL,
         Tile::ChestDoubleEndR,
+        Tile::BedHeadTopWhite,
+        Tile::BedHeadTopOrange,
+        Tile::BedHeadTopMagenta,
+        Tile::BedHeadTopLightBlue,
+        Tile::BedHeadTopYellow,
+        Tile::BedHeadTopLime,
+        Tile::BedHeadTopPink,
+        Tile::BedHeadTopGray,
+        Tile::BedHeadTopSilver,
+        Tile::BedHeadTopCyan,
+        Tile::BedHeadTopPurple,
+        Tile::BedHeadTopBlue,
+        Tile::BedHeadTopBrown,
+        Tile::BedHeadTopGreen,
+        Tile::BedHeadTopRed,
+        Tile::BedHeadTopBlack,
+        Tile::BedFootTopWhite,
+        Tile::BedFootTopOrange,
+        Tile::BedFootTopMagenta,
+        Tile::BedFootTopLightBlue,
+        Tile::BedFootTopYellow,
+        Tile::BedFootTopLime,
+        Tile::BedFootTopPink,
+        Tile::BedFootTopGray,
+        Tile::BedFootTopSilver,
+        Tile::BedFootTopCyan,
+        Tile::BedFootTopPurple,
+        Tile::BedFootTopBlue,
+        Tile::BedFootTopBrown,
+        Tile::BedFootTopGreen,
+        Tile::BedFootTopRed,
+        Tile::BedFootTopBlack,
+        Tile::BedHeadSideWhite,
+        Tile::BedHeadSideOrange,
+        Tile::BedHeadSideMagenta,
+        Tile::BedHeadSideLightBlue,
+        Tile::BedHeadSideYellow,
+        Tile::BedHeadSideLime,
+        Tile::BedHeadSidePink,
+        Tile::BedHeadSideGray,
+        Tile::BedHeadSideSilver,
+        Tile::BedHeadSideCyan,
+        Tile::BedHeadSidePurple,
+        Tile::BedHeadSideBlue,
+        Tile::BedHeadSideBrown,
+        Tile::BedHeadSideGreen,
+        Tile::BedHeadSideRed,
+        Tile::BedHeadSideBlack,
+        Tile::BedFootSideWhite,
+        Tile::BedFootSideOrange,
+        Tile::BedFootSideMagenta,
+        Tile::BedFootSideLightBlue,
+        Tile::BedFootSideYellow,
+        Tile::BedFootSideLime,
+        Tile::BedFootSidePink,
+        Tile::BedFootSideGray,
+        Tile::BedFootSideSilver,
+        Tile::BedFootSideCyan,
+        Tile::BedFootSidePurple,
+        Tile::BedFootSideBlue,
+        Tile::BedFootSideBrown,
+        Tile::BedFootSideGreen,
+        Tile::BedFootSideRed,
+        Tile::BedFootSideBlack,
+        Tile::RedstoneTorchOn,
+        Tile::BrewingStand,
+        Tile::BrewingStandBase,
+        Tile::TrapdoorOak,
     ];
 
     pub fn sway(self) -> f32 {
@@ -464,7 +600,30 @@ impl Tile {
     }
 
     pub fn emissive(self) -> bool {
-        matches!(self, Tile::Glowstone | Tile::Lava | Tile::Torch)
+        matches!(
+            self,
+            Tile::Glowstone | Tile::Lava | Tile::Torch | Tile::RedstoneTorchOn
+        )
+    }
+
+    /// Плитка кровати: `head` — изголовье, `top` — верх, иначе боковая полоса.
+    pub fn bed(color: u8, head: bool, top: bool) -> Tile {
+        let part = match (head, top) {
+            (true, true) => 0,
+            (false, true) => 1,
+            (true, false) => 2,
+            (false, false) => 3,
+        };
+        Tile::ALL[Tile::BedHeadTopWhite as usize + part * 16 + usize::from(color % 16)]
+    }
+
+    /// `(цвет, изголовье, верх)` плитки кровати.
+    pub fn bed_part(self) -> Option<(u8, bool, bool)> {
+        let index = (self as usize).checked_sub(Tile::BedHeadTopWhite as usize)?;
+        (index < 64).then(|| {
+            let part = index / 16;
+            ((index % 16) as u8, part % 2 == 0, part < 2)
+        })
     }
 
     pub const fn layer(self) -> u32 {
@@ -486,6 +645,9 @@ impl Tile {
                     | Tile::Poppy
                     | Tile::Dandelion
                     | Tile::Torch
+                    | Tile::RedstoneTorchOn
+                    | Tile::BrewingStand
+                    | Tile::TrapdoorOak
                     | Tile::CactusTop
                     | Tile::CactusSide
                     | Tile::CactusBottom

@@ -520,21 +520,57 @@ fn showcase_terrain_is_flat_with_plot_biomes() {
     assert_eq!(terrain.biome_at(5, 5), Biome::Plains);
     let all: Vec<_> = plots().collect();
     assert_eq!(all.len(), 13);
-    for (index, plot) in all.iter().enumerate() {
-        assert_eq!(
-            plot.center,
-            glam::IVec2::new(FIRST_PLOT_X + index as i32 * PLOT_STEP, 0)
-        );
+    let mut edge = FIRST_PLOT_X;
+    for plot in &all {
+        assert_eq!(plot.center, glam::IVec2::new(edge + plot.width / 2, 0));
+        edge += plot.width;
+        let beyond = plot.width / 2;
         assert_eq!(terrain.biome_at(plot.center.x, plot.center.y), plot.biome);
         assert_eq!(
             terrain.surface_height(plot.center.x, plot.center.y),
             plot.surface()
         );
-        assert_eq!(terrain.surface_height(plot.center.x + PLOT_HALF + 1, 0), 63);
+        assert_eq!(terrain.surface_height(plot.center.x, beyond), 63);
+        assert_eq!(terrain.biome_at(plot.center.x, beyond), Biome::Plains);
         assert_eq!(
-            terrain.biome_at(plot.center.x + PLOT_HALF + 1, 0),
-            Biome::Plains
+            plot_at(plot.center.x - beyond, 0).unwrap().center,
+            plot.center
         );
+        assert_ne!(
+            plot_at(plot.center.x + beyond, 0).map(|p| p.center),
+            Some(plot.center)
+        );
+    }
+}
+
+#[test]
+fn showcase_plots_hold_their_structures_and_leave_the_spawn_free() {
+    let order: Vec<_> = plots().map(|plot| plot.variant).collect();
+    assert_eq!(
+        order[..4],
+        [
+            Variant::Temple(TempleKind::SwampHut),
+            Variant::Temple(TempleKind::Igloo),
+            Variant::Temple(TempleKind::DesertPyramid),
+            Variant::Temple(TempleKind::JunglePyramid),
+        ]
+    );
+    assert!(plot_at(0, 0).is_none());
+    let terrain = Terrain::of(1, WorldType::Structures);
+    for kind in StructureKind::ALL {
+        terrain.set_structure_built(kind, true);
+    }
+    for plot in plots().filter(|plot| plot.variant.ready()) {
+        let start = build(&terrain, plot.kind, plot.column()).unwrap();
+        let half = plot.width / 2;
+        let (low, high) = (plot.center.x - half, plot.center.x + half);
+        assert!(
+            start.bounds.min.x >= low && start.bounds.max.x < high,
+            "{:?} {:?} {low}..{high}",
+            plot.variant,
+            start.bounds
+        );
+        assert!(start.bounds.min.z >= -half && start.bounds.max.z < half);
     }
 }
 
@@ -560,7 +596,7 @@ fn showcase_monument_plot_is_an_ocean() {
 #[test]
 fn showcase_has_no_trees_or_decor() {
     let terrain = Terrain::of(1, WorldType::Structures);
-    for plot in plots().filter(|plot| plot.variant != Variant::Temple(TempleKind::SwampHut)) {
+    for plot in plots().filter(|plot| !is_built_temple(plot.variant)) {
         let column = terrain.generate(plot.column());
         for i in 0..16 * 16 {
             let (x, z) = (i % 16, i / 16);
@@ -666,21 +702,43 @@ fn writer_places_empty_chests_furnaces_cauldrons_and_pots() {
 
 const HUT_SEED: i32 = 1337;
 
-fn huts(terrain: &Terrain) -> Vec<StartRef> {
+fn is_built_temple(variant: Variant) -> bool {
+    matches!(
+        variant,
+        Variant::Temple(TempleKind::SwampHut | TempleKind::Igloo)
+    )
+}
+
+fn temples(terrain: &Terrain, variant: Variant, around: ColumnPos) -> Vec<StartRef> {
     let mut found = Vec::new();
     for rz in -12..12 {
         for rx in -12..12 {
-            let center = ColumnPos::new(rx * 32 + 16, rz * 32 + 16);
+            let center = ColumnPos::new(around.x() + rx * 32 + 16, around.z() + rz * 32 + 16);
             found.extend(terrain.starts_near(StructureKind::Temple, center, 16));
         }
     }
-    found.retain(|start| start.get().is_some());
+    found.retain(|start| start.get().is_some_and(|start| start.variant == variant));
     found.sort_by_key(|start| {
         let origin = start.get().unwrap().origin;
         (origin.x(), origin.z())
     });
     found.dedup_by_key(|start| start.get().unwrap().origin);
     found
+}
+
+fn huts(terrain: &Terrain) -> Vec<StartRef> {
+    temples(
+        terrain,
+        Variant::Temple(TempleKind::SwampHut),
+        ColumnPos::ZERO,
+    )
+}
+
+/// Ближайшие к началу координат иглу сида `HUT_SEED` лежат около (−6472, 840).
+const IGLOO_REGION: ColumnPos = ColumnPos::new(-405, 52);
+
+fn igloos(terrain: &Terrain) -> Vec<StartRef> {
+    temples(terrain, Variant::Temple(TempleKind::Igloo), IGLOO_REGION)
 }
 
 fn hut_columns(start: &StructureStart) -> Vec<ColumnPos> {
@@ -814,18 +872,23 @@ fn trees_do_not_root_inside_the_hut_box() {
 #[test]
 fn locate_finds_only_ready_temple_variants() {
     let terrain = Terrain::new(HUT_SEED);
-    let nearest = huts(&terrain)
-        .into_iter()
-        .map(|s| s.get().unwrap().anchor)
-        .min_by_key(|a| i64::from(a.0).pow(2) + i64::from(a.1).pow(2))
-        .unwrap();
-    for name in ["Swamp_Hut", "Temple"] {
+    let nearest = |starts: Vec<StartRef>| {
+        starts
+            .into_iter()
+            .map(|s| s.get().unwrap().anchor)
+            .min_by_key(|a| i64::from(a.0).pow(2) + i64::from(a.1).pow(2))
+            .unwrap()
+    };
+    let hut = nearest(huts(&terrain));
+    let igloo = nearest(igloos(&terrain));
+    let both = nearest([huts(&terrain), igloos(&terrain)].concat());
+    for (name, expected) in [("Swamp_Hut", hut), ("Igloo", igloo), ("Temple", both)] {
         let target = LocateName::find(name).unwrap();
         assert!(target.ready());
         let (x, z, _) = terrain.nearest_structure(target, 0, 0, 20_000).unwrap();
-        assert_eq!((x, z), nearest, "{name}");
+        assert_eq!((x, z), expected, "{name}");
     }
-    for name in ["Desert_Pyramid", "Jungle_Pyramid", "Igloo"] {
+    for name in ["Desert_Pyramid", "Jungle_Pyramid"] {
         let target = LocateName::find(name).unwrap();
         assert!(!target.ready());
         assert_eq!(
@@ -856,4 +919,295 @@ fn showcase_hut_plot_is_not_empty() {
     assert!(count_in(&columns, Block::SprucePlanks) > 40);
     let floor = start.pieces[0].bounds.min.y;
     assert_eq!(floor, plot.surface() + 1);
+}
+
+fn piece_columns(piece: &Piece) -> Vec<ColumnPos> {
+    let b = piece.bounds;
+    let (low, high) = (ColumnPos::of_block(b.min), ColumnPos::of_block(b.max));
+    (low.z()..=high.z())
+        .flat_map(|z| (low.x()..=high.x()).map(move |x| ColumnPos::new(x, z)))
+        .collect()
+}
+
+fn start_columns(start: &StructureStart) -> Vec<ColumnPos> {
+    let mut keys: Vec<ColumnPos> = start.pieces.iter().flat_map(piece_columns).collect();
+    keys.sort_by_key(|key| (key.x(), key.z()));
+    keys.dedup();
+    keys
+}
+
+fn igloo_start(terrain: &Terrain, basement: bool) -> StructureStart {
+    let found = igloos(terrain);
+    let index = found
+        .iter()
+        .position(|s| (s.get().unwrap().pieces.len() == 2) == basement)
+        .unwrap_or_else(|| panic!("no igloo with basement={basement}"));
+    let origin = found[index].get().unwrap().origin;
+    build(terrain, StructureKind::Temple, origin).unwrap()
+}
+
+#[test]
+fn igloos_only_stand_in_cold_biomes_and_are_deterministic() {
+    let terrain = Terrain::new(HUT_SEED);
+    let found = igloos(&terrain);
+    assert!(found.len() >= 2, "{}", found.len());
+    for start in &found {
+        let start = start.get().unwrap();
+        assert_eq!(start.variant, Variant::Temple(TempleKind::Igloo));
+        assert!(matches!(
+            terrain.biome_at(start.anchor.0, start.anchor.1),
+            Biome::IcePlains | Biome::ColdTaiga
+        ));
+        assert_eq!(start.pieces[0].kind, PieceKind::Igloo);
+        assert!(matches!(start.pieces.len(), 1 | 2));
+    }
+    let key = |starts: &[StartRef]| -> Vec<_> {
+        starts
+            .iter()
+            .map(|s| {
+                let s = s.get().unwrap();
+                (
+                    s.origin,
+                    s.pieces
+                        .iter()
+                        .map(|p| (p.bounds, p.facing, p.kind))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(key(&found), key(&igloos(&Terrain::new(HUT_SEED))));
+}
+
+#[test]
+fn about_half_of_igloos_get_a_basement_of_four_to_eleven_segments() {
+    let terrain = Terrain::new(HUT_SEED);
+    let mut with = 0;
+    let runs = 400;
+    for seed in 0..runs {
+        let pieces = igloo::layout(&terrain, (0, 0), &mut Stream::new(seed));
+        if let Some(piece) = pieces.get(1) {
+            with += 1;
+            let PieceKind::IglooBasement(segments, _) = piece.kind else {
+                panic!("{:?}", piece.kind);
+            };
+            assert!((4..=11).contains(&segments), "{segments}");
+            assert_eq!(piece.bounds.size().y, 3 * i32::from(segments) + 8);
+        }
+    }
+    assert!((160..=240).contains(&with), "{with} of {runs}");
+}
+
+#[test]
+fn the_basement_hangs_under_the_dome_and_stays_in_the_ground() {
+    let terrain = Terrain::new(HUT_SEED);
+    for seed in 0..64 {
+        let pieces = igloo::layout(&terrain, (100, -40), &mut Stream::new(seed));
+        let [top, basement] = pieces[..] else {
+            continue;
+        };
+        assert_eq!(basement.facing, top.facing);
+        assert_eq!(basement.bounds.max.y, top.bounds.min.y + 1);
+        assert!(basement.bounds.min.y >= 1);
+        let (mut scratch, mut other) = (Column::new(), Column::new());
+        let a = PieceWriter::new(&mut scratch, ColumnPos::ZERO, &top).world(0, 0, 0);
+        let b = PieceWriter::new(&mut other, ColumnPos::ZERO, &basement).world(0, 0, 0);
+        assert_eq!((a.x, a.z), (b.x, b.z), "{:?}", top.facing);
+    }
+}
+
+#[test]
+fn local_boxes_invert_the_writer_mapping() {
+    let size = IVec3::new(7, 5, 9);
+    for facing in Facing::ALL {
+        let origin = IVec3::new(-33, 20, 71);
+        let bounds = BlockBox::from_local(origin, size, facing);
+        let piece = Piece {
+            bounds,
+            facing,
+            kind: PieceKind::Probe,
+        };
+        let mut column = Column::new();
+        let writer = PieceWriter::new(&mut column, ColumnPos::ZERO, &piece);
+        assert_eq!(writer.world(0, 0, 0), origin, "{facing:?}");
+        assert_eq!(bounds.size().y, size.y);
+        for (x, z) in [(6, 0), (0, 8), (6, 8)] {
+            assert!(bounds.contains(writer.world(x, 4, z)), "{facing:?}");
+        }
+    }
+}
+
+#[test]
+fn igloo_columns_agree_in_any_order_and_hold_the_dome() {
+    let terrain = Terrain::new(HUT_SEED);
+    let start = igloo_start(&terrain, false);
+    let keys = start_columns(&start);
+    let generate = |order: Vec<usize>| {
+        let terrain = Terrain::new(HUT_SEED);
+        let mut out: Vec<Option<Column>> = keys.iter().map(|_| None).collect();
+        for i in order {
+            out[i] = Some(terrain.generate(keys[i]));
+        }
+        out.into_iter().flatten().collect::<Vec<_>>()
+    };
+    let forward = generate((0..keys.len()).collect());
+    let backward = generate((0..keys.len()).rev().collect());
+    for (a, b) in forward.iter().zip(&backward) {
+        assert!(snapshot(a) == snapshot(b));
+    }
+    assert!(count_in(&forward, Block::SnowBlock) > 60);
+    assert_eq!(count_in(&forward, Block::Bed), 2);
+    assert_eq!(count_in(&forward, Block::CraftingTable), 1);
+    assert_eq!(count_in(&forward, Block::Furnace), 1);
+    assert_eq!(count_in(&forward, Block::RedstoneTorch), 1);
+    assert_eq!(count_in(&forward, Block::Ice), 3);
+    assert_eq!(count_in(&forward, Block::OakTrapdoor), 0);
+}
+
+#[test]
+fn an_igloo_basement_is_seamless_and_complete() {
+    let terrain = Terrain::new(HUT_SEED);
+    let start = igloo_start(&terrain, true);
+    let PieceKind::IglooBasement(segments, _) = start.pieces[1].kind else {
+        panic!();
+    };
+    let keys = start_columns(&start);
+    let generate = |order: Vec<usize>| {
+        let terrain = Terrain::new(HUT_SEED);
+        let mut out: Vec<Option<Column>> = keys.iter().map(|_| None).collect();
+        for i in order {
+            out[i] = Some(terrain.generate(keys[i]));
+        }
+        out.into_iter().flatten().collect::<Vec<_>>()
+    };
+    let forward = generate((0..keys.len()).collect());
+    let backward = generate((0..keys.len()).rev().collect());
+    for (a, b) in forward.iter().zip(&backward) {
+        assert!(snapshot(a) == snapshot(b));
+    }
+    let floor = 3 * usize::from(segments) + 6;
+    assert_eq!(count_in(&forward, Block::Ladder), floor);
+    assert_eq!(count_in(&forward, Block::OakTrapdoor), 1);
+    assert_eq!(count_in(&forward, Block::Chest), 1);
+    assert_eq!(count_in(&forward, Block::BrewingStand), 1);
+    assert_eq!(count_in(&forward, Block::IronBars), 2 * 4);
+    let bricks = [
+        Block::StoneBricks,
+        Block::MossyStoneBricks,
+        Block::CrackedStoneBricks,
+    ];
+    for brick in bricks {
+        assert!(count_in(&forward, brick) > 20, "{brick:?}");
+    }
+    assert!(count_in(&forward, Block::StoneBricks) > count_in(&forward, Block::CrackedStoneBricks));
+    let eggs: Vec<u8> = forward
+        .iter()
+        .flat_map(|column| {
+            (0..16 * WORLD_HEIGHT * 16).filter_map(|i| {
+                let at = IVec3::new(i % 16, i / 256, i / 16 % 16);
+                (column.get(at) == Block::MonsterEgg).then(|| column.get_data(at))
+            })
+        })
+        .collect();
+    assert!(!eggs.is_empty());
+    assert!(eggs.iter().all(|data| (2..=4).contains(data)), "{eggs:?}");
+}
+
+#[test]
+fn the_ladder_runs_unbroken_from_the_room_to_the_hatch() {
+    let terrain = Terrain::new(HUT_SEED);
+    let start = igloo_start(&terrain, true);
+    let basement = start.pieces[1];
+    let mut scratch = Column::new();
+    let writer = PieceWriter::new(&mut scratch, ColumnPos::ZERO, &basement);
+    let PieceKind::IglooBasement(segments, _) = basement.kind else {
+        panic!();
+    };
+    let top = 3 * i32::from(segments) + 6;
+    let (x, z) = (writer.world(3, 0, 4).x, writer.world(3, 0, 4).z);
+    let key = ColumnPos::of_block(IVec3::new(x, 0, z));
+    let column = terrain.generate(key);
+    let local = |y: i32| {
+        IVec3::new(
+            x - key.origin().x,
+            basement.bounds.min.y + y,
+            z - key.origin().z,
+        )
+    };
+    for y in 1..=top {
+        assert_eq!(column.get(local(y)), Block::Ladder, "y {y}");
+    }
+    assert_eq!(column.get(local(top + 1)), Block::OakTrapdoor);
+    assert!(column.get(local(0)).is_solid());
+    let sky = column.get(local(top + 2));
+    assert!(
+        sky == Block::Air || sky == Block::Carpet || sky == Block::Snow,
+        "{sky:?}"
+    );
+}
+
+#[test]
+fn igloo_pieces_never_write_outside_their_boxes() {
+    let terrain = Terrain::new(HUT_SEED);
+    for seed in 0..24 {
+        let pieces = igloo::layout(&terrain, (-77, 155), &mut Stream::new(seed));
+        for piece in pieces {
+            let mut cells = 0;
+            let keys = piece_columns(&piece);
+            let ring = ColumnPos::new(keys[0].x() - 1, keys[0].z() - 1);
+            for z in ring.z()..ring.z() + 6 {
+                for x in ring.x()..ring.x() + 6 {
+                    let key = ColumnPos::new(x, z);
+                    let mut column = Column::new();
+                    piece.place(&mut PieceWriter::new(&mut column, key, &piece));
+                    for (i, (block, _)) in snapshot(&column).into_iter().enumerate() {
+                        if block == Block::Air {
+                            continue;
+                        }
+                        let at = key.origin()
+                            + IVec3::new(i as i32 % 16, i as i32 / 256, i as i32 / 16 % 16);
+                        cells += 1;
+                        let below_floor = at.y < piece.bounds.min.y;
+                        assert!(
+                            piece.bounds.contains(at)
+                                || (below_floor && piece.bounds.contains_xz(at.x, at.z)),
+                            "{:?} {at} {:?}",
+                            piece.kind,
+                            piece.bounds
+                        );
+                    }
+                }
+            }
+            assert!(cells > 50);
+        }
+    }
+}
+
+#[test]
+fn locate_finds_the_igloo() {
+    let terrain = Terrain::new(HUT_SEED);
+    let target = LocateName::find("Igloo").unwrap();
+    assert!(target.ready());
+    let (x, z, _) = terrain.nearest_structure(target, 0, 0, 20_000).unwrap();
+    assert!(matches!(
+        terrain.biome_at(x, z),
+        Biome::IcePlains | Biome::ColdTaiga
+    ));
+}
+
+#[test]
+fn showcase_igloo_plot_shows_the_dome_over_a_basement() {
+    let terrain = Terrain::of(HUT_SEED, WorldType::Structures);
+    let plot = plots()
+        .find(|plot| plot.variant == Variant::Temple(TempleKind::Igloo))
+        .unwrap();
+    let start = build(&terrain, plot.kind, plot.column()).unwrap();
+    assert_eq!(start.pieces.len(), 2);
+    let columns: Vec<Column> = start_columns(&start)
+        .into_iter()
+        .map(|key| terrain.generate(key))
+        .collect();
+    assert!(count_in(&columns, Block::SnowBlock) > 60);
+    assert!(count_in(&columns, Block::StoneBricks) > 20);
+    assert_eq!(start.pieces[0].bounds.min.y, plot.surface());
 }

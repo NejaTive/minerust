@@ -58,9 +58,14 @@ impl Block {
         self.box_kind() == BoxKind::Ladder
     }
 
+    pub fn is_trapdoor(self) -> bool {
+        self.box_kind() == BoxKind::Trapdoor
+    }
+
     /// Правая кнопка открывает и закрывает; железная дверь ждёт механизмов.
     pub fn opens_by_hand(self) -> bool {
-        matches!(self, Block::Chest | Block::FlowerPot)
+        matches!(self, Block::Chest | Block::FlowerPot | Block::Bed)
+            || self.is_trapdoor()
             || self.is_gate()
             || (self.is_door() && !matches!(self, Block::IronDoor | Block::IronDoorUpper))
     }
@@ -104,6 +109,7 @@ impl Block {
     pub fn is_open(self, data: u8) -> bool {
         self.is_gate() && data & GATE_OPEN != 0
             || self.data_kind() == DataKind::Door && data & DOOR_OPEN != 0
+            || self.is_trapdoor() && data & TRAPDOOR_OPEN != 0
     }
 
     /// Поворот, открытость и петля двери по обеим половинам, как `getActualState`.
@@ -258,6 +264,41 @@ impl Block {
         list
     }
 
+    /// Кровать: в системе, где изголовье смотрит на север; ножки — у дальнего от стыка края.
+    pub(super) fn bed_boxes(data: u8) -> BoxList {
+        let b = VoxelBox::new;
+        let leg = BED_LEG_UNITS;
+        let outer = if bed::is_head(data) { 0 } else { 16 - leg };
+        let mut list = BoxList::of(&[b([0, leg, 0], [16, BED_UNITS, 16])]);
+        for x in [0, 16 - leg] {
+            list.push(b([x, 0, outer], [x + leg, leg, outer + leg]));
+        }
+        let turns = data & bed::FACING_MASK;
+        list.map(|b| b.turned(turns))
+    }
+
+    pub(super) fn trapdoor_boxes(data: u8) -> BoxList {
+        let panel = if data & TRAPDOOR_OPEN != 0 {
+            VoxelBox::new([0, 0, 16 - TRAPDOOR_UNITS], [16, 16, 16])
+                .turned(data & TRAPDOOR_FACING_MASK)
+        } else if data & TRAPDOOR_TOP != 0 {
+            VoxelBox::new([0, 16 - TRAPDOOR_UNITS, 0], [16, 16, 16])
+        } else {
+            VoxelBox::new([0, 0, 0], [16, TRAPDOOR_UNITS, 16])
+        };
+        BoxList::of(&[panel])
+    }
+
+    pub(super) fn brewing_stand_boxes() -> BoxList {
+        let b = VoxelBox::new;
+        BoxList::of(&[
+            b([7, 0, 7], [9, 14, 9]),
+            b([9, 0, 5], [15, 2, 11]),
+            b([2, 0, 1], [8, 2, 7]),
+            b([2, 0, 9], [8, 2, 15]),
+        ])
+    }
+
     pub(super) fn cauldron_boxes() -> BoxList {
         let b = VoxelBox::new;
         BoxList::of(&[
@@ -303,6 +344,16 @@ impl Block {
                 _ => Tile::CauldronSide,
             }),
             Block::FlowerPot if facing == Facing::Top => Some(Tile::Dirt),
+            Block::Bed => Some(match (box_index, facing) {
+                (0, Facing::Top) => Tile::bed(bed::color_of(data), bed::is_head(data), true),
+                (0, Facing::Side) => Tile::bed(bed::color_of(data), bed::is_head(data), false),
+                _ => Tile::PlanksOak,
+            }),
+            Block::BrewingStand => Some(if box_index == 0 {
+                Tile::BrewingStand
+            } else {
+                Tile::BrewingStandBase
+            }),
             _ => self.face_tile(facing, normal, data),
         }
     }
@@ -324,6 +375,7 @@ impl Block {
         match self.box_kind() {
             BoxKind::Fence => self.fence_boxes(&around, true),
             BoxKind::Gate => self.gate_boxes(data, true),
+            BoxKind::Bed => BoxList::of(&[VoxelBox::new([0, 0, 0], [16, BED_UNITS, 16])]),
             _ => self.boxes(data, around),
         }
     }

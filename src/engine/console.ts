@@ -37,6 +37,10 @@ function log(text: string, ok: boolean, suggest?: string) {
   nextId += text.split('\n').length
 }
 
+export function postMessage(text: string) {
+  log(text, true)
+}
+
 export function submitCommand(line: string) {
   commandHistory.push(line)
   if (!host) return

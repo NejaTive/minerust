@@ -111,6 +111,17 @@ impl Quad {
         quad
     }
 
+    /// Поворот текстуры коробочной грани на `turns` четвертей по часовой стрелке сверху; в записи `w2` биты 28–29.
+    pub fn with_turn(mut self, turns: u8) -> Self {
+        debug_assert!(self.is_boxed() && turns < 4);
+        self.0[2] |= u32::from(turns) << 28;
+        self
+    }
+
+    pub fn turn(self) -> u8 {
+        (self.0[2] >> 28 & 3) as u8
+    }
+
     pub fn is_boxed(self) -> bool {
         self.0[0] & BOX_FLAG != 0
     }

@@ -1,5 +1,6 @@
 use glam::IVec3;
 
+use crate::bed;
 use crate::block::{Block, CAULDRON_LEVELS, facing_code};
 use crate::chest;
 use crate::column::{Column, WORLD_HEIGHT};
@@ -87,6 +88,20 @@ impl BlockBox {
         Self::new(low, high)
     }
 
+    /// Рамка размера `size` (ширина, высота, глубина) в осях части, у которой локальная клетка (0, 0, 0)
+    /// лежит в мировой `origin`; обратна `PieceWriter::world`.
+    pub fn from_local(origin: IVec3, size: IVec3, facing: Facing) -> Self {
+        let (w, h, d) = (size.x, size.y, size.z);
+        let top = h - 1;
+        let (low, high) = match facing {
+            Facing::South => (IVec3::new(0, 0, 0), IVec3::new(w - 1, top, d - 1)),
+            Facing::North => (IVec3::new(0, 0, 1 - d), IVec3::new(w - 1, top, 0)),
+            Facing::West => (IVec3::new(1 - d, 0, 0), IVec3::new(0, top, w - 1)),
+            Facing::East => (IVec3::new(0, 0, 0), IVec3::new(d - 1, top, w - 1)),
+        };
+        Self::new(origin + low, origin + high)
+    }
+
     pub fn of_column(key: ColumnPos) -> Self {
         let origin = key.origin();
         Self {
@@ -129,6 +144,9 @@ impl BlockBox {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PieceKind {
     SwampHut,
+    Igloo,
+    /// Шахта и комната под иглу: число сегментов шахты и соль выбора кирпичей.
+    IglooBasement(u8, u32),
     #[cfg(test)]
     Probe,
 }
@@ -145,6 +163,10 @@ impl Piece {
     pub fn place(&self, writer: &mut PieceWriter) {
         match self.kind {
             PieceKind::SwampHut => super::swamp_hut::place(writer),
+            PieceKind::Igloo => super::igloo::place_top(writer),
+            PieceKind::IglooBasement(segments, salt) => {
+                super::igloo::place_basement(writer, segments, salt);
+            }
             PieceKind::Probe => super::tests::draw_probe(writer),
         }
     }
@@ -153,6 +175,10 @@ impl Piece {
     pub fn place(&self, writer: &mut PieceWriter) {
         match self.kind {
             PieceKind::SwampHut => super::swamp_hut::place(writer),
+            PieceKind::Igloo => super::igloo::place_top(writer),
+            PieceKind::IglooBasement(segments, salt) => {
+                super::igloo::place_basement(writer, segments, salt);
+            }
         }
     }
 }
@@ -239,6 +265,25 @@ impl<'a> PieceWriter<'a> {
         let right = left + chest::right_of(front);
         self.set_world(left, Block::Chest, chest::data(front, chest::HALF_LEFT));
         self.set_world(right, Block::Chest, chest::data(front, chest::HALF_RIGHT));
+    }
+
+    /// Блок с поворотом `front` (направление части): ступени, лестницы, люки.
+    pub fn set_facing(&mut self, x: i32, y: i32, z: i32, block: Block, front: IVec3) {
+        let data = facing_code(self.world_dir(front));
+        self.set_with_data(x, y, z, block, data);
+    }
+
+    /// Кровать: ножная половина в `(x, y, z)`, изголовье на шаг дальше по `toward_head` (направление части).
+    pub fn bed(&mut self, x: i32, y: i32, z: i32, toward_head: IVec3, color: u8) {
+        let dir = self.world_dir(toward_head);
+        let foot = self.world(x, y, z);
+        self.set_world(foot, Block::Bed, bed::data(dir, false, color));
+        self.set_world(foot + dir, Block::Bed, bed::data(dir, true, color));
+    }
+
+    /// Закрытый люк в нижней половине клетки; `front` — направление части, в которую смотрит люк.
+    pub fn trapdoor(&mut self, x: i32, y: i32, z: i32, front: IVec3) {
+        self.set_facing(x, y, z, Block::OakTrapdoor, front);
     }
 
     pub fn furnace(&mut self, x: i32, y: i32, z: i32, front: IVec3, lit: bool) {
