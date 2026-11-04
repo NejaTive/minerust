@@ -59,6 +59,23 @@ impl Column {
         self.set_with_data(local, block, 0);
     }
 
+    /// Заменяет камень на `block` в столбике `(x, z)` на высотах `y_low..=y_high` (границы уже внутри колонки).
+    pub(crate) fn replace_stone_run(
+        &mut self,
+        at: (i32, i32),
+        (y_low, y_high): (i32, i32),
+        block: Block,
+    ) {
+        for sy in y_low / SECTION_SIZE..=y_high / SECTION_SIZE {
+            let base = sy * SECTION_SIZE;
+            self.sections[sy as usize].replace_stone_run(
+                at,
+                ((y_low - base).max(0), (y_high - base).min(SECTION_SIZE - 1)),
+                block,
+            );
+        }
+    }
+
     pub fn set_with_data(&mut self, local: IVec3, block: Block, data: u8) {
         let (sy, in_section) = Self::split(local);
         self.sections[sy].set_with_data(in_section, block, data);

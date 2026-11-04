@@ -100,6 +100,30 @@ impl Section {
         *slot = block;
     }
 
+    /// Заменяет каменные блоки столбика `(x, z)` на `block` в слоях `y_low..=y_high` секции.
+    pub(crate) fn replace_stone_run(
+        &mut self,
+        (x, z): (i32, i32),
+        (y_low, y_high): (i32, i32),
+        block: Block,
+    ) {
+        let step = (SECTION_SIZE * SECTION_SIZE) as usize;
+        let first = (x + SECTION_SIZE * z) as usize;
+        let mut replaced = 0u16;
+        for y in y_low as usize..=y_high as usize {
+            let index = first + step * y;
+            if self.blocks[index].is_stone() {
+                self.blocks[index] = block;
+                if let Some(bytes) = &mut self.data {
+                    bytes[index] = 0;
+                }
+                replaced += 1;
+            }
+        }
+        self.emitters += u16::from(block.emission() > 0) * replaced;
+        self.tickable += u16::from(block.random_ticks()) * replaced;
+    }
+
     fn index(local: IVec3) -> usize {
         assert!(
             Self::contains(local),

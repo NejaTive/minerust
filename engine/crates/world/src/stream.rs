@@ -12,6 +12,15 @@ impl Stream {
         (splitmix64(self.0) >> 32) as u32 % bound
     }
 
+    pub fn skip(&mut self) {
+        self.0 = self.0.wrapping_add(1);
+    }
+
+    pub fn fork(&mut self) -> Stream {
+        let high = u64::from(self.below(u32::MAX));
+        Stream::new(high << 32 | u64::from(self.below(u32::MAX)))
+    }
+
     pub fn taper(&mut self) -> u32 {
         let bound = self.below(3) + 1;
         self.below(bound)

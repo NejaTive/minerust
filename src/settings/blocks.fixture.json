@@ -79,5 +79,15 @@
   { "name": "orange_tulip", "label": "оранжевый тюльпан", "placeable": true },
   { "name": "white_tulip", "label": "белый тюльпан", "placeable": true },
   { "name": "pink_tulip", "label": "розовый тюльпан", "placeable": true },
-  { "name": "pumpkin", "label": "тыква", "placeable": true }
+  { "name": "pumpkin", "label": "тыква", "placeable": true },
+  { "name": "granite", "label": "гранит", "placeable": true },
+  { "name": "diorite", "label": "диорит", "placeable": true },
+  { "name": "andesite", "label": "андезит", "placeable": true },
+  { "name": "coal_ore", "label": "угольная руда", "placeable": true },
+  { "name": "iron_ore", "label": "железная руда", "placeable": true },
+  { "name": "gold_ore", "label": "золотая руда", "placeable": true },
+  { "name": "redstone_ore", "label": "редстоуновая руда", "placeable": true },
+  { "name": "diamond_ore", "label": "алмазная руда", "placeable": true },
+  { "name": "lapis_ore", "label": "лазуритовая руда", "placeable": true },
+  { "name": "emerald_ore", "label": "изумрудная руда", "placeable": true }
 ]

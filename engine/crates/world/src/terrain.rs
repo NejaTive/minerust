@@ -254,6 +254,7 @@ impl Terrain {
         }
         let mut column = self.generate_carved(key);
         self.grow_lakes(key, &mut column);
+        self.grow_ores(key, &mut column);
         trees::plant_where(self, key, &mut column, |tree| {
             !self.lake_covers(tree.base.x, tree.base.z)
         });

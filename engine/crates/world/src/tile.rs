@@ -107,10 +107,20 @@ pub enum Tile {
     PumpkinSide,
     PumpkinTop,
     PumpkinFace,
+    StoneGranite,
+    StoneDiorite,
+    StoneAndesite,
+    CoalOre,
+    IronOre,
+    GoldOre,
+    RedstoneOre,
+    DiamondOre,
+    LapisOre,
+    EmeraldOre,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 100] = [
+    pub const ALL: [Tile; 110] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -211,6 +221,16 @@ impl Tile {
         Tile::PumpkinSide,
         Tile::PumpkinTop,
         Tile::PumpkinFace,
+        Tile::StoneGranite,
+        Tile::StoneDiorite,
+        Tile::StoneAndesite,
+        Tile::CoalOre,
+        Tile::IronOre,
+        Tile::GoldOre,
+        Tile::RedstoneOre,
+        Tile::DiamondOre,
+        Tile::LapisOre,
+        Tile::EmeraldOre,
     ];
 
     pub fn sway(self) -> f32 {
