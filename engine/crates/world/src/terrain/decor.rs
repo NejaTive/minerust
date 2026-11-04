@@ -29,9 +29,6 @@ const BROWN_MUSHROOM_ONE_IN: u32 = 4;
 const RED_MUSHROOM_ONE_IN: u32 = 8;
 const SHADE_REACH: i32 = 8;
 const SHADE_BLOCKS: i32 = 3;
-const CLAY_RADIUS_MIN: u32 = 2;
-const CLAY_RADIUS_SPAN: u32 = 2;
-const CLAY_DEPTH: i32 = 2;
 const CENTER: i32 = 8;
 const DOUBLE_TRIES: u32 = 64;
 const DOUBLE_SPREAD: u32 = 8;
@@ -302,8 +299,7 @@ impl Terrain {
                 self.grow_mushrooms(&mut rng, column, &climate, block, start);
             }
         }
-        let spot = pick(&mut rng);
-        self.grow_clay(&mut rng, column, &climate, &spot);
+        self.grow_disks(key, column);
         self.decorate_cold_and_flowers(&mut rng, column, &climate, &counts, key);
     }
 
@@ -598,34 +594,6 @@ impl Terrain {
         }
     }
 
-    fn grow_clay(
-        &self,
-        rng: &mut Stream,
-        column: &mut Column,
-        climate: &ColumnClimate,
-        spot: &Spot,
-    ) {
-        let floor = climate.surface[ColumnClimate::index(spot.x, spot.z)];
-        let center = IVec3::new(spot.x, floor + 1, spot.z);
-        if floor >= WATER_LEVEL || column.get(center) != Block::Water {
-            return;
-        }
-        let radius = (rng.below(CLAY_RADIUS_SPAN) + CLAY_RADIUS_MIN) as i32;
-        for dz in -radius..=radius {
-            for dx in -radius..=radius {
-                if dx * dx + dz * dz > radius * radius {
-                    continue;
-                }
-                for y in center.y - CLAY_DEPTH..=center.y + CLAY_DEPTH {
-                    let at = IVec3::new(center.x + dx, y, center.z + dz);
-                    if Column::contains(at) && column.get(at) == Block::Dirt {
-                        column.set(at, Block::Clay);
-                    }
-                }
-            }
-        }
-    }
-
     fn grow_vines(&self, rng: &mut Stream, column: &mut Column, start: IVec3) {
         let mut at = start;
         while at.y < VINE_CEILING {
@@ -766,6 +734,8 @@ fn shaded(column: &Column, at: IVec3) -> bool {
         .count() as i32;
     covering >= SHADE_BLOCKS
 }
+
+mod disks;
 
 #[cfg(test)]
 mod tests;

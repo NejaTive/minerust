@@ -11,6 +11,7 @@ pub mod item;
 pub mod light;
 mod mesa;
 pub mod mob;
+mod noise;
 pub mod pack;
 mod plants;
 pub mod pos;

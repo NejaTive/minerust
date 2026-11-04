@@ -89,10 +89,15 @@ fn plants_stand_on_dry_grass_only() {
             for z in 0..16 {
                 for x in 0..16 {
                     let block = column.get([x, y, z].into());
-                    let single = !block.is_mushroom() && block.double_lower().is_none();
-                    if block.needs_support() && block != Block::Snow && single {
+                    let single = !block.is_mushroom()
+                        && block.double_lower().is_none()
+                        && block.double_upper().is_none();
+                    if block.needs_support()
+                        && !matches!(block, Block::Snow | Block::Reeds)
+                        && single
+                    {
                         assert_eq!(column.get([x, y - 1, z].into()), Block::Grass);
-                        assert!(y - 1 > WATER_LEVEL, "plant at y {y} near water");
+                        assert!(y - 1 > WATER_LEVEL, "plant {block:?} at y {y} near water");
                     }
                 }
             }

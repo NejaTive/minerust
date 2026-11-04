@@ -15,25 +15,28 @@ use crate::section::SECTION_SIZE;
 use crate::trees::hash;
 use crate::{plants, trees};
 
+use self::relief::{Relief, Solid};
+
 pub use crate::biome::Biome;
 
-const DIRT_DEPTH: i32 = 3;
 pub const WATER_LEVEL: i32 = 62;
-const GRAVEL_DEPTH: i32 = 2;
-const SEA_BASE: f32 = 63.0;
-const HEIGHT_PER_BASE: f32 = 17.0;
-const SPREAD_AMPLITUDE: f32 = 50.0;
+const SEA_LEVEL: i32 = WATER_LEVEL + 1;
 const WINDOW_RADIUS: i32 = 2;
 const GRID: usize = 5;
 const GRID_STEP: i32 = 4;
 const COARSE_SIDE: usize = GRID + 2 * WINDOW_RADIUS as usize;
-const CLIMATE_CACHE_COLUMNS: usize = 1024;
-const MOUNTAIN_STONE_Y: i32 = 95;
-const MOUNTAIN_GRAVEL_Y: i32 = 80;
+const CLIMATE_CACHE_COLUMNS: usize = 2048;
+const FREEZE_BELOW: f32 = 0.15;
+const GRAVEL_BELOW_SEA: i32 = 7;
+const HILLS_STONE_ABOVE: f64 = 1.0;
+const HILLS_GRAVEL_ABOVE: f64 = 2.0;
+const HILLS_GRAVEL_BELOW: f64 = -1.0;
+const TOP_THICKNESS_BASE: f64 = 3.0;
+const TOP_THICKNESS_JITTER: f64 = 0.25;
 
 const BEDROCK_SCATTER: i32 = 3;
 const SALT_BEDROCK: u64 = 30;
-const SALT_SCREE: u64 = 31;
+const SALT_THICKNESS: u64 = 33;
 const SALT_SANDSTONE: u64 = 32;
 const SWAMP_NOISE_SALT: i32 = 2345;
 const MEGA_NOISE_SALT: i32 = 3456;
@@ -45,7 +48,7 @@ const MEGA_PODZOL_ABOVE: f32 = -0.95;
 const SWAMP_NOISE_FREQUENCY: f32 = 0.25;
 const SWAMP_LILY_BELOW: f32 = 0.12;
 const SANDSTONE_JITTER: u32 = 4;
-const SANDSTONE_BASE_Y: i32 = 63;
+const SANDSTONE_BASE_Y: i32 = SEA_LEVEL;
 pub const FLAT_SURFACE: i32 = 4;
 pub const DEBUG_GRID_Y: i32 = 70;
 pub const DEBUG_FLOOR_Y: i32 = 60;
@@ -74,6 +77,7 @@ impl WorldType {
 struct ColumnClimate {
     biomes: [Biome; 256],
     surface: [i32; 256],
+    solid: [Solid; 256],
 }
 
 impl ColumnClimate {
@@ -85,7 +89,7 @@ impl ColumnClimate {
 pub struct Terrain {
     seed: i32,
     world_type: WorldType,
-    height: FastNoiseLite,
+    relief: Relief,
     map: BiomeMap,
     mesa: Mesa,
     swamp: FastNoiseLite,
@@ -101,12 +105,6 @@ impl Terrain {
     }
 
     pub fn of(seed: i32, world_type: WorldType) -> Self {
-        let mut height = FastNoiseLite::with_seed(seed);
-        height.set_noise_type(Some(NoiseType::OpenSimplex2));
-        height.set_fractal_type(Some(FractalType::FBm));
-        height.set_fractal_octaves(Some(5));
-        height.set_frequency(Some(0.005));
-
         let mut swamp = FastNoiseLite::with_seed(seed ^ SWAMP_NOISE_SALT);
         swamp.set_noise_type(Some(NoiseType::Perlin));
         swamp.set_frequency(Some(SWAMP_NOISE_FREQUENCY));
@@ -124,7 +122,7 @@ impl Terrain {
         Self {
             seed,
             world_type,
-            height,
+            relief: Relief::new(seed),
             swamp,
             mega,
             color,
@@ -219,45 +217,31 @@ impl Terrain {
         let cell = |i: usize, j: usize| {
             Biome::from_id(coarse.data[j * COARSE_SIDE + i]).unwrap_or(Biome::Plains)
         };
-        let mut base = [[0.0f32; GRID]; GRID];
-        let mut spread = [[0.0f32; GRID]; GRID];
-        for (gz, (base_row, spread_row)) in base.iter_mut().zip(&mut spread).enumerate() {
-            for (gx, (b, v)) in base_row.iter_mut().zip(spread_row).enumerate() {
-                (*b, *v) = blended_heights(&cell, gx, gz);
-            }
-        }
         let blocks = self.map.blocks_within(x0, z0, 16, 16, &coarse);
+        let mut solid = self.relief.solid(column_x, column_z, &cell);
         let mut biomes = [Biome::Plains; 256];
         let mut surface = [0; 256];
-        let step = GRID_STEP as usize;
         for z in 0..16usize {
             for x in 0..16usize {
-                let (gx, gz) = (x / step, z / step);
-                let (fx, fz) = (
-                    (x % step) as f32 / step as f32,
-                    (z % step) as f32 / step as f32,
-                );
-                let lerp = |grid: &[[f32; GRID]; GRID]| {
-                    let top = grid[gz][gx] * (1.0 - fx) + grid[gz][gx + 1] * fx;
-                    let bottom = grid[gz + 1][gx] * (1.0 - fx) + grid[gz + 1][gx + 1] * fx;
-                    top * (1.0 - fz) + bottom * fz
-                };
-                let noise = self
-                    .height
-                    .get_noise_2d((x0 + x as i32) as f32, (z0 + z as i32) as f32);
-                let y = SEA_BASE
-                    + HEIGHT_PER_BASE * lerp(&base)
-                    + SPREAD_AMPLITUDE * lerp(&spread) * noise;
                 let index = z * 16 + x;
                 biomes[index] = blocks[index];
-                let mut height = (y.floor() as i32).clamp(1, WORLD_HEIGHT - 2);
                 if blocks[index] == Biome::MesaBryce {
-                    height = height.max(self.mesa.pillar_top(x0 + x as i32, z0 + z as i32));
+                    let pillar = self.mesa.pillar_top(x0 + x as i32, z0 + z as i32);
+                    for y in (0..=pillar.min(WORLD_HEIGHT - 1)).rev() {
+                        if solid[index].get(y) {
+                            break;
+                        }
+                        solid[index].set(y);
+                    }
                 }
-                surface[index] = height;
+                surface[index] = solid[index].highest().unwrap_or(1).max(1);
             }
         }
-        ColumnClimate { biomes, surface }
+        ColumnClimate {
+            biomes,
+            surface,
+            solid,
+        }
     }
 
     pub fn generate(&self, key: ColumnPos) -> Column {
@@ -307,92 +291,186 @@ impl Terrain {
             for x in 0..SECTION_SIZE {
                 let (wx, wz) = (origin.x + x, origin.z + z);
                 let index = ColumnClimate::index(x, z);
-                let surface = climate.surface[index];
                 let biome = climate.biomes[index];
-                let snowy = biome.is_snowy();
-                let (top, filler) = self.surface_blocks(biome, surface, wx, wz);
-                let mut mesa_layers = [Block::Stone; LAYER_SPAN];
-                let mesa = biome.is_mesa() && surface >= WATER_LEVEL - 1;
-                if mesa {
-                    self.mesa.layers(biome, surface, wx, wz, &mut mesa_layers);
-                }
-                let sandstone = if filler == Block::Sand {
-                    (hash(self.seed, wx, wz, SALT_SANDSTONE) % SANDSTONE_JITTER) as i32
-                        + (surface - SANDSTONE_BASE_Y).max(0)
-                } else {
-                    0
-                };
-                for y in 0..=surface {
-                    if self.is_bedrock(wx, y, wz) {
-                        column.set(IVec3::new(x, y, z), Block::Bedrock);
-                        continue;
-                    }
-                    let depth = surface - y;
-                    let block = match depth {
-                        _ if mesa => mesa_layers
-                            .get(depth as usize)
-                            .copied()
-                            .unwrap_or(Block::Stone),
-                        0 => top,
-                        d if d <= DIRT_DEPTH => filler,
-                        d if d <= DIRT_DEPTH + sandstone => Block::Sandstone,
-                        _ => Block::Stone,
-                    };
-                    column.set(IVec3::new(x, y, z), block);
-                }
-                for y in surface + 1..=WATER_LEVEL {
-                    let water = if snowy && y == WATER_LEVEL {
-                        Block::Ice
-                    } else {
+                let mut blocks: [Block; WORLD_HEIGHT as usize] = std::array::from_fn(|y| {
+                    if climate.solid[index].get(y as i32) {
+                        Block::Stone
+                    } else if y as i32 <= WATER_LEVEL {
                         Block::Water
-                    };
-                    column.set(IVec3::new(x, y, z), water);
-                }
-                if biome.is_swamp() && surface == WATER_LEVEL {
+                    } else {
+                        Block::Air
+                    }
+                });
+                if biome.is_swamp() && climate.surface[index] == WATER_LEVEL {
                     let noise = self.swamp_noise(wx, wz);
                     if noise > 0.0 {
-                        column.set(IVec3::new(x, surface, z), Block::Water);
+                        blocks[WATER_LEVEL as usize] = Block::Water;
                         if noise < SWAMP_LILY_BELOW {
-                            column.set(IVec3::new(x, surface + 1, z), Block::Waterlily);
+                            blocks[WATER_LEVEL as usize + 1] = Block::Waterlily;
                         }
                     }
                 }
-                let ground = column.get(IVec3::new(x, surface, z));
-                let snow_bound = ground == Block::SnowyGrass
-                    || (snowy && surface >= WATER_LEVEL && ground.is_sand());
-                if snow_bound {
-                    column.set(IVec3::new(x, surface + 1, z), Block::Snow);
-                }
+                self.paint_column(&mut blocks, biome, wx, wz);
+                self.freeze_top(&mut blocks, biome, wx, wz);
+                let top = blocks
+                    .iter()
+                    .rposition(|&b| b != Block::Air)
+                    .map_or(0, |y| y + 1);
+                column.set_stack(x, z, &blocks[..top]);
             }
         }
         column
     }
 
-    fn surface_blocks(&self, biome: Biome, surface: i32, x: i32, z: i32) -> (Block, Block) {
-        let blocks = biome.surface_blocks();
-        let depth = WATER_LEVEL - surface;
-        if depth > GRAVEL_DEPTH {
-            return (Block::Gravel, blocks.filler);
+    fn temperature(&self, biome: Biome, x: i32, y: i32, z: i32) -> f32 {
+        self.relief.temperature(biome, x, y, z)
+    }
+
+    /// Порт `Biome.generateBiomeTerrain`: слои сверху вниз, после каждого воздушного промежутка заново.
+    fn paint_column(
+        &self,
+        blocks: &mut [Block; WORLD_HEIGHT as usize],
+        biome: Biome,
+        x: i32,
+        z: i32,
+    ) {
+        let noise = self.relief.surface_noise(x, z);
+        if biome.is_mesa() {
+            self.paint_mesa(blocks, biome, x, z);
+        } else {
+            self.paint_layers(blocks, biome, x, z, noise);
         }
-        if depth > 0 {
-            let shallow = if biome.is_ocean() || biome.is_river() {
-                Block::Sand
-            } else if matches!(blocks.top, Block::Grass | Block::Mycelium) {
-                Block::Dirt
-            } else {
-                blocks.top
-            };
-            return (shallow, blocks.filler);
-        }
-        if biome.is_extreme_hills() {
-            if surface > MOUNTAIN_STONE_Y {
-                return (Block::Stone, Block::Stone);
+        for y in 0..=BEDROCK_SCATTER {
+            if self.is_bedrock(x, y, z) {
+                blocks[y as usize] = Block::Bedrock;
             }
-            let scree = biome.is_mutation()
-                && surface > MOUNTAIN_GRAVEL_Y
-                && hash(self.seed, x, z, SALT_SCREE).is_multiple_of(4);
-            if scree {
-                return (Block::Gravel, Block::Stone);
+        }
+    }
+
+    fn paint_mesa(
+        &self,
+        blocks: &mut [Block; WORLD_HEIGHT as usize],
+        biome: Biome,
+        x: i32,
+        z: i32,
+    ) {
+        let mut y = WORLD_HEIGHT - 1;
+        while y >= 0 {
+            if blocks[y as usize] != Block::Stone {
+                y -= 1;
+                continue;
+            }
+            let mut layers = [Block::Stone; LAYER_SPAN];
+            self.mesa.layers(biome, y, x, z, &mut layers);
+            let mut depth = 0;
+            while y >= 0 && blocks[y as usize] == Block::Stone {
+                if let Some(&layer) = layers.get(depth) {
+                    blocks[y as usize] = layer;
+                }
+                depth += 1;
+                y -= 1;
+            }
+        }
+    }
+
+    fn paint_layers(
+        &self,
+        blocks: &mut [Block; WORLD_HEIGHT as usize],
+        biome: Biome,
+        x: i32,
+        z: i32,
+        noise: f64,
+    ) {
+        let base = self.surface_blocks(biome, x, z, noise);
+        let (mut top, mut filler) = (base.0, base.1);
+        let jitter = f64::from(hash(self.seed, x, z, SALT_THICKNESS)) / f64::from(u32::MAX);
+        let thickness = (noise / 3.0 + TOP_THICKNESS_BASE + jitter * TOP_THICKNESS_JITTER) as i32;
+        let mut left = -1;
+        let top_y = blocks
+            .iter()
+            .rposition(|&b| b != Block::Air)
+            .map_or(0, |y| y as i32);
+        for y in (0..=top_y).rev() {
+            match blocks[y as usize] {
+                Block::Air => left = -1,
+                Block::Stone if left == -1 => {
+                    if thickness <= 0 {
+                        (top, filler) = (Block::Air, Block::Stone);
+                    } else if (SEA_LEVEL - 4..=SEA_LEVEL + 1).contains(&y) {
+                        (top, filler) = base;
+                    }
+                    if y < SEA_LEVEL && top == Block::Air {
+                        top = if self.temperature(biome, x, y, z) < FREEZE_BELOW {
+                            Block::Ice
+                        } else {
+                            Block::Water
+                        };
+                    }
+                    left = thickness;
+                    if y >= SEA_LEVEL - 1 {
+                        if top != Block::Air {
+                            blocks[y as usize] = top;
+                        }
+                    } else if y < SEA_LEVEL - GRAVEL_BELOW_SEA - thickness {
+                        (top, filler) = (Block::Air, Block::Stone);
+                        blocks[y as usize] = Block::Gravel;
+                    } else {
+                        blocks[y as usize] = filler;
+                    }
+                }
+                Block::Stone if left > 0 => {
+                    left -= 1;
+                    blocks[y as usize] = filler;
+                    if left == 0 && filler == Block::Sand && thickness > 1 {
+                        left = (hash(self.seed, x, z, SALT_SANDSTONE) % SANDSTONE_JITTER) as i32
+                            + (y - SANDSTONE_BASE_Y).max(0);
+                        filler = Block::Sandstone;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Лёд на воде и снег на верхнем блоке, где `Biome.getTemperature(pos)` ниже порога замерзания.
+    fn freeze_top(
+        &self,
+        blocks: &mut [Block; WORLD_HEIGHT as usize],
+        biome: Biome,
+        x: i32,
+        z: i32,
+    ) {
+        let Some(top) = blocks.iter().rposition(|&b| b != Block::Air) else {
+            return;
+        };
+        let y = top as i32;
+        match blocks[top] {
+            Block::Water => {
+                if y == WATER_LEVEL && self.temperature(biome, x, y, z) < FREEZE_BELOW {
+                    blocks[top] = Block::Ice;
+                }
+            }
+            Block::Ice | Block::Waterlily | Block::Lava | Block::Bedrock => {}
+            ground => {
+                if top + 1 < blocks.len() && self.temperature(biome, x, y + 1, z) < FREEZE_BELOW {
+                    blocks[top + 1] = Block::Snow;
+                    if ground == Block::Grass {
+                        blocks[top] = Block::SnowyGrass;
+                    }
+                }
+            }
+        }
+    }
+
+    fn surface_blocks(&self, biome: Biome, x: i32, z: i32, noise: f64) -> (Block, Block) {
+        let blocks = biome.surface_blocks();
+        if biome.is_extreme_hills() {
+            let extra_trees = biome == Biome::ExtremeHillsPlus;
+            if biome.is_mutation() && !(HILLS_GRAVEL_BELOW..=HILLS_GRAVEL_ABOVE).contains(&noise) {
+                return (Block::Gravel, Block::Gravel);
+            }
+            if noise > HILLS_STONE_ABOVE && !extra_trees {
+                return (Block::Stone, Block::Stone);
             }
         }
         if biome.is_mega_taiga() {
@@ -405,9 +483,6 @@ impl Terrain {
                 Block::Grass
             };
             return (top, blocks.filler);
-        }
-        if blocks.top == Block::Grass && biome.is_snowy() {
-            return (Block::SnowyGrass, blocks.filler);
         }
         (blocks.top, blocks.filler)
     }
@@ -480,28 +555,6 @@ fn debug_cell_origin(cell: usize, side: i32) -> (i32, i32) {
     (cell % side * DEBUG_STEP, cell / side * DEBUG_STEP)
 }
 
-fn blended_heights(cell: &impl Fn(usize, usize) -> Biome, gx: usize, gz: usize) -> (f32, f32) {
-    let center = cell(gx + WINDOW_RADIUS as usize, gz + WINDOW_RADIUS as usize);
-    let (mut base, mut spread, mut total) = (0.0, 0.0, 0.0);
-    for dz in -WINDOW_RADIUS..=WINDOW_RADIUS {
-        for dx in -WINDOW_RADIUS..=WINDOW_RADIUS {
-            let near = cell(
-                (gx as i32 + WINDOW_RADIUS + dx) as usize,
-                (gz as i32 + WINDOW_RADIUS + dz) as usize,
-            );
-            let distance = (dx * dx + dz * dz) as f32 + 0.2;
-            let mut weight = 10.0 / distance.sqrt() / (near.base_height() + 2.0);
-            if near.base_height() > center.base_height() {
-                weight /= 2.0;
-            }
-            base += near.base_height() * weight;
-            spread += near.height_variation() * weight;
-            total += weight;
-        }
-    }
-    (base / total, spread / total * 0.9 + 0.1)
-}
-
 pub(crate) fn smoothstep(edge0: f32, edge1: f32, v: f32) -> f32 {
     let t = ((v - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -518,6 +571,7 @@ pub fn lake_key(terrain: &Terrain) -> ColumnPos {
 }
 
 mod decor;
+mod relief;
 
 #[cfg(test)]
 mod bench;

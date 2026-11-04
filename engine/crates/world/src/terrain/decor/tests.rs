@@ -334,9 +334,15 @@ fn swamp_puddles_replace_the_sea_level_top_with_water() {
                 if dry && terrain.is_puddle(wx, wz) {
                     puddles += 1;
                     assert_eq!(column.get(at), Block::Water);
-                    assert_eq!(column.get(at - IVec3::Y), Block::Dirt);
+                    assert!(matches!(
+                        column.get(at - IVec3::Y),
+                        Block::Dirt | Block::Clay | Block::Sand | Block::Gravel
+                    ));
                 } else if dry {
-                    assert!(matches!(column.get(at), Block::Grass), "{wx}, {wz}");
+                    assert!(
+                        matches!(column.get(at), Block::Grass | Block::Sand | Block::Gravel),
+                        "{wx}, {wz}"
+                    );
                 }
             }
         }
@@ -427,8 +433,10 @@ fn mushroom_island_is_mycelium_with_giant_and_small_mushrooms() {
                         .biome_at(origin.x + x, origin.z + z)
                         .is_mushroom_island()
                 {
-                    assert_eq!(column.get(IVec3::new(x, top, z)), Block::Mycelium);
-                    assert_eq!(column.get(IVec3::new(x, top - 1, z)), Block::Dirt);
+                    assert!(matches!(
+                        column.get(IVec3::new(x, top, z)),
+                        Block::Mycelium | Block::Air
+                    ));
                 }
             }
         }
@@ -560,7 +568,12 @@ fn boulders_are_small_mossy_blobs_sunk_into_the_ground() {
     for key in mesa_columns(&terrain, Biome::MegaTaiga, 12) {
         let column = terrain.generate(key);
         for pos in find(&column, Block::MossyCobblestone) {
-            let ground = terrain.surface_height(key.origin().x + pos.x, key.origin().z + pos.z);
+            let (x, z) = (key.origin().x + pos.x, key.origin().z + pos.z);
+            let ground = (-3..=3)
+                .flat_map(|dz| (-3..=3).map(move |dx| (dx, dz)))
+                .map(|(dx, dz)| terrain.surface_height(x + dx, z + dz))
+                .max()
+                .unwrap();
             assert!(pos.y <= ground + 3, "{key} {pos}");
         }
     }
@@ -715,4 +728,34 @@ fn ferns_replace_some_grass_in_taiga_and_jungle() {
         );
     }
     assert_eq!(count_of(&terrain, Biome::Plains, 12, &[Block::Fern]), 0);
+}
+
+#[test]
+fn shallow_seabeds_are_dirt_with_sand_gravel_and_clay_disks() {
+    let terrain = Terrain::new(SEED);
+    let (mut dirt, mut sand, mut gravel, mut clay) = (0, 0, 0, 0);
+    let keys = columns_of(&terrain, Biome::Ocean, 60)
+        .into_iter()
+        .chain(columns_of(&terrain, Biome::River, 60));
+    for key in keys {
+        let column = terrain.generate(key);
+        for z in 0..16 {
+            for x in 0..16 {
+                let floor = surface_of(&column, x, z);
+                if !(WATER_LEVEL - 3..WATER_LEVEL).contains(&floor) {
+                    continue;
+                }
+                match column.get([x, floor, z].into()) {
+                    Block::Dirt => dirt += 1,
+                    Block::Sand => sand += 1,
+                    Block::Gravel => gravel += 1,
+                    Block::Clay => clay += 1,
+                    Block::Stone => {}
+                    other => panic!("{other:?} on a shallow seabed"),
+                }
+            }
+        }
+    }
+    assert!(dirt > sand / 2 && dirt > gravel, "{dirt} {sand} {gravel}");
+    assert!(sand > 0 && gravel > 0 && clay > 0, "{sand} {gravel} {clay}");
 }

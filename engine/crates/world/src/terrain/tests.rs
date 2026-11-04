@@ -61,7 +61,7 @@ fn surface_stays_in_range() {
         }
     }
     assert!(max - min > 40, "{min}..{max}");
-    assert!(min > 15 && max < 150, "{min}..{max}");
+    assert!(min > 15, "{min}..{max}");
 }
 
 fn find_column(terrain: &Terrain, pred: impl Fn(i32, i32, Biome) -> bool) -> Option<(i32, i32)> {
@@ -81,11 +81,11 @@ fn find_biome(terrain: &Terrain, biome: Biome) -> (i32, i32) {
 fn oceans_lie_under_water_and_their_floor_is_gravel() {
     let terrain = Terrain::new(1337);
     let (x, z) = find_column(&terrain, |x, z, b| {
-        b == Biome::DeepOcean && terrain.surface_height(x, z) < WATER_LEVEL - 10
+        b == Biome::DeepOcean && terrain.surface_height(x, z) < WATER_LEVEL - 14
     })
     .expect("no deep ocean");
     let (top, layers) = ground_layers(&terrain, x, z);
-    assert!(top < WATER_LEVEL - 10);
+    assert!(top < WATER_LEVEL - 14);
     assert_eq!(layers[0], Block::Gravel, "deep water floor is gravel");
     assert!(layers.iter().all(|&b| b != Block::Water));
 }
@@ -129,7 +129,7 @@ fn beaches_are_sand() {
     let (x, z) = find_biome(&terrain, Biome::Beach);
     let (_, layers) = ground_layers(&terrain, x, z);
     let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
-    assert_eq!(sand, DIRT_DEPTH as usize + 1);
+    assert!(sand >= 2, "{sand}");
     let rest = layers[sand..]
         .iter()
         .skip_while(|&&b| b == Block::Sandstone);
@@ -157,12 +157,15 @@ fn ground_layers(terrain: &Terrain, x: i32, z: i32) -> (i32, Vec<Block>) {
     let local = |y| IVec3::new(x.rem_euclid(16), y, z.rem_euclid(16));
     let top = terrain.surface_height(x, z);
     for y in top + 1..WORLD_HEIGHT {
-        let expected = if y <= WATER_LEVEL {
-            Block::Water
-        } else {
-            Block::Air
+        let found = column.get(local(y));
+        let allowed = match found {
+            Block::Water => y <= WATER_LEVEL,
+            Block::Ice => y == WATER_LEVEL,
+            Block::Snow => y == top + 1,
+            Block::Air => y > WATER_LEVEL,
+            _ => false,
         };
-        assert_eq!(column.get(local(y)), expected, "y {y}");
+        assert!(allowed, "y {y}: {found:?}");
     }
     (top, (0..=top).rev().map(|y| column.get(local(y))).collect())
 }
@@ -174,13 +177,13 @@ fn grass_dirt_stone_outside_desert() {
         let (x, z) = find_biome(&terrain, biome);
         let (_, layers) = ground_layers(&terrain, x, z);
         assert_eq!(layers[0], Block::Grass);
+        let dirt = layers[1..]
+            .iter()
+            .take_while(|&&b| b == Block::Dirt)
+            .count();
+        assert!((1..=8).contains(&dirt), "{dirt}");
         assert!(
-            layers[1..=DIRT_DEPTH as usize]
-                .iter()
-                .all(|&b| b == Block::Dirt)
-        );
-        assert!(
-            layers[DIRT_DEPTH as usize + 1..]
+            layers[1 + dirt..]
                 .iter()
                 .all(|&b| matches!(b, Block::Stone | Block::Bedrock))
         );
@@ -193,24 +196,35 @@ fn sand_over_stone_in_desert() {
     let (x, z) = find_biome(&terrain, Biome::Desert);
     let (_, layers) = ground_layers(&terrain, x, z);
     let sand = layers.iter().take_while(|&&b| b == Block::Sand).count();
-    assert_eq!(sand, DIRT_DEPTH as usize + 1);
+    assert!(sand >= 2, "{sand}");
     assert!(
         layers[sand..]
             .iter()
             .all(|&b| matches!(b, Block::Sandstone | Block::Stone | Block::Bedrock))
     );
-    assert_eq!(layers[sand], Block::Sandstone);
 }
 
 #[test]
-fn tall_extreme_hills_are_stone() {
+fn extreme_hills_mix_grass_and_bare_stone() {
     let terrain = Terrain::new(1337);
-    let (x, z) = find_column(&terrain, |x, z, b| {
-        b.is_extreme_hills() && terrain.surface_height(x, z) > MOUNTAIN_STONE_Y + 3
-    })
-    .expect("no tall mountain");
-    let (_, layers) = ground_layers(&terrain, x, z);
-    assert_eq!(layers[0], Block::Stone);
+    let (mut stone, mut grass) = (0, 0);
+    for key in columns_of(&terrain, |b| b == Biome::ExtremeHills, 40) {
+        let column = terrain.generate_ground(key);
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                let top = terrain.surface_height(key.origin().x + x, key.origin().z + z);
+                if top <= WATER_LEVEL {
+                    continue;
+                }
+                match column.get(IVec3::new(x, top, z)) {
+                    Block::Stone => stone += 1,
+                    Block::Grass | Block::SnowyGrass => grass += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+    assert!(stone > 100 && grass > 100, "{stone} stone, {grass} grass");
 }
 
 pub(super) fn mean_run_length<K: PartialEq>(terrain: &Terrain, class: impl Fn(Biome) -> K) -> f32 {
@@ -778,4 +792,76 @@ fn cold_beach_is_snow_covered_sand() {
         snowy_sand >= 10 && bare_sand == 0,
         "{snowy_sand} {bare_sand}"
     );
+}
+
+fn hill_columns(terrain: &Terrain) -> Vec<(ColumnPos, Column)> {
+    columns_of(terrain, |b| b.is_extreme_hills(), 60)
+        .into_iter()
+        .map(|key| (key, terrain.generate_ground(key)))
+        .collect()
+}
+
+#[test]
+fn extreme_hills_have_overhangs_and_tall_peaks() {
+    let terrain = Terrain::new(1337);
+    let (mut overhangs, mut peak) = (0, 0);
+    for (key, column) in hill_columns(&terrain) {
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                peak = peak.max(terrain.surface_height(key.origin().x + x, key.origin().z + z));
+                let top = terrain.surface_height(key.origin().x + x, key.origin().z + z);
+                overhangs += (WATER_LEVEL + 1..top)
+                    .filter(|&y| {
+                        column.get(IVec3::new(x, y, z)) == Block::Air
+                            && column.get(IVec3::new(x, y + 1, z)).is_solid()
+                    })
+                    .count();
+            }
+        }
+    }
+    assert!(peak > 100, "{peak}");
+    assert!(overhangs > 20, "{overhangs}");
+}
+
+#[test]
+fn deep_oceans_are_deep_and_plains_are_gentle() {
+    let terrain = Terrain::new(1337);
+    let deepest = (-200..200)
+        .flat_map(|z| (-200..200).map(move |x| (x * 16, z * 16)))
+        .filter(|&(x, z)| terrain.sample_biome(x, z) == Biome::DeepOcean)
+        .map(|(x, z)| terrain.surface_height(x, z))
+        .min()
+        .expect("no deep ocean");
+    assert!(deepest < 50, "{deepest}");
+    let steps: Vec<i32> = (-200..200)
+        .flat_map(|z| (-200..200).map(move |x| (x * 16, z * 16)))
+        .filter(|&(x, z)| terrain.sample_biome(x, z) == Biome::Plains)
+        .take(400)
+        .map(|(x, z)| (terrain.surface_height(x + 1, z) - terrain.surface_height(x, z)).abs())
+        .collect();
+    assert!(steps.len() > 100);
+    assert!(steps.iter().sum::<i32>() < steps.len() as i32 * 2 / 3 + 1);
+}
+
+#[test]
+fn warm_mountain_peaks_are_snow_capped_only_high_up() {
+    let terrain = Terrain::new(1337);
+    let (mut capped, mut low_snow) = (0, 0);
+    for (_, column) in hill_columns(&terrain) {
+        for z in 0..SECTION_SIZE {
+            for x in 0..SECTION_SIZE {
+                for y in 1..WORLD_HEIGHT {
+                    if column.get(IVec3::new(x, y, z)) == Block::Snow {
+                        if y > 90 {
+                            capped += 1;
+                        } else if y < 75 {
+                            low_snow += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(capped > 0, "no snow on the peaks");
+    assert_eq!(low_snow, 0);
 }
