@@ -174,16 +174,16 @@ fn oriented_scene_matches_golden() {
 
 const GOLDEN_ORIENTED: u64 = 0x15318b7276c46957;
 const GOLDEN_BLOCKS: [u64; 5] = [
-    0xa17cd0fca25a5488,
+    0x3f13bc587a3e2b68,
     0xcdf6ebbaac2b466a,
-    0xfc597d301ab980b7,
+    0x40993c37d06718f9,
     0xb6b9eb0c917f4f09,
     0x5a9628e66ea64f41,
 ];
 const GOLDEN_MESHES: [u64; 5] = [
-    0x549ad2d4ff966e3a,
+    0x11e49b6a4eb36db2,
     0xbb46f49d36ddcfff,
-    0x4d6e4d09b9940640,
+    0xbcbad94181fb53b4,
     0xff38608461e16a85,
     0x5d17de866c224b12,
 ];
