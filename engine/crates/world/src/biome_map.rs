@@ -8,12 +8,12 @@ const ICY: i32 = 4;
 const OCEAN: i32 = Biome::Ocean as i32;
 const PLAINS: i32 = Biome::Plains as i32;
 const DESERT: i32 = Biome::Desert as i32;
+const FROZEN_OCEAN: i32 = Biome::FrozenOcean as i32;
 const EXTREME_HILLS: i32 = Biome::ExtremeHills as i32;
 const FOREST: i32 = Biome::Forest as i32;
 const TAIGA: i32 = Biome::Taiga as i32;
 const SWAMPLAND: i32 = Biome::Swampland as i32;
 const RIVER: i32 = Biome::River as i32;
-const FROZEN_OCEAN: i32 = Biome::FrozenOcean as i32;
 const FROZEN_RIVER: i32 = Biome::FrozenRiver as i32;
 const ICE_PLAINS: i32 = Biome::IcePlains as i32;
 const ICE_MOUNTAINS: i32 = Biome::IceMountains as i32;
@@ -121,7 +121,6 @@ enum Kind {
     Smooth,
     RareBiome,
     Shore,
-    FrozenOcean,
     RiverMix,
 }
 
@@ -218,8 +217,7 @@ impl BiomeMap {
         let river = b.add(Kind::River, 1, river_wide);
         let river_smooth = b.add(Kind::Smooth, 1000, river);
 
-        let mut l = b.add(Kind::FrozenOcean, 1, hills);
-        l = b.add(Kind::RareBiome, 1001, l);
+        let mut l = b.add(Kind::RareBiome, 1001, hills);
         for j in 0..4 {
             l = b.add(Kind::Zoom { fuzzy: false }, 1000 + j, l);
             if j == 0 {
@@ -603,16 +601,6 @@ fn cell(kind: Kind, a: &Around, rng: &mut Rng) -> i32 {
             }
         }
         Kind::Shore => shore(a),
-        Kind::FrozenOcean => {
-            let snowy = |v: i32| {
-                Biome::from_id(v).is_some_and(|b| b.is_snowy() && !b.is_ocean() && !b.is_river())
-            };
-            if c == OCEAN && (a.sides().into_iter().chain(a.corners()).any(snowy)) {
-                FROZEN_OCEAN
-            } else {
-                c
-            }
-        }
         Kind::Island | Kind::Zoom { .. } | Kind::RiverInit | Kind::Hills | Kind::RiverMix => c,
     }
 }

@@ -151,3 +151,12 @@ fn mesa_jungle_and_mega_taiga_are_found_across_seeds() {
         assert!(count * 300 > total, "{name} {count} of {total}");
     }
 }
+
+#[test]
+fn frozen_ocean_is_not_generated() {
+    for seed in [1337, 7, 99] {
+        let map = BiomeMap::new(seed);
+        let seen = sampled(&map, 300, 30);
+        assert!(!seen.contains(&Biome::FrozenOcean), "{seed}");
+    }
+}

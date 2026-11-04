@@ -463,10 +463,10 @@ fn bedrock_scatter_thins_out_upwards() {
             .count();
         hits as f32 / (columns.len() * 256) as f32
     };
-    for (y, expected) in [(1, 0.75), (2, 0.5), (3, 0.25)] {
+    for (y, expected) in [(1, 0.8), (2, 0.6), (3, 0.4), (4, 0.2)] {
         assert!((share(y) - expected).abs() < 0.07, "y={y}: {}", share(y));
     }
-    assert_eq!(share(4), 0.0);
+    assert_eq!(share(5), 0.0);
 }
 
 #[test]
@@ -474,7 +474,7 @@ fn caves_and_lava_leave_bedrock_alone() {
     let terrain = Terrain::new(7);
     let ground = terrain.generate_ground(ColumnPos::new(2, 2));
     let carved = terrain.generate(ColumnPos::new(2, 2));
-    for y in 0..=3 {
+    for y in 0..=4 {
         for z in 0..16 {
             for x in 0..16 {
                 let at = IVec3::new(x, y, z);
@@ -575,11 +575,7 @@ fn snowy_water_is_capped_with_ice() {
     let terrain = Terrain::new(SNOW_SEED);
     let mut frozen = 0;
     let mut deep = 0;
-    for key in columns_of(
-        &terrain,
-        |b| matches!(b, Biome::FrozenOcean | Biome::FrozenRiver),
-        30,
-    ) {
+    for key in columns_of(&terrain, Biome::is_snowy, 400) {
         let column = terrain.generate_ground(key);
         for lz in 0..SECTION_SIZE {
             for lx in 0..SECTION_SIZE {

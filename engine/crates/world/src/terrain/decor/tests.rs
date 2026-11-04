@@ -1103,3 +1103,148 @@ fn mesa_has_extra_gold_high_up() {
         .max();
     assert!(high.is_some_and(|y| y >= 40), "{high:?}");
 }
+
+#[test]
+fn generated_cocoa_hangs_on_jungle_logs() {
+    let terrain = Terrain::new(SEED);
+    let (mut stages, mut checked) = ([0; 3], 0);
+    for key in mesa_columns(&terrain, Biome::Jungle, 60) {
+        let column = terrain.generate(key);
+        for at in find(&column, Block::Cocoa) {
+            let data = column.get_data(at);
+            stages[usize::from(data >> crate::block::COCOA_STAGE_SHIFT)] += 1;
+            let behind = at + Block::Cocoa.support_dir(data).unwrap();
+            if Column::contains(behind) {
+                assert_eq!(column.get(behind), Block::JungleLog, "{key} {at}");
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0, "{stages:?}");
+}
+
+#[test]
+fn ice_spikes_ground_is_snow_block_over_dirt() {
+    let terrain = Terrain::new(SEED);
+    let mut checked = 0;
+    for key in mesa_columns(&terrain, Biome::IceSpikes, 6) {
+        let ground = terrain.generate_ground(key);
+        for (x, z) in [(2, 3), (9, 9), (14, 5)] {
+            let (wx, wz) = (key.origin().x + x, key.origin().z + z);
+            let surface = terrain.surface_height(wx, wz);
+            if surface < WATER_LEVEL || terrain.biome_at(wx, wz) != Biome::IceSpikes {
+                continue;
+            }
+            checked += 1;
+            assert_eq!(
+                ground.get(IVec3::new(x, surface, z)),
+                Block::SnowBlock,
+                "{key}"
+            );
+            assert_eq!(
+                ground.get(IVec3::new(x, surface - 1, z)),
+                Block::Dirt,
+                "{key}"
+            );
+        }
+    }
+    assert!(checked > 10, "{checked}");
+}
+
+#[test]
+fn monster_eggs_hide_in_extreme_hills_stone_below_the_sky() {
+    let terrain = Terrain::new(SEED);
+    for key in columns_of(&terrain, Biome::Plains, 30) {
+        assert!(find(&terrain.generate(key), Block::MonsterEgg).is_empty());
+    }
+    let mut total = 0;
+    for biome in [Biome::ExtremeHills, Biome::ExtremeHillsPlus] {
+        for key in columns_of(&terrain, biome, 20) {
+            for p in find(&terrain.generate(key), Block::MonsterEgg) {
+                total += 1;
+                assert!(p.y <= 64, "{key} {p}");
+            }
+        }
+    }
+    assert!(total > 200, "{total} egg blocks");
+}
+
+fn fossil_sources(terrain: &Terrain) -> Vec<(i32, i32, fossils::FossilBlocks)> {
+    (-150..150)
+        .flat_map(|z| (-150..150).map(move |x| (x, z)))
+        .filter_map(|(x, z)| {
+            let cells = terrain.fossil(x, z);
+            (!cells.is_empty()).then_some((x, z, cells))
+        })
+        .collect()
+}
+
+#[test]
+fn fossils_appear_only_in_deserts_and_swamps_deep_underground() {
+    let terrain = Terrain::new(SEED);
+    let fossils = fossil_sources(&terrain);
+    assert!(fossils.len() > 3, "{} fossils", fossils.len());
+    let mut desert = 0;
+    for (sx, sz, cells) in &fossils {
+        let biome = terrain.sample_biome(sx * 16 + 8, sz * 16 + 8);
+        desert += usize::from(biome.is_desert());
+        assert!(biome.is_desert() || biome.is_swamp(), "{biome:?}");
+        let top = cells.iter().map(|(at, ..)| at.y).max().unwrap();
+        let lowest_ground = cells
+            .iter()
+            .map(|(at, ..)| terrain.surface_height(at.x, at.z))
+            .min()
+            .unwrap();
+        assert!(
+            top + 3 <= lowest_ground,
+            "top {top}, ground {lowest_ground}"
+        );
+        assert!(cells.iter().all(|(at, ..)| at.y >= 10 - 1));
+        assert!(
+            cells
+                .iter()
+                .all(|(_, block, _)| matches!(block, Block::BoneBlock | Block::CoalOre))
+        );
+    }
+    assert!(desert > 0, "no desert fossil");
+}
+
+#[test]
+fn fossils_are_mostly_bone_with_some_coal_and_gaps() {
+    let terrain = Terrain::new(SEED);
+    let (mut bone, mut coal) = (0, 0);
+    for (_, _, cells) in fossil_sources(&terrain) {
+        for (_, block, _) in cells {
+            bone += usize::from(block == Block::BoneBlock);
+            coal += usize::from(block == Block::CoalOre);
+        }
+    }
+    assert!(coal > 0 && bone > coal * 4, "{bone} bone, {coal} coal");
+}
+
+#[test]
+fn fossils_cross_column_borders_without_seams() {
+    let terrain = Terrain::new(SEED);
+    let (mut crossing, mut matched, mut total) = (0, 0, 0);
+    for (.., cells) in fossil_sources(&terrain).into_iter().take(12) {
+        let owners: std::collections::HashSet<(i32, i32)> = cells
+            .iter()
+            .map(|(at, ..)| (at.x >> 4, at.z >> 4))
+            .collect();
+        crossing += usize::from(owners.len() > 1);
+        for (cx, cz) in owners {
+            let key = ColumnPos::new(cx, cz);
+            let column = terrain.generate(key);
+            for (at, block, _) in cells
+                .iter()
+                .filter(|(at, ..)| (at.x >> 4, at.z >> 4) == (cx, cz))
+            {
+                let local = *at - IVec3::new(key.origin().x, 0, key.origin().z);
+                total += 1;
+                matched += usize::from(column.get(local) == *block);
+            }
+        }
+    }
+    assert!(crossing > 0, "no fossil crosses a border");
+    assert!(matched * 100 >= total * 98, "{matched} of {total}");
+}

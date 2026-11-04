@@ -89,5 +89,9 @@
   { "name": "redstone_ore", "label": "редстоуновая руда", "placeable": true },
   { "name": "diamond_ore", "label": "алмазная руда", "placeable": true },
   { "name": "lapis_ore", "label": "лазуритовая руда", "placeable": true },
-  { "name": "emerald_ore", "label": "изумрудная руда", "placeable": true }
+  { "name": "emerald_ore", "label": "изумрудная руда", "placeable": true },
+  { "name": "cocoa", "label": "какао-бобы", "placeable": true },
+  { "name": "snow_block", "label": "снежный блок", "placeable": true },
+  { "name": "monster_egg", "label": "яйцо чешуйницы", "placeable": true },
+  { "name": "bone_block", "label": "костяной блок", "placeable": true }
 ]

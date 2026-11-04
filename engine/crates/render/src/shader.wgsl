@@ -128,7 +128,7 @@ struct TileAnim {
     tint: vec4<f32>,
 };
 @group(0) @binding(3)
-var<uniform> animation: array<TileAnim, 110>;
+var<uniform> animation: array<TileAnim, 115>;
 
 // Цвет травы (верхняя половина) и листвы (нижняя, на BIOME_MAP_SIZE ниже) на блок, тор
 // BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
@@ -180,7 +180,7 @@ struct Shape {
     shade: vec4<f32>,
 };
 struct ShapeTable {
-    shapes: array<Shape, 83>,
+    shapes: array<Shape, 215>,
     ao: vec4<f32>,
 };
 @group(1) @binding(1)
@@ -246,7 +246,7 @@ fn block_vertex(in: VertexIn) -> VertexOut {
     let w2 = quads[at + 2u];
     let flip = (w0 >> 17u) & 1u;
     let corner = ((in.vertex % 4u) + flip) & 3u;
-    let shape = ((w0 >> 12u) & 0x1Fu) | (((w0 >> 26u) & 3u) << 5u);
+    let shape = ((w0 >> 12u) & 0x1Fu) | (((w0 >> 26u) & 7u) << 5u);
     let packed = table.shapes[shape].corners[corner];
     let cell = vec3<f32>(f32(w0 & 0xFu), f32((w0 >> 4u) & 0xFu), f32((w0 >> 8u) & 0xFu));
     var offset = vec3<f32>(

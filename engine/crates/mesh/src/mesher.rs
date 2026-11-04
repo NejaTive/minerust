@@ -2,14 +2,14 @@ use glam::IVec3;
 
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
-    AO_BRIGHTNESS, CACTUS, CROSS, CUBE_FACE, FACES, Face, LILY, LOG_BARK_X, LOG_BARK_Z, SNOW_SIDE,
-    SNOW_TOP, SUNFLOWER_HEAD, TORCH_SIDE, TORCH_TOP, TORCH_WALL, TORCH_WALL_PARTS, VINE,
-    WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP,
-    WATER_TOP_SLOPED,
+    AO_BRIGHTNESS, CACTUS, COCOA, COCOA_PARTS, CROSS, CUBE_FACE, FACES, Face, LILY, LOG_BARK_X,
+    LOG_BARK_Z, SNOW_SIDE, SNOW_TOP, SUNFLOWER_HEAD, TORCH_SIDE, TORCH_TOP, TORCH_WALL,
+    TORCH_WALL_PARTS, VINE, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SIDE_SLOPED,
+    WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
 use world::block::{
-    ATTACH_NEG_Z, ATTACH_POS_X, Block, Facing, FluidKind, RenderLayer, Shape, VINE_SIDES,
-    fluid_height_units,
+    ATTACH_NEG_Z, ATTACH_POS_X, Block, COCOA_STAGE_SHIFT, COCOA_STAGES, Facing, FluidKind,
+    RenderLayer, Shape, VINE_SIDES, fluid_height_units,
 };
 use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
@@ -605,6 +605,15 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
             mesh.quads.push(quad(LILY, layer));
             mesh.quads.push(quad(LILY + 1, layer));
         }
+        Shape::Cocoa => {
+            let stage = usize::from(data >> COCOA_STAGE_SHIFT).min(COCOA_STAGES as usize - 1);
+            let layer =
+                [Tile::CocoaStage0, Tile::CocoaStage1, Tile::CocoaStage2][stage].layer() as u8;
+            let first = COCOA + data * COCOA_PARTS;
+            for t in first..first + COCOA_PARTS {
+                mesh.quads.push(quad(t, layer));
+            }
+        }
         Shape::Sunflower => {
             let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
             for t in CROSS..CROSS + 4 {
@@ -722,6 +731,8 @@ pub fn mesh_world_section(
 mod bench;
 #[cfg(test)]
 mod cactus;
+#[cfg(test)]
+mod cocoa;
 #[cfg(test)]
 mod expand;
 #[cfg(test)]

@@ -248,6 +248,11 @@ fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
         Tile::DiamondOre => ("diamond_ore", WHITE, BiomeTint::None),
         Tile::LapisOre => ("lapis_ore", WHITE, BiomeTint::None),
         Tile::EmeraldOre => ("emerald_ore", WHITE, BiomeTint::None),
+        Tile::CocoaStage0 => ("cocoa_stage_0", WHITE, BiomeTint::None),
+        Tile::CocoaStage1 => ("cocoa_stage_1", WHITE, BiomeTint::None),
+        Tile::CocoaStage2 => ("cocoa_stage_2", WHITE, BiomeTint::None),
+        Tile::BoneBlockSide => ("bone_block_side", WHITE, BiomeTint::None),
+        Tile::BoneBlockTop => ("bone_block_top", WHITE, BiomeTint::None),
     }
 }
 
@@ -525,6 +530,11 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
     "diamond_ore.png",
     "lapis_ore.png",
     "emerald_ore.png",
+    "cocoa_stage_0.png",
+    "cocoa_stage_1.png",
+    "cocoa_stage_2.png",
+    "bone_block_side.png",
+    "bone_block_top.png",
     "mushroom_block_skin_brown.png",
     "mushroom_block_skin_red.png",
     "mushroom_block_skin_stem.png",

@@ -7,6 +7,7 @@ const EMERALD_MIN_COUNT: u32 = 3;
 const EMERALD_EXTRA_COUNT: u32 = 6;
 const EMERALD_MIN_Y: u32 = 4;
 const EMERALD_Y_SPAN: u32 = 28;
+const MONSTER_EGGS: Vein = uniform(Block::MonsterEgg, 9, 7, 64);
 const MESA_GOLD: Vein = Vein::new(Block::GoldOre, 9, 20, Height::Uniform { min: 32, max: 80 });
 
 #[derive(Clone, Copy)]
@@ -98,10 +99,12 @@ impl Terrain {
                 let state = u64::from(hash(self.seed, sx, sz, SALT_ORES))
                     | u64::from(hash(self.seed, sx, sz, SALT_ORES + 1)) << 32;
                 let mut rng = Stream::new(state);
-                let mesa =
-                    self.climate(sx, sz).biomes[ColumnClimate::index(CENTER, CENTER)].is_mesa();
-                let extra = mesa.then_some(MESA_GOLD);
-                for vein in VEINS.iter().copied().chain(extra) {
+                let biome = self.climate(sx, sz).biomes[ColumnClimate::index(CENTER, CENTER)];
+                let extra = [
+                    biome.is_mesa().then_some(MESA_GOLD),
+                    biome.is_extreme_hills().then_some(MONSTER_EGGS),
+                ];
+                for vein in VEINS.iter().copied().chain(extra.into_iter().flatten()) {
                     for _ in 0..vein.count {
                         let x = sx * SECTION_SIZE + rng.below(16) as i32;
                         let y = vein.height.pick(&mut rng);
