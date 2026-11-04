@@ -425,6 +425,9 @@ impl Terrain {
         if climate.biomes[index] != Biome::IceSpikes || climate.surface[index] < WATER_LEVEL {
             return;
         }
+        if column.get(IVec3::new(spot.x, climate.surface[index], spot.z)) != Block::SnowBlock {
+            return;
+        }
         let mut base = IVec3::new(spot.x, climate.surface[index] + rng.below(4) as i32, spot.z);
         let height = rng.below(4) as i32 + SPIKE_BASE_HEIGHT;
         let radius = height / 4 + rng.below(2) as i32;
@@ -497,7 +500,11 @@ impl Terrain {
                     if Column::contains(at)
                         && matches!(
                             column.get(at),
-                            Block::Dirt | Block::Grass | Block::SnowyGrass | Block::Ice
+                            Block::Dirt
+                                | Block::Grass
+                                | Block::SnowyGrass
+                                | Block::SnowBlock
+                                | Block::Ice
                         )
                     {
                         column.set(at, Block::IcePacked);
@@ -705,6 +712,7 @@ fn freezes(block: Block) -> bool {
             | Block::Grass
             | Block::SnowyGrass
             | Block::Snow
+            | Block::SnowBlock
             | Block::Ice
             | Block::IcePacked
     )
@@ -739,6 +747,7 @@ fn shaded(column: &Column, at: IVec3) -> bool {
 }
 
 mod disks;
+mod fossils;
 pub(in crate::terrain) mod lakes;
 mod ores;
 mod pumpkins;

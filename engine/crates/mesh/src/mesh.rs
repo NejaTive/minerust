@@ -32,7 +32,7 @@ pub struct Quad([u32; 3]);
 pub const QUAD_BYTES: usize = size_of::<Quad>();
 
 const _: () = assert!(QUAD_BYTES == 12);
-const _: () = assert!(crate::templates::TEMPLATE_COUNT <= 128);
+const _: () = assert!(crate::templates::TEMPLATE_COUNT <= 256);
 
 impl Quad {
     pub fn new(
@@ -99,7 +99,7 @@ impl Quad {
     }
 
     pub fn template(self) -> u8 {
-        ((self.0[0] >> 12 & 0x1F) | (self.0[0] >> 26 & 3) << 5) as u8
+        ((self.0[0] >> 12 & 0x1F) | (self.0[0] >> 26 & 7) << 5) as u8
     }
 
     pub fn flipped(self) -> bool {

@@ -98,6 +98,10 @@ pub enum Block {
     DiamondOre,
     LapisOre,
     EmeraldOre,
+    Cocoa,
+    SnowBlock,
+    MonsterEgg,
+    BoneBlock,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -141,6 +145,7 @@ pub enum Shape {
     Vine,
     Lily,
     Sunflower,
+    Cocoa,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -151,6 +156,7 @@ pub enum DataKind {
     Fluid,
     Sides,
     Facing,
+    Cocoa,
 }
 
 pub const AXIS_Y: u8 = 0;
@@ -161,6 +167,38 @@ pub const FACING_NEG_Z: u8 = 0;
 pub const FACING_POS_X: u8 = 1;
 pub const FACING_POS_Z: u8 = 2;
 pub const FACING_NEG_X: u8 = 3;
+
+pub const COCOA_STAGES: u8 = 3;
+pub const COCOA_DIRECTION_MASK: u8 = 3;
+pub const COCOA_STAGE_SHIFT: u32 = 2;
+
+#[derive(Clone, Copy)]
+pub struct CocoaPod {
+    pub width: i32,
+    pub bottom: i32,
+    pub top: i32,
+}
+
+pub const COCOA_PODS: [CocoaPod; COCOA_STAGES as usize] = [
+    CocoaPod {
+        width: 4,
+        bottom: 7,
+        top: 12,
+    },
+    CocoaPod {
+        width: 6,
+        bottom: 5,
+        top: 12,
+    },
+    CocoaPod {
+        width: 8,
+        bottom: 2,
+        top: 11,
+    },
+];
+pub const COCOA_BACK: i32 = 15;
+pub const COCOA_STEM: (i32, i32) = (7, 9);
+pub const COCOA_STEM_DEPTH: i32 = 2;
 
 pub const ATTACH_FLOOR: u8 = 0;
 pub const ATTACH_POS_X: u8 = 1;
@@ -303,7 +341,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 91] = [
+pub const BLOCKS: [BlockDef; 95] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -660,10 +698,27 @@ pub const BLOCKS: [BlockDef; 91] = [
     BlockDef::uniform("diamond_ore", "алмазная руда", Tile::DiamondOre),
     BlockDef::uniform("lapis_ore", "лазуритовая руда", Tile::LapisOre),
     BlockDef::uniform("emerald_ore", "изумрудная руда", Tile::EmeraldOre),
+    BlockDef {
+        solid: false,
+        opaque: false,
+        needs_support: true,
+        data: DataKind::Cocoa,
+        layer: RenderLayer::Cutout,
+        shape: Shape::Cocoa,
+        ..BlockDef::uniform("cocoa", "какао-бобы", Tile::CocoaStage2)
+    },
+    BlockDef::uniform("snow_block", "снежный блок", Tile::Snow),
+    BlockDef::uniform("monster_egg", "яйцо чешуйницы", Tile::Stone),
+    BlockDef::log(
+        "bone_block",
+        "костяной блок",
+        Tile::BoneBlockSide,
+        Tile::BoneBlockTop,
+    ),
 ];
 
 impl Block {
-    pub const ALL: [Block; 91] = [
+    pub const ALL: [Block; 95] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -755,6 +810,10 @@ impl Block {
         Block::DiamondOre,
         Block::LapisOre,
         Block::EmeraldOre,
+        Block::Cocoa,
+        Block::SnowBlock,
+        Block::MonsterEgg,
+        Block::BoneBlock,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -830,6 +889,28 @@ impl Block {
                 let (a, b) = (rotate(min), rotate(max));
                 (a.min(b), a.max(b))
             }
+            Shape::Cocoa => {
+                let pod =
+                    COCOA_PODS[usize::from(data >> COCOA_STAGE_SHIFT).min(COCOA_PODS.len() - 1)];
+                let unit = 1.0 / PIXEL_GRID as f32;
+                let half = pod.width as f32 / 2.0;
+                let min = Vec3::new(
+                    8.0 - half,
+                    pod.bottom as f32,
+                    (COCOA_BACK - pod.width) as f32,
+                );
+                let max = Vec3::new(8.0 + half, pod.top as f32, COCOA_BACK as f32);
+                let turns = ((data & COCOA_DIRECTION_MASK) + 2) % 4;
+                let rotate = |p: Vec3| {
+                    let mut p = p * unit - Vec3::new(0.5, 0.0, 0.5);
+                    for _ in 0..turns {
+                        p = Vec3::new(-p.z, p.y, p.x);
+                    }
+                    p + Vec3::new(0.5, 0.0, 0.5)
+                };
+                let (a, b) = (rotate(min), rotate(max));
+                (a.min(b), a.max(b))
+            }
             Shape::Layer => (Vec3::ZERO, Vec3::new(1.0, SNOW_HEIGHT, 1.0)),
             Shape::Lily => (Vec3::ZERO, Vec3::new(1.0, LILY_HEIGHT, 1.0)),
             Shape::Cactus => (
@@ -866,6 +947,9 @@ impl Block {
         if !self.needs_support() {
             return None;
         }
+        if self.data_kind() == DataKind::Cocoa {
+            return Some(self.facing_dir(data & COCOA_DIRECTION_MASK));
+        }
         if self.data_kind() != DataKind::Attachment {
             return Some(IVec3::NEG_Y);
         }
@@ -895,6 +979,13 @@ impl Block {
                 IVec3::Z => FACING_POS_Z,
                 _ => FACING_NEG_Z,
             }),
+            DataKind::Cocoa => match normal {
+                IVec3::X => Some(FACING_NEG_X),
+                IVec3::NEG_X => Some(FACING_POS_X),
+                IVec3::Z => Some(FACING_NEG_Z),
+                IVec3::NEG_Z => Some(FACING_POS_Z),
+                _ => None,
+            },
             DataKind::Axis => Some(match normal.abs().max_position() {
                 0 => AXIS_X,
                 1 => AXIS_Y,
@@ -924,6 +1015,7 @@ impl Block {
                 ATTACH_NEG_Z,
             ],
             DataKind::Facing => &[FACING_NEG_Z, FACING_POS_X, FACING_POS_Z, FACING_NEG_X],
+            DataKind::Cocoa => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
                 FLUID_SOURCE,
@@ -1047,6 +1139,7 @@ impl Block {
                     || matches!(support, Block::Dirt | Block::Grass)
             }
             Block::Waterlily => support == Block::Water,
+            Block::Cocoa => support == Block::JungleLog,
             _ if self.double_lower().is_some() => self.double_lower() == Some(support),
             _ => support.is_solid(),
         }

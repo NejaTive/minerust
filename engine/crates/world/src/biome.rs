@@ -284,6 +284,7 @@ impl Biome {
             | Biome::Beach
             | Biome::ColdBeach => (Block::Sand, Block::Sand),
             Biome::StoneBeach => (Block::Stone, Block::Stone),
+            Biome::IceSpikes => (Block::SnowBlock, Block::Dirt),
             Biome::MushroomIsland | Biome::MushroomIslandShore => (Block::Mycelium, Block::Dirt),
             _ if self.is_mesa() => (Block::RedSand, Block::OrangeTerracotta),
             _ => (Block::Grass, Block::Dirt),

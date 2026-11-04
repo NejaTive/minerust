@@ -34,7 +34,8 @@ const HILLS_GRAVEL_BELOW: f64 = -1.0;
 const TOP_THICKNESS_BASE: f64 = 3.0;
 const TOP_THICKNESS_JITTER: f64 = 0.25;
 
-const BEDROCK_SCATTER: i32 = 3;
+const BEDROCK_SCATTER: i32 = 4;
+const BEDROCK_ODDS: u32 = 5;
 const SALT_BEDROCK: u64 = 30;
 const SALT_THICKNESS: u64 = 33;
 const SALT_SANDSTONE: u64 = 32;
@@ -255,6 +256,7 @@ impl Terrain {
         let mut column = self.generate_carved(key);
         self.grow_lakes(key, &mut column);
         self.grow_ores(key, &mut column);
+        self.grow_fossils(key, &mut column);
         trees::plant_where(self, key, &mut column, |tree| {
             !self.lake_covers(tree.base.x, tree.base.z)
         });
@@ -502,7 +504,8 @@ impl Terrain {
         match y {
             0 => true,
             1..=BEDROCK_SCATTER => {
-                hash(self.seed, x, z, SALT_BEDROCK + y as u64) % 4 < (4 - y) as u32
+                hash(self.seed, x, z, SALT_BEDROCK + y as u64) % BEDROCK_ODDS
+                    < BEDROCK_ODDS - y as u32
             }
             _ => false,
         }

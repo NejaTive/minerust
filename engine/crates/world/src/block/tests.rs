@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard())
 }
 
-const ALL: [Block; 91] = Block::ALL;
+const ALL: [Block; 95] = Block::ALL;
 
 const FLOWERS: [Block; 8] = [
     Block::Allium,
@@ -47,7 +47,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(91), Err(91));
+    assert_eq!(Block::try_from(95), Err(95));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -101,6 +101,7 @@ fn solid_and_opaque() {
                 | Block::Waterlily
                 | Block::BrownMushroom
                 | Block::RedMushroom
+                | Block::Cocoa
         ) || is_new_plant(block);
         let solid =
             !matches!(block, Block::Air | Block::Water | Block::Lava | Block::Snow) && !plant;
@@ -156,7 +157,8 @@ fn render_layers() {
             | Block::Reeds
             | Block::Waterlily
             | Block::BrownMushroom
-            | Block::RedMushroom => RenderLayer::Cutout,
+            | Block::RedMushroom
+            | Block::Cocoa => RenderLayer::Cutout,
             block if is_new_plant(block) => RenderLayer::Cutout,
             Block::Water | Block::Ice => RenderLayer::Translucent,
             _ => RenderLayer::Opaque,
@@ -309,7 +311,9 @@ fn only_log_torch_and_water_use_data() {
             | Block::SpruceLog
             | Block::JungleLog
             | Block::AcaciaLog
-            | Block::DarkOakLog => DataKind::Axis,
+            | Block::DarkOakLog
+            | Block::BoneBlock => DataKind::Axis,
+            Block::Cocoa => DataKind::Cocoa,
             Block::Vine => DataKind::Sides,
             Block::Pumpkin => DataKind::Facing,
             Block::Torch => DataKind::Attachment,
@@ -524,6 +528,7 @@ fn states_cover_every_data_kind() {
             DataKind::Fluid => usize::from(FLUID_MAX_LEVEL) + 2,
             DataKind::Sides => 5,
             DataKind::Facing => 4,
+            DataKind::Cocoa => usize::from(COCOA_STAGES) * 4,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -874,4 +879,46 @@ fn pumpkin_faces_the_side_it_was_placed_against() {
         assert_eq!(pumpkin.facing_dir(data), normal);
     }
     assert_eq!(pumpkin.placement_data(IVec3::Y), Some(FACING_NEG_Z));
+}
+
+#[test]
+fn cocoa_hangs_on_the_jungle_log_it_faces() {
+    use crate::block::{COCOA_STAGE_SHIFT, FACING_NEG_X, FACING_POS_Z};
+    let cocoa = Block::Cocoa;
+    assert!(!cocoa.is_solid() && !cocoa.is_opaque() && cocoa.needs_support());
+    assert!(cocoa.stands_on(Block::JungleLog) && !cocoa.stands_on(Block::Log));
+    assert_eq!(cocoa.placement_data(IVec3::X), Some(FACING_NEG_X));
+    assert_eq!(cocoa.placement_data(IVec3::NEG_Z), Some(FACING_POS_Z));
+    assert_eq!(cocoa.placement_data(IVec3::Y), None);
+    let data = 2 << COCOA_STAGE_SHIFT | FACING_NEG_X;
+    assert_eq!(cocoa.support_dir(data), Some(IVec3::NEG_X));
+    let (lo, hi) = cocoa.bounds(data);
+    assert_eq!((lo.x, hi.x), (1.0 / 16.0, 9.0 / 16.0));
+    assert_eq!((hi.y - lo.y) * 16.0, 9.0);
+}
+
+#[test]
+fn cocoa_pods_grow_with_the_stage() {
+    let sizes: Vec<(f32, f32)> = (0..COCOA_STAGES)
+        .map(|stage| {
+            let (lo, hi) = Block::Cocoa.bounds(stage << COCOA_STAGE_SHIFT | FACING_POS_Z);
+            ((hi.x - lo.x) * 16.0, (hi.y - lo.y) * 16.0)
+        })
+        .collect();
+    assert_eq!(sizes, [(4.0, 5.0), (6.0, 7.0), (8.0, 9.0)]);
+}
+
+#[test]
+fn snow_block_monster_egg_and_bone_block_look_like_their_sources() {
+    assert_eq!(Block::SnowBlock.tile(Facing::Top), Some(Tile::Snow));
+    assert!(Block::SnowBlock.is_opaque() && Block::SnowBlock.shape() == Shape::Cube);
+    assert_ne!(Block::SnowBlock, Block::Snow);
+    assert_eq!(Block::MonsterEgg.tile(Facing::Side), Some(Tile::Stone));
+    assert!(!Block::MonsterEgg.is_stone());
+    assert!(Block::BoneBlock.is_log());
+    assert_eq!(Block::BoneBlock.tile(Facing::Top), Some(Tile::BoneBlockTop));
+    assert_eq!(
+        Block::BoneBlock.tile(Facing::Side),
+        Some(Tile::BoneBlockSide)
+    );
 }

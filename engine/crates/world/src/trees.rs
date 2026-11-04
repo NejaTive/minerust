@@ -1,6 +1,6 @@
 use glam::IVec3;
 
-use crate::block::{AXIS_X, AXIS_Y, AXIS_Z, Block};
+use crate::block::{AXIS_X, AXIS_Y, AXIS_Z, Block, COCOA_STAGE_SHIFT, COCOA_STAGES};
 use crate::column::Column;
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
@@ -122,6 +122,11 @@ fn spacing(a: &Candidate, b: &Candidate) -> i32 {
 }
 
 const MAX_SPACING: i32 = 9;
+const COCOA_SALT: u64 = 0xc0c0a;
+const COCOA_MIN_HEIGHT: i32 = 5;
+const COCOA_TREE_ONE_IN: u32 = 5;
+const COCOA_ROWS: i32 = 2;
+const COCOA_SIDES: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Tree {
@@ -236,6 +241,31 @@ impl Tree {
             .into_iter()
             .map(|v| (v.cell, v.side, v.drop))
             .collect()
+    }
+
+    /// `WorldGenTrees.generate` для джунглей: плоды у ствола на высоте `height - 5` и `height - 4`.
+    pub fn cocoas(&self) -> Vec<(IVec3, u8)> {
+        let mut rng = Rng(u64::from(self.shape) ^ COCOA_SALT);
+        if self.kind != TreeKind::JungleTree
+            || self.height <= COCOA_MIN_HEIGHT
+            || rng.below(COCOA_TREE_ONE_IN) != 0
+        {
+            return Vec::new();
+        }
+        let mut pods = Vec::new();
+        for row in 0..COCOA_ROWS {
+            for (dx, dz) in COCOA_SIDES {
+                if rng.below((4 - row) as u32) != 0 {
+                    continue;
+                }
+                let stage = rng.below(u32::from(COCOA_STAGES)) as u8;
+                let outward = IVec3::new(-dx, 0, -dz);
+                let at = self.base + outward + IVec3::Y * (self.height - COCOA_MIN_HEIGHT + row);
+                let data = Block::Cocoa.placement_data(outward).expect("cocoa side");
+                pods.push((at, stage << COCOA_STAGE_SHIFT | data));
+            }
+        }
+        pods
     }
 
     pub fn branches(&self) -> Vec<Branch> {
@@ -650,6 +680,12 @@ pub fn plant_where(
                 }
                 column.set_with_data(local, Block::Vine, vine.side);
             }
+        }
+    }
+    for pod in trees.iter().flat_map(Tree::cocoas) {
+        let local = pod.0 - origin;
+        if Column::contains(local) && column.get(local) == Block::Air {
+            column.set_with_data(local, Block::Cocoa, pod.1);
         }
     }
     for (tree, parts) in trees.iter().zip(&built) {

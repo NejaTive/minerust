@@ -483,6 +483,14 @@ fn assert_tree_seamless(terrain: &Terrain, tree: Tree) {
         }
     }
 
+    for tree in &trees {
+        for (at, _) in tree.cocoas() {
+            if inside(at) && window[index(at)] == Block::Air {
+                window[index(at)] = Block::Cocoa;
+            }
+        }
+    }
+
     let mut compared = 0;
     for cz in -1..=1 {
         for cx in -1..=1 {
@@ -1169,4 +1177,53 @@ fn mega_pines_and_tall_birches_are_seamless_across_columns() {
     ] {
         assert_tree_seamless(&terrain, tree);
     }
+}
+
+#[test]
+fn only_tall_small_jungle_trees_carry_cocoa_against_their_trunk() {
+    let (mut with_pods, mut pods) = (0, 0);
+    for tree in jungle_trees() {
+        let found = tree.cocoas();
+        if tree.kind != TreeKind::JungleTree || tree.height <= 5 {
+            assert!(found.is_empty(), "{:?}", tree.kind);
+            continue;
+        }
+        with_pods += usize::from(!found.is_empty());
+        let logs: Vec<IVec3> = tree.logs().iter().map(|&(at, _)| at).collect();
+        let sides: Vec<_> = found
+            .iter()
+            .map(|&(at, data)| (at.x - tree.base.x, at.z - tree.base.z, data))
+            .collect();
+        assert!(sides.len() <= 8);
+        for &(at, data) in &found {
+            pods += 1;
+            let toward = Block::Cocoa.support_dir(data).unwrap();
+            assert!(logs.contains(&(at + toward)), "{at}");
+            assert!((tree.height - 5..tree.height - 3).contains(&(at.y - tree.base.y)));
+            assert!(data >> COCOA_STAGE_SHIFT < COCOA_STAGES);
+        }
+    }
+    assert!(
+        with_pods > 5 && pods > with_pods,
+        "{with_pods} trees, {pods} pods"
+    );
+    let jungle_trees = jungle_trees()
+        .iter()
+        .filter(|t| t.kind == TreeKind::JungleTree)
+        .count();
+    assert!(
+        with_pods * 10 < jungle_trees * 4,
+        "{with_pods} of {jungle_trees}"
+    );
+}
+
+#[test]
+fn cocoa_stages_are_mixed() {
+    let mut stages = [0; 3];
+    for tree in jungle_trees() {
+        for (_, data) in tree.cocoas() {
+            stages[usize::from(data >> COCOA_STAGE_SHIFT)] += 1;
+        }
+    }
+    assert!(stages.iter().all(|&n| n > 0), "{stages:?}");
 }

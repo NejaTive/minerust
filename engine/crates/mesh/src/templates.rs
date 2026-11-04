@@ -8,8 +8,8 @@ use glam::IVec3;
 
 use crate::mesh::POSITION_UNITS;
 use world::block::{
-    CACTUS_INSET_UNITS, Facing, LILY_UNITS, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT,
-    VINE_INSET_UNITS, WATER_SURFACE,
+    CACTUS_INSET_UNITS, COCOA_BACK, COCOA_PODS, COCOA_STAGES, COCOA_STEM, COCOA_STEM_DEPTH, Facing,
+    LILY_UNITS, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, VINE_INSET_UNITS, WATER_SURFACE,
 };
 use world::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW};
 
@@ -100,7 +100,9 @@ pub const CACTUS: u8 = 63;
 pub const VINE: u8 = 69;
 pub const LILY: u8 = 79;
 pub const SUNFLOWER_HEAD: u8 = 81;
-pub const TEMPLATE_COUNT: usize = 83;
+pub const COCOA: u8 = 83;
+pub const COCOA_PARTS: u8 = 11;
+pub const TEMPLATE_COUNT: usize = COCOA as usize + COCOA_STAGES as usize * 4 * COCOA_PARTS as usize;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -272,6 +274,80 @@ fn cactus_face(face: &Face) -> Template {
     template
 }
 
+const COCOA_POD_TOP_UV: [i32; COCOA_STAGES as usize] = [4, 6, 7];
+const COCOA_STEM_UV_U: [i32; COCOA_STAGES as usize] = [13, 12, 12];
+const COCOA_POD_SIDE_ROW: i32 = 4;
+const COCOA_STEM_UV_ROWS: (i32, i32) = (2, 4);
+
+fn cocoa_box(
+    face: &Face,
+    (lo, hi): ([i32; 3], [i32; 3]),
+    (u, v): ((i32, i32), (i32, i32)),
+    turns: u32,
+) -> Template {
+    let units = POSITION_UNITS;
+    let corners = std::array::from_fn(|i| {
+        let mut p: [i32; 3] = std::array::from_fn(|k| {
+            if face.corners[i][k] == 1 {
+                hi[k]
+            } else {
+                lo[k]
+            }
+        });
+        for _ in 0..turns {
+            p = [units - p[2], p[1], p[0]];
+        }
+        let [cu, cv] = CORNER_UVS[i];
+        Corner {
+            pos: p.map(|c| c as u8),
+            uv: [
+                if cu == 0 { u.0 } else { u.1 } as u8,
+                if cv == 0 { v.0 } else { v.1 } as u8,
+            ],
+        }
+    });
+    Template {
+        corners,
+        shade: face.shade,
+    }
+}
+
+fn cocoa(stage: usize, direction: u32) -> Vec<Template> {
+    let pod = COCOA_PODS[stage];
+    let turns = (direction + 2) % 4;
+    let (back, half) = (COCOA_BACK, pod.width / 2);
+    let pod_box = (
+        [8 - half, pod.bottom, back - pod.width],
+        [8 + half, pod.top, back],
+    );
+    let pod_side = (
+        (back - pod.width, back),
+        (
+            COCOA_POD_SIDE_ROW,
+            COCOA_POD_SIDE_ROW + pod.top - pod.bottom,
+        ),
+    );
+    let pod_end = ((0, COCOA_POD_TOP_UV[stage]), (0, COCOA_POD_TOP_UV[stage]));
+    let stem_box = (
+        [COCOA_STEM.0, pod.top, back - COCOA_STEM_DEPTH],
+        [COCOA_STEM.1, POSITION_UNITS, back],
+    );
+    let stem_u = COCOA_STEM_UV_U[stage];
+    let stem_uv = (
+        (stem_u, stem_u + COCOA_STEM.1 - COCOA_STEM.0),
+        COCOA_STEM_UV_ROWS,
+    );
+    let end = |face: &Face| cocoa_box(face, pod_box, pod_end, turns);
+    let side = |face: &Face| cocoa_box(face, pod_box, pod_side, turns);
+    let stem = |face: &Face| cocoa_box(face, stem_box, stem_uv, turns);
+    [end(&FACES[0]), end(&FACES[1])]
+        .into_iter()
+        .chain(FACES[2..].iter().map(side))
+        .chain(FACES[2..].iter().map(stem))
+        .chain(std::iter::once(stem(&FACES[0])))
+        .collect()
+}
+
 fn vine_plane(face: &Face) -> Template {
     let mut template = cube_face(face, POSITION_UNITS);
     let axis = face.normal.abs().max_position();
@@ -335,6 +411,11 @@ fn build() -> [Template; TEMPLATE_COUNT] {
     }
     out.extend([&FACES[0], &FACES[1]].map(|f| cube_face(f, i32::from(LILY_UNITS))));
     out.extend([&FACES[2], &FACES[3]].map(sunflower_head));
+    for stage in 0..COCOA_STAGES as usize {
+        for direction in 0..4 {
+            out.extend(cocoa(stage, direction));
+        }
+    }
     out.try_into().expect("template count")
 }
 
