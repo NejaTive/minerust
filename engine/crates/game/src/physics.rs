@@ -1,5 +1,6 @@
 use glam::{IVec3, Vec2, Vec3};
 use world::block::FluidKind;
+use world::boxes::BoxList;
 
 pub const PLAYER_WIDTH: f32 = 0.6;
 pub const PLAYER_HEIGHT: f32 = 1.8;
@@ -18,6 +19,7 @@ pub const SPRINT_FOV_TIME: f32 = 0.15;
 pub const AIR_ACCEL: f32 = 10.0;
 pub const ICE_ACCEL: f32 = 3.0;
 pub const STEP_HEIGHT: f32 = 1.0;
+pub const BASE_STEP_HEIGHT: f32 = 0.6;
 pub const STEP_SMOOTH_TIME: f32 = 0.12;
 
 pub const WATER_GRAVITY: f32 = GRAVITY / 4.0;
@@ -76,17 +78,47 @@ const EPS: f32 = 1e-3;
 pub struct Collision {
     pub height: f32,
     pub slippery: bool,
+    pub boxes: Option<BoxList>,
 }
 
 impl Collision {
     pub const NONE: Collision = Collision {
         height: 0.0,
         slippery: false,
+        boxes: None,
     };
     pub const FULL: Collision = Collision {
         height: 1.0,
         slippery: false,
+        boxes: None,
     };
+
+    /// `height` — верх самой высокой коробки: по нему мобы и тени судят о клетке целиком.
+    pub fn of_boxes(boxes: BoxList, slippery: bool) -> Collision {
+        Collision {
+            height: boxes.top(),
+            slippery,
+            boxes: Some(boxes),
+        }
+    }
+
+    pub fn is_solid(&self) -> bool {
+        self.height > 0.0 || self.boxes.is_some_and(|boxes| !boxes.is_empty())
+    }
+
+    pub fn for_each_box(&self, cell: IVec3, mut visit: impl FnMut(Vec3, Vec3)) {
+        let origin = cell.as_vec3();
+        match &self.boxes {
+            Some(list) => {
+                for b in list.iter().filter(|b| !b.is_flat()) {
+                    let (min, max) = b.bounds();
+                    visit(origin + min, origin + max);
+                }
+            }
+            None if self.height > 0.0 => visit(origin, origin + Vec3::new(1.0, self.height, 1.0)),
+            None => {}
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -186,6 +218,15 @@ impl Player {
         let block_min = pos.as_vec3();
         let block_max = block_min + Vec3::ONE;
         (min + EPS).cmplt(block_max).all() && (max - EPS).cmpgt(block_min).all()
+    }
+
+    pub fn overlaps_boxes(&self, pos: IVec3, boxes: &BoxList) -> bool {
+        let (min, max) = self.aabb();
+        let mut hit = false;
+        Collision::of_boxes(*boxes, false).for_each_box(pos, |box_min, box_max| {
+            hit |= (min + EPS).cmplt(box_max).all() && (max - EPS).cmpgt(box_min).all();
+        });
+        hit
     }
 
     pub fn fluid_depth(
@@ -328,13 +369,18 @@ impl Player {
             return;
         }
         self.step_offset = (self.step_offset - TICK * STEP_HEIGHT / STEP_SMOOTH_TIME).max(0.0);
-        let can_step = self.auto_step && self.mode == Mode::Walking && immersion.is_none();
+        let can_step = self.mode == Mode::Walking && immersion.is_none();
+        let step_height = if self.auto_step {
+            STEP_HEIGHT
+        } else {
+            BASE_STEP_HEIGHT
+        };
         let mut against_wall = false;
         for axis in [1, 0, 2] {
             let before = self.feet;
             let mut blocked = self.move_axis(axis, delta[axis], &collision);
             if blocked && axis != 1 && can_step && self.on_ground {
-                blocked = !self.step_up(before, axis, delta[axis], &collision);
+                blocked = !self.step_up(before, axis, delta[axis], step_height, &collision);
             }
             against_wall |= blocked && axis != 1;
         }
@@ -372,15 +418,15 @@ impl Player {
         start: Vec3,
         axis: usize,
         delta: f32,
+        height: f32,
         collision: &impl Fn(IVec3) -> Collision,
     ) -> bool {
         let saved = (self.feet, self.velocity);
         self.feet = start;
-        let raised = !self.move_axis(1, STEP_HEIGHT, collision)
-            && !self.move_axis(axis, delta, collision)
-            && {
+        let raised =
+            !self.move_axis(1, height, collision) && !self.move_axis(axis, delta, collision) && {
                 self.on_ground = false;
-                self.move_axis(1, -STEP_HEIGHT, collision) && self.feet.y > start.y + EPS
+                self.move_axis(1, -height, collision) && self.feet.y > start.y + EPS
             };
         if raised {
             self.step_offset += self.feet.y - start.y;
@@ -413,61 +459,63 @@ impl Player {
             1 => (0, 2),
             _ => (0, 1),
         };
-        let cells = |layer: i32| {
-            let mut pos = lo;
-            pos[axis] = layer;
-            (lo[a]..=hi[a]).flat_map(move |i| {
-                (lo[b]..=hi[b]).map(move |j| {
-                    let mut cell = pos;
+        let layers = if delta > 0.0 {
+            (max[axis] - EPS).floor() as i32..=(max[axis] + delta - EPS).floor() as i32
+        } else if axis == 1 {
+            (min.y + delta - EPS).floor() as i32..=(min.y + EPS).floor() as i32
+        } else {
+            (min[axis] + delta + EPS).floor() as i32..=(min[axis] + EPS).floor() as i32
+        };
+        let mut limit: Option<f32> = None;
+        for layer in layers {
+            for i in lo[a]..=hi[a] {
+                for j in lo[b]..=hi[b] {
+                    let mut cell = IVec3::ZERO;
+                    cell[axis] = layer;
                     cell[a] = i;
                     cell[b] = j;
-                    cell
-                })
-            })
-        };
-        let blocked = |layer: i32| {
-            cells(layer).any(|cell| {
-                let height = collision(cell).height;
-                height > 0.0 && (axis == 1 || min.y + EPS < cell.y as f32 + height)
-            })
-        };
-
-        if delta > 0.0 {
-            let first = (max[axis] - EPS).ceil() as i32;
-            let last = (max[axis] + delta - EPS).floor() as i32;
-            if let Some(layer) = (first..=last).find(|&layer| blocked(layer)) {
-                self.feet[axis] = layer as f32 - above;
-                self.velocity[axis] = 0.0;
-                return true;
-            }
-        } else if axis == 1 {
-            let first = (min.y + EPS).floor() as i32;
-            let last = (min.y + delta - EPS).floor() as i32;
-            let floor = (last..=first)
-                .flat_map(cells)
-                .filter_map(|cell| {
-                    let height = collision(cell).height;
-                    (height > 0.0).then_some(cell.y as f32 + height)
-                })
-                .filter(|&top| top <= min.y + EPS && top >= min.y + delta - EPS)
-                .reduce(f32::max);
-            if let Some(top) = floor {
-                self.feet.y = top;
-                self.velocity.y = 0.0;
-                self.on_ground = true;
-                return true;
-            }
-        } else {
-            let first = (min[axis] + EPS).floor() as i32 - 1;
-            let last = (min[axis] + delta + EPS).floor() as i32;
-            if let Some(layer) = (last..=first).rev().find(|&layer| blocked(layer)) {
-                self.feet[axis] = (layer + 1) as f32 + below;
-                self.velocity[axis] = 0.0;
-                return true;
+                    collision(cell).for_each_box(cell, |box_min, box_max| {
+                        let overlaps = [a, b]
+                            .iter()
+                            .all(|&k| box_max[k] > min[k] + EPS && box_min[k] < max[k] - EPS);
+                        if !overlaps {
+                            return;
+                        }
+                        let candidate = if delta > 0.0 {
+                            (box_min[axis] >= max[axis] - EPS
+                                && box_min[axis] <= max[axis] + delta - EPS)
+                                .then_some(box_min[axis])
+                        } else {
+                            let slack = if axis == 1 { -EPS } else { EPS };
+                            (box_max[axis] <= min[axis] + EPS
+                                && box_max[axis] >= min[axis] + delta + slack)
+                                .then_some(box_max[axis])
+                        };
+                        if let Some(edge) = candidate {
+                            limit = Some(match limit {
+                                Some(best) if delta > 0.0 => best.min(edge),
+                                Some(best) => best.max(edge),
+                                None => edge,
+                            });
+                        }
+                    });
+                }
             }
         }
-        self.feet[axis] += delta;
-        false
+        let Some(edge) = limit else {
+            self.feet[axis] += delta;
+            return false;
+        };
+        if delta > 0.0 {
+            self.feet[axis] = edge - above;
+        } else {
+            self.feet[axis] = edge + below;
+            if axis == 1 {
+                self.on_ground = true;
+            }
+        }
+        self.velocity[axis] = 0.0;
+        true
     }
 }
 

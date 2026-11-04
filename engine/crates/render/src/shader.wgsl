@@ -128,7 +128,7 @@ struct TileAnim {
     tint: vec4<f32>,
 };
 @group(0) @binding(3)
-var<uniform> animation: array<TileAnim, 115>;
+var<uniform> animation: array<TileAnim, 153>;
 
 // Цвет травы, листвы (на BIOME_MAP_SIZE ниже) и воды (ещё на BIOME_MAP_SIZE ниже) на блок, тор BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
 @group(0) @binding(11)
@@ -253,7 +253,28 @@ fn block_vertex(in: VertexIn) -> VertexOut {
         f32((packed >> 5u) & 0x1Fu),
         f32((packed >> 10u) & 0x1Fu),
     );
+    var u = f32((packed >> 15u) & 0x1Fu);
     var v = f32((packed >> 20u) & 0x1Fu);
+    let boxed = (w0 >> 29u) & 1u;
+    if boxed == 1u {
+        // коробка произвольного размера: шаблон — полная грань, прямоугольник и плоскость лежат в записи квада (`Quad::boxed`)
+        let n = select(select(2u, 0u, shape < 4u), 1u, shape < 2u);
+        let ua = select(0u, 2u, n == 0u);
+        let va = select(1u, 2u, n == 1u);
+        let plane_code = (w1 >> 28u) & 0xFu;
+        let u0 = f32(w1 & 0xFu);
+        let u1 = f32(((w1 >> 4u) & 0xFu) + 1u);
+        let v0 = f32((w2 >> 20u) & 0xFu);
+        let v1 = f32(((w2 >> 24u) & 0xFu) + 1u);
+        let src = offset;
+        var q = src;
+        q[n] = f32(select(plane_code + 1u, plane_code, (shape & 1u) == 1u));
+        q[ua] = select(u0, u1, src[ua] > 0.5);
+        q[va] = select(v0, v1, src[va] > 0.5);
+        u = select(16.0 - q[ua], q[ua], u == src[ua]);
+        v = select(16.0 - q[va], q[va], v == src[va]);
+        offset = q;
+    }
     // y = 30 и 31 — маркеры SIDE_TOP_CORNER / TOP_CORNER из templates.rs: высота угла берётся из квада
     if offset.y >= 30.0 {
         var stored = (w1 >> 28u) & 0xFu;
@@ -269,12 +290,13 @@ fn block_vertex(in: VertexIn) -> VertexOut {
     var world_pos = in.origin + cell + offset / 16.0;
     let layer = (w0 >> 18u) & 0xFFu;
     world_pos += sway_offset(world_pos, sway_kind(animation[layer].timing.w), offset.y > 0.0);
-    let ao = (w1 >> (2u * corner)) & 3u;
-    let sun = (w1 >> (8u + 5u * corner)) & 0x1Fu;
-    let block = (w2 >> (5u * corner)) & 0x1Fu;
+    let ao = select((w1 >> (2u * corner)) & 3u, (w1 >> (13u + 2u * corner)) & 3u, boxed == 1u);
+    let light_corner = select(corner, 0u, boxed == 1u);
+    let sun = (w1 >> (8u + 5u * light_corner)) & 0x1Fu;
+    let block = (w2 >> (5u * light_corner)) & 0x1Fu;
     var out: VertexOut;
     out.position = globals.view_proj * vec4<f32>(world_pos, 1.0);
-    out.uv = vec2<f32>(f32((packed >> 15u) & 0x1Fu), v) / 16.0;
+    out.uv = vec2<f32>(u, v) / 16.0;
     out.uv.y -= table.shapes[shape].shade.y * fract(globals.anim_time * animation[layer].timing.z);
     out.shade = table.shapes[shape].shade.x * table.ao[ao];
     out.sun_light = level_brightness(f32(sun) * 0.5 - globals.darkness);

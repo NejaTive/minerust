@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn tile_count_and_slots_follow_tile_order() {
-    assert_eq!(TILE_COUNT, 115);
+    assert_eq!(TILE_COUNT, 153);
     for (i, tile) in Tile::ALL.iter().enumerate() {
         assert_eq!(tile.layer() as usize, i, "{tile:?}");
     }

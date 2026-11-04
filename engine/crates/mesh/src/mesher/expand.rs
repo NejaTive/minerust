@@ -1,6 +1,7 @@
-use crate::mesh::{POSITION_UNITS, light_brightness, quantize_shade};
+use crate::mesh::{POSITION_UNITS, Quad, light_brightness, quantize_shade};
 use crate::mesher::MeshData;
 use crate::templates::{AO_BRIGHTNESS, SIDE_TOP_CORNER, TOP_CORNER, templates};
+use world::boxes::face_axes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Vertex {
@@ -54,8 +55,12 @@ pub fn vertices(data: &MeshData) -> Vec<Vertex> {
             let quad = *quad;
             std::array::from_fn::<_, 4, _>(move |i| {
                 let corner = template.corners[i];
-                let [x, mut y, z] = corner.pos.map(u16::from);
+                let [mut x, mut y, mut z] = corner.pos.map(u16::from);
                 let mut uv = corner.uv;
+                let ao = quad.ao()[i];
+                if quad.is_boxed() {
+                    (x, y, z, uv) = boxed_corner(quad, usize::from(quad.template()), [x, y, z], uv);
+                }
                 if y == u16::from(TOP_CORNER) || y == u16::from(SIDE_TOP_CORNER) {
                     let top = quad.heights()[i];
                     if y == u16::from(SIDE_TOP_CORNER) {
@@ -66,9 +71,7 @@ pub fn vertices(data: &MeshData) -> Vec<Vertex> {
                 Vertex {
                     position: [cx + x, cy + y, cz + z],
                     uv,
-                    shade: quantize_shade(
-                        template.shade * AO_BRIGHTNESS[usize::from(quad.ao()[i])],
-                    ),
+                    shade: quantize_shade(template.shade * AO_BRIGHTNESS[usize::from(ao)]),
                     layer: quad.layer(),
                     light: [quad.sun_halves()[i], quad.block_halves()[i]],
                 }
@@ -91,4 +94,24 @@ pub fn indices(data: &MeshData) -> Vec<u16> {
             order.map(|i| first + i)
         })
         .collect()
+}
+
+fn boxed_corner(quad: Quad, face: usize, pos: [u16; 3], uv: [u8; 2]) -> (u16, u16, u16, [u8; 2]) {
+    let (rect, plane) = quad.box_rect();
+    let normal = [1, 1, 0, 0, 2, 2][face];
+    let (ua, va) = face_axes(normal);
+    let units = POSITION_UNITS as u16;
+    let mut at = pos;
+    at[normal] = u16::from(plane);
+    at[ua] = u16::from(if pos[ua] == 0 { rect.0 } else { rect.1 });
+    at[va] = u16::from(if pos[va] == 0 { rect.2 } else { rect.3 });
+    let pick = |axis: usize, template_uv: u8| {
+        let along = at[axis];
+        (if u16::from(template_uv) == pos[axis] {
+            along
+        } else {
+            units - along
+        }) as u8
+    };
+    (at[0], at[1], at[2], [pick(ua, uv[0]), pick(va, uv[1])])
 }

@@ -267,6 +267,7 @@ fn egg_rabbit_takes_the_colour_of_the_biome_it_is_summoned_in() {
                 block: cell - IVec3::Y,
                 normal: IVec3::Y,
                 distance: 1.0,
+                bounds: None,
             };
             game.use_item(Item::RabbitSpawnEgg, hit);
             assert_eq!(game.mobs.len(), 1);

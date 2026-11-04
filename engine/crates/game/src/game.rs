@@ -1,7 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use glam::{IVec3, Vec2, Vec3};
-use world::block::{Block, FLUID_SOURCE, FluidKind};
+use world::block::{
+    Block, FLUID_SOURCE, FluidKind, Placement, SLAB_BOTTOM, SLAB_DOUBLE, SLAB_TOP, Shape,
+};
+use world::boxes::BoxList;
 use world::clouds::cloud_drift;
 use world::column::{Column, WORLD_HEIGHT};
 use world::falling::Falling;
@@ -23,7 +26,7 @@ use crate::mob::{Mob, Pose, Surroundings, spec};
 use crate::mob_shadow::{Ground, ShadowPatch, shadow_patches};
 use crate::physics::{Clock, Collision, EYE_HEIGHT, Input, Mode, Player, TICK, next_fov_scale};
 use crate::rain_cover::RainCover;
-use crate::raycast::{Hit, raycast};
+use crate::raycast::{Hit, Probe, raycast, raycast_shapes};
 use crate::repeat::Repeat;
 use crate::rng::Rng;
 use crate::spawning::random_variant;
@@ -31,6 +34,18 @@ use crate::weather::{self, Weather, WeatherState};
 
 const TIME_FAST_FACTOR: u32 = 60;
 const REACH: f32 = 6.0;
+
+fn cell_collision(world: &World, pos: IVec3) -> Collision {
+    let block = world.block(pos);
+    if block.shape() == Shape::Boxes {
+        return Collision::of_boxes(world.boxes_at(pos), false);
+    }
+    Collision {
+        height: block.collision_height(),
+        slippery: block.is_slippery(),
+        boxes: None,
+    }
+}
 const REPEAT_S: f32 = 0.25;
 const DEFAULT_BLOCK: Block = Block::Grass;
 const MAX_DT: f32 = 0.1;
@@ -42,7 +57,7 @@ const MOB_RECORD_GRID: f32 = 8.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Held {
-    Block(Block),
+    Block(Block, u8),
     Item(Item),
 }
 
@@ -107,7 +122,7 @@ pub struct Game {
     keys: HashSet<String>,
     last_time: Option<f32>,
     paused: bool,
-    target: Option<IVec3>,
+    target: Option<Hit>,
     breaking: Repeat,
     placing: Repeat,
     selected: Option<Held>,
@@ -190,7 +205,7 @@ impl Game {
             target: None,
             breaking: Repeat::new(REPEAT_S),
             placing: Repeat::new(REPEAT_S),
-            selected: Some(Held::Block(DEFAULT_BLOCK)),
+            selected: Some(Held::Block(DEFAULT_BLOCK, 0)),
             mobs: Vec::new(),
             adopted: HashSet::new(),
             mob_rng: Rng::new(seed as u32 ^ 0x9E37_79B9),
@@ -434,8 +449,8 @@ impl Game {
             self.selected = None;
             return true;
         }
-        let held = Block::from_name(name)
-            .map(Held::Block)
+        let held = Block::stack_from_name(name)
+            .map(|stack| Held::Block(stack.block, stack.data))
             .or_else(|| Item::from_name(name).map(Held::Item));
         match held {
             Some(held) => {
@@ -497,14 +512,9 @@ impl Game {
                 self.use_item(item, hit);
             }
         } else if editable
-            && let Some(Held::Block(block)) = self.selected
+            && let Some(Held::Block(block, variant)) = self.selected
             && self.placing.fire(time)
-            && let Some((hit, pos)) = self.placement_hit(target, block)
-            && let Some(data) = block.placement_data(hit.normal)
-            && self.world.can_place_with_data(pos, block, data)
-            && (block.fluid().is_some()
-                || !self.player.overlaps_block(pos)
-                    && (block.collision_height() == 0.0 || !self.mob_overlaps_block(pos)))
+            && let Some((pos, data)) = self.placement(target, block, variant)
         {
             let changed = self.world.set_block_supported_with_data(pos, block, data);
             if !changed.is_empty() {
@@ -512,13 +522,71 @@ impl Game {
                 target = self.pick();
             }
         }
-        self.target = target.map(|hit| hit.block);
+        self.target = target;
         Edits::new(dirty, lit)
     }
 
-    pub fn target_block(&self) -> Option<(IVec3, Block, u8)> {
-        self.target
-            .map(|pos| (pos, self.world.block(pos), self.world.block_data(pos)))
+    pub fn target_block(&self) -> Option<(IVec3, (Vec3, Vec3))> {
+        self.target.map(|hit| {
+            let bounds = self
+                .world
+                .block(hit.block)
+                .bounds(self.world.block_data(hit.block));
+            (hit.block, bounds)
+        })
+    }
+
+    fn look_dir(&self) -> IVec3 {
+        let forward = self.camera.forward();
+        if forward.x.abs() >= forward.z.abs() {
+            IVec3::new(if forward.x < 0.0 { -1 } else { 1 }, 0, 0)
+        } else {
+            IVec3::new(0, 0, if forward.z < 0.0 { -1 } else { 1 })
+        }
+    }
+
+    fn placement(&self, solid: Option<Hit>, block: Block, variant: u8) -> Option<(IVec3, u8)> {
+        if block.is_slab()
+            && let Some(hit) = solid
+            && self.world.block(hit.block) == block
+        {
+            let data = self.world.block_data(hit.block);
+            let joins = (hit.normal == IVec3::Y && data == SLAB_BOTTOM)
+                || (hit.normal == IVec3::NEG_Y && data == SLAB_TOP);
+            if joins && !self.bodies_overlap(hit.block, block, SLAB_DOUBLE) {
+                return Some((hit.block, SLAB_DOUBLE));
+            }
+        }
+        let (hit, pos) = self.placement_hit(solid, block)?;
+        let point = self.camera.position + self.camera.forward() * hit.distance;
+        let placement = Placement {
+            normal: hit.normal,
+            hit_y: (point.y - hit.block.y as f32).clamp(0.0, 1.0),
+            look: self.look_dir(),
+            variant,
+        };
+        let data = block.placement_state(&placement)?;
+        (self.world.can_place_with_data(pos, block, data)
+            && (block.fluid().is_some() || !self.bodies_overlap(pos, block, data)))
+        .then_some((pos, data))
+    }
+
+    fn bodies_overlap(&self, pos: IVec3, block: Block, data: u8) -> bool {
+        if block.shape() == Shape::Boxes {
+            let boxes: BoxList = block.boxes(data, |offset| {
+                (
+                    self.world.block(pos + offset),
+                    self.world.block_data(pos + offset),
+                )
+            });
+            return self.player.overlaps_boxes(pos, &boxes)
+                || self
+                    .mobs
+                    .iter()
+                    .any(|mob| mob.body.overlaps_boxes(pos, &boxes));
+        }
+        self.player.overlaps_block(pos)
+            || (block.collision_height() > 0.0 && self.mob_overlaps_block(pos))
     }
 
     /// `add_column` пересчитывает его заново вместе с соседями.
@@ -551,8 +619,15 @@ impl Game {
     }
 
     fn pick(&self) -> Option<Hit> {
-        raycast(self.camera.position, self.camera.forward(), REACH, |pos| {
-            self.world.block(pos).is_targetable()
+        raycast_shapes(self.camera.position, self.camera.forward(), REACH, |pos| {
+            let block = self.world.block(pos);
+            if !block.is_targetable() {
+                Probe::Miss
+            } else if block.shape() == Shape::Boxes {
+                Probe::Boxes(self.world.boxes_at(pos))
+            } else {
+                Probe::Full
+            }
         })
     }
 
@@ -613,7 +688,7 @@ impl Game {
                     shadow_radius: spec(mob.kind).shadow_radius,
                     shadow: shadow_patches(pose.feet, spec(mob.kind).shadow_radius, |pos| {
                         let block = self.world.block(pos);
-                        let height = block.collision_height();
+                        let height = cell_collision(&self.world, pos).height;
                         if block == Block::Air {
                             Ground::Air
                         } else if height > 0.0 && block.fluid().is_none() {
@@ -656,13 +731,7 @@ impl Game {
     fn tick_mobs(&mut self) {
         let world = &self.world;
         let eye = self.player.eye();
-        let collision = |pos| {
-            let block = world.block(pos);
-            Collision {
-                height: block.collision_height(),
-                slippery: block.is_slippery(),
-            }
-        };
+        let collision = |pos| cell_collision(world, pos);
         let fluid = |pos| world.fluid_height(pos);
         let around = Surroundings {
             collision: &collision,
@@ -685,13 +754,7 @@ impl Game {
 
     fn push_entities(&mut self) {
         let world = &self.world;
-        let collision = |pos| {
-            let block = world.block(pos);
-            Collision {
-                height: block.collision_height(),
-                slippery: block.is_slippery(),
-            }
-        };
+        let collision = |pos| cell_collision(world, pos);
         let bounds: Vec<_> = self.mobs.iter().map(|mob| mob.body.aabb()).collect();
         let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
         for (i, bound) in bounds.iter().enumerate() {
@@ -785,13 +848,7 @@ impl Game {
             self.player.step_with(
                 &input,
                 self.camera.yaw,
-                |pos| {
-                    let block = self.world.block(pos);
-                    Collision {
-                        height: block.collision_height(),
-                        slippery: block.is_slippery(),
-                    }
-                },
+                |pos| cell_collision(&self.world, pos),
                 |pos| self.world.fluid_height(pos),
             );
             self.tick_mobs();

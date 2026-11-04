@@ -2,6 +2,7 @@ pub mod biome;
 pub mod biome_color;
 pub mod biome_map;
 pub mod block;
+pub mod boxes;
 mod caves;
 pub mod clouds;
 pub mod column;

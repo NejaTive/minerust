@@ -5,6 +5,8 @@ use world::light::{MAX_LIGHT, level_brightness};
 pub const POSITION_UNITS: i32 = 16;
 
 const LIGHT_MASK: u32 = 0x1F;
+const BOX_FLAG: u32 = 1 << 29;
+const BOX_AO_SHIFT: u32 = 13;
 
 pub const MAX_LIGHT_HALVES: u8 = 2 * MAX_LIGHT;
 
@@ -67,6 +69,66 @@ impl Quad {
         ])
     }
 
+    /// Грань коробки произвольного размера: `face` — индекс грани `FACES` (она же шаблон),
+    /// `rect` — `(u0, u1, v0, v1)` в 1/16 на осях грани (`world::boxes::face_axes`), `plane` —
+    /// положение грани по нормали, `light` — `[sun, block]` на всю грань, `ao` — по углам шаблона.
+    /// Биты AO и высот заняты прямоугольником и одним светом; раскладку знает и shader.wgsl.
+    pub fn boxed(
+        cell: [u8; 3],
+        face: u8,
+        rect: (u8, u8, u8, u8),
+        plane: u8,
+        layer: u8,
+        light: [u8; 2],
+        ao: [u8; 4],
+    ) -> Self {
+        let (u0, u1, v0, v1) = rect;
+        debug_assert!(face < 6 && u0 < u1 && v0 < v1 && u1 <= 16 && v1 <= 16 && plane <= 16);
+        debug_assert!(ao.iter().all(|&a| a < 4), "{ao:?}");
+        let mut quad = Self::new(
+            cell,
+            face,
+            false,
+            layer,
+            [0; 4],
+            [light[0], 0, 0, 0],
+            [light[1], 0, 0, 0],
+        );
+        let code = if face.is_multiple_of(2) {
+            plane - 1
+        } else {
+            plane
+        };
+        quad.0[0] |= BOX_FLAG;
+        let ao = ao
+            .iter()
+            .enumerate()
+            .fold(0, |acc, (i, &a)| acc | u32::from(a) << (2 * i));
+        quad.0[1] |=
+            u32::from(u0) | u32::from(u1 - 1) << 4 | ao << BOX_AO_SHIFT | u32::from(code) << 28;
+        quad.0[2] |= u32::from(v0) << 20 | u32::from(v1 - 1) << 24;
+        quad
+    }
+
+    pub fn is_boxed(self) -> bool {
+        self.0[0] & BOX_FLAG != 0
+    }
+
+    /// `(rect, plane)` коробочной грани, см. [`Quad::boxed`].
+    pub fn box_rect(self) -> ((u8, u8, u8, u8), u8) {
+        let field = |word: usize, shift: u32| (self.0[word] >> shift & 0xF) as u8;
+        let code = field(1, 28);
+        let plane = if self.template().is_multiple_of(2) {
+            code + 1
+        } else {
+            code
+        };
+        (
+            (field(1, 0), field(1, 4) + 1, field(2, 20), field(2, 24) + 1),
+            plane,
+        )
+    }
+
     // шаги 1/16 блока; биты полей знает и shader.wgsl (vs_main)
     pub fn with_heights(mut self, heights: [u8; 4]) -> Self {
         debug_assert!(heights.iter().all(|h| (1..=16).contains(h)), "{heights:?}");
@@ -111,14 +173,23 @@ impl Quad {
     }
 
     pub fn ao(self) -> [u8; 4] {
+        if self.is_boxed() {
+            return std::array::from_fn(|i| (self.0[1] >> (BOX_AO_SHIFT + 2 * i as u32) & 3) as u8);
+        }
         std::array::from_fn(|i| (self.0[1] >> (2 * i) & 3) as u8)
     }
 
     pub fn sun_halves(self) -> [u8; 4] {
+        if self.is_boxed() {
+            return [(self.0[1] >> 8 & LIGHT_MASK) as u8; 4];
+        }
         std::array::from_fn(|i| (self.0[1] >> (8 + 5 * i) & LIGHT_MASK) as u8)
     }
 
     pub fn block_halves(self) -> [u8; 4] {
+        if self.is_boxed() {
+            return [(self.0[2] & LIGHT_MASK) as u8; 4];
+        }
         std::array::from_fn(|i| (self.0[2] >> (5 * i) & LIGHT_MASK) as u8)
     }
 }

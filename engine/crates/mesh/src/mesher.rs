@@ -1,5 +1,7 @@
 use glam::IVec3;
 
+mod boxes;
+
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
     AO_BRIGHTNESS, CACTUS, COCOA, COCOA_PARTS, CROSS, CUBE_FACE, FACES, Face, LILY, LOG_BARK_X,
@@ -177,6 +179,7 @@ impl<'a> Surroundings<'a> {
                 }
             }
         }
+        boxes::settle_lights(blocks, lights);
         has_data
     }
 }
@@ -254,6 +257,7 @@ pub fn mesh_section(
     let (mut blocks, mut lights, mut datas) = new_caches();
     fill_blocks(&mut blocks, &mut datas, section);
     fill_halo(&mut blocks, &mut lights, neighbor, light);
+    boxes::settle_lights(&blocks, &mut lights);
     mesh_cached(&blocks, &lights, &datas, options)
 }
 
@@ -289,6 +293,18 @@ pub(crate) fn mesh_cached(
                 }
                 if block.shape() == Shape::Cactus {
                     push_cactus(&mut meshes.cutout, blocks, lights, index, cell, &faces);
+                    continue;
+                }
+                if block.shape() == Shape::Boxes {
+                    boxes::push_boxes(
+                        (&mut meshes.solid, &mut meshes.cutout),
+                        blocks,
+                        datas,
+                        lights,
+                        index,
+                        &faces,
+                        options.ambient_occlusion,
+                    );
                     continue;
                 }
                 if block.shape() != Shape::Cube {
@@ -347,7 +363,11 @@ pub(crate) fn mesh_cached(
                     .then(|| block.axis(byte()))
                     .filter(|&axis| axis != 1);
                 for (face_index, (face, normal, corners)) in faces.iter().enumerate() {
-                    if blocks.opaque(index, *normal) {
+                    let beyond = blocks.at(index, *normal);
+                    if beyond.is_opaque()
+                        || boxes::is_special_neighbor(beyond)
+                            && boxes::hides_cube_face(blocks, datas, local, block, face_index)
+                    {
                         continue;
                     }
                     let (tile, template) = match lying {
@@ -357,7 +377,10 @@ pub(crate) fn mesh_cached(
                         {
                             (Some(Tile::PumpkinFace), CUBE_FACE + face_index as u8)
                         }
-                        None => (block.tile(face.facing), CUBE_FACE + face_index as u8),
+                        None => (
+                            block.face_tile(face.facing, face.normal, byte()),
+                            CUBE_FACE + face_index as u8,
+                        ),
                     };
                     let Some(tile) = tile else {
                         continue;
@@ -589,7 +612,7 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
         )
     };
     match block.shape() {
-        Shape::Cube | Shape::Layer | Shape::Cactus => {}
+        Shape::Cube | Shape::Layer | Shape::Cactus | Shape::Boxes => {}
         Shape::Vine => {
             let layer = Tile::Vine.layer() as u8;
             for (side, &(bit, _)) in VINE_SIDES.iter().enumerate() {
@@ -739,6 +762,8 @@ mod expand;
 mod lily;
 #[cfg(test)]
 mod oriented;
+#[cfg(test)]
+mod slabs;
 #[cfg(test)]
 mod snow;
 #[cfg(test)]

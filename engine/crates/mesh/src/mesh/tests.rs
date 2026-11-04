@@ -103,3 +103,23 @@ fn day_shade_is_quantized_shade_times_light() {
         );
     }
 }
+
+#[test]
+fn boxed_quads_keep_rect_plane_and_the_other_fields() {
+    for face in 0..6u8 {
+        let rect = (1, 9, 2, 16);
+        let plane = if face % 2 == 0 { 16 } else { 0 };
+        let quad = Quad::boxed([3, 4, 5], face, rect, plane, 77, [9, 30], [0, 1, 2, 3]);
+        assert!(quad.is_boxed());
+        assert_eq!(quad.template(), face);
+        assert_eq!(quad.box_rect(), (rect, plane));
+        assert_eq!(quad.cell(), [3, 4, 5]);
+        assert_eq!(quad.layer(), 77);
+        assert_eq!(quad.sun_halves(), [9; 4]);
+        assert_eq!(quad.block_halves(), [30; 4]);
+        assert_eq!(quad.ao(), [0, 1, 2, 3]);
+        assert!(!quad.flipped());
+    }
+    let plain = Quad::new([0; 3], 3, false, 1, [3; 4], [0; 4], [0; 4]);
+    assert!(!plain.is_boxed());
+}

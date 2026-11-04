@@ -4,7 +4,7 @@ use game::camera::{
 use game::loader::{DEFAULT_RADIUS, MAX_RADIUS, MIN_RADIUS};
 use mesh::mesher::MeshOptions;
 use wasm_bindgen::prelude::*;
-use world::block::BLOCKS;
+use world::block::Block;
 use world::item::ITEMS;
 
 #[wasm_bindgen]
@@ -74,12 +74,12 @@ pub struct BlockInfo {
 
 #[wasm_bindgen]
 pub fn blocks() -> Vec<BlockInfo> {
-    BLOCKS
+    Block::stacks()
         .iter()
-        .map(|def| BlockInfo {
-            name: def.name.to_owned(),
-            label: def.label.to_owned(),
-            placeable: def.selectable,
+        .map(|stack| BlockInfo {
+            name: stack.name.clone(),
+            label: stack.label.clone(),
+            placeable: stack.placeable,
         })
         .collect()
 }

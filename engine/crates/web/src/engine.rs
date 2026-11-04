@@ -522,7 +522,8 @@ impl Engine {
 
 #[wasm_bindgen]
 pub fn block_icon(name: &str) -> Option<Vec<u8>> {
-    ICON_TEXTURES.with(|icons| Block::from_name(name)?.icon_pixels(&icons.borrow()))
+    let stack = Block::stack_from_name(name)?;
+    ICON_TEXTURES.with(|icons| stack.block.icon_pixels(&icons.borrow(), stack.data))
 }
 
 #[wasm_bindgen]
