@@ -352,6 +352,11 @@ pub(crate) fn mesh_cached(
                     }
                     let (tile, template) = match lying {
                         Some(axis) => axis_face(block, axis, face_index, face),
+                        None if block == Block::Pumpkin
+                            && face.normal == block.facing_dir(byte()) =>
+                        {
+                            (Some(Tile::PumpkinFace), CUBE_FACE + face_index as u8)
+                        }
                         None => (block.tile(face.facing), CUBE_FACE + face_index as u8),
                     };
                     let Some(tile) = tile else {

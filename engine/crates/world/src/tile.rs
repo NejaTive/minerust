@@ -104,10 +104,13 @@ pub enum Tile {
     TulipOrange,
     TulipWhite,
     TulipPink,
+    PumpkinSide,
+    PumpkinTop,
+    PumpkinFace,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 97] = [
+    pub const ALL: [Tile; 100] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -205,6 +208,9 @@ impl Tile {
         Tile::TulipOrange,
         Tile::TulipWhite,
         Tile::TulipPink,
+        Tile::PumpkinSide,
+        Tile::PumpkinTop,
+        Tile::PumpkinFace,
     ];
 
     pub fn sway(self) -> f32 {

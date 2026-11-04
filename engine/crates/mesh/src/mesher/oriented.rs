@@ -3,7 +3,8 @@ use glam::Vec3;
 use super::expand::{Vertex, vertices};
 use super::*;
 use world::block::{
-    ATTACH_NEG_X, ATTACH_NEG_Z, ATTACH_POS_X, ATTACH_POS_Z, AXIS_X, AXIS_Y, AXIS_Z,
+    ATTACH_NEG_X, ATTACH_NEG_Z, ATTACH_POS_X, ATTACH_POS_Z, AXIS_X, AXIS_Y, AXIS_Z, FACING_NEG_X,
+    FACING_NEG_Z, FACING_POS_X, FACING_POS_Z,
 };
 
 const AT: IVec3 = IVec3::new(5, 5, 5);
@@ -219,4 +220,34 @@ fn neighbor_section_data_does_not_change_the_mesh() {
     let b = mesh_with(&mut world, AXIS_X);
     assert_eq!(a.solid.quads, b.solid.quads);
     assert_eq!(a.cutout.quads, b.cutout.quads);
+}
+
+#[test]
+fn pumpkin_shows_its_face_on_one_side_only() {
+    for (data, face) in [
+        (FACING_NEG_Z, IVec3::NEG_Z),
+        (FACING_POS_X, IVec3::X),
+        (FACING_POS_Z, IVec3::Z),
+        (FACING_NEG_X, IVec3::NEG_X),
+    ] {
+        let verts = vertices(&single(Block::Pumpkin, data).solid);
+        assert_eq!(verts.len(), 24);
+        let mut faces = 0;
+        for quad in verts.chunks(4) {
+            let n = normal(quad).round().as_ivec3();
+            let want = if n == face {
+                Tile::PumpkinFace
+            } else if n.y != 0 {
+                Tile::PumpkinTop
+            } else {
+                Tile::PumpkinSide
+            };
+            assert!(
+                quad.iter().all(|v| v.layer() == want.layer() as u8),
+                "{data} {n}"
+            );
+            faces += usize::from(want == Tile::PumpkinFace);
+        }
+        assert_eq!(faces, 1);
+    }
 }

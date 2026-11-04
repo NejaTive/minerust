@@ -301,6 +301,8 @@ impl Terrain {
         }
         self.grow_disks(key, column);
         self.decorate_cold_and_flowers(&mut rng, column, &climate, &counts, key);
+        self.grow_pumpkins(key, column);
+        self.grow_springs(key, column);
     }
 
     fn decorate_cold_and_flowers(
@@ -736,6 +738,9 @@ fn shaded(column: &Column, at: IVec3) -> bool {
 }
 
 mod disks;
+pub(in crate::terrain) mod lakes;
+mod pumpkins;
+mod springs;
 
 #[cfg(test)]
 mod tests;

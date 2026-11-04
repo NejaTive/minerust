@@ -87,6 +87,7 @@ pub enum Block {
     OrangeTulip,
     WhiteTulip,
     PinkTulip,
+    Pumpkin,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -139,11 +140,17 @@ pub enum DataKind {
     Attachment,
     Fluid,
     Sides,
+    Facing,
 }
 
 pub const AXIS_Y: u8 = 0;
 pub const AXIS_X: u8 = 1;
 pub const AXIS_Z: u8 = 2;
+
+pub const FACING_NEG_Z: u8 = 0;
+pub const FACING_POS_X: u8 = 1;
+pub const FACING_POS_Z: u8 = 2;
+pub const FACING_NEG_X: u8 = 3;
 
 pub const ATTACH_FLOOR: u8 = 0;
 pub const ATTACH_POS_X: u8 = 1;
@@ -286,7 +293,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 80] = [
+pub const BLOCKS: [BlockDef; 81] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -627,10 +634,16 @@ pub const BLOCKS: [BlockDef; 80] = [
     BlockDef::plant("orange_tulip", "оранжевый тюльпан", Tile::TulipOrange),
     BlockDef::plant("white_tulip", "белый тюльпан", Tile::TulipWhite),
     BlockDef::plant("pink_tulip", "розовый тюльпан", Tile::TulipPink),
+    BlockDef {
+        data: DataKind::Facing,
+        top: Some(Tile::PumpkinTop),
+        bottom: Some(Tile::PumpkinTop),
+        ..BlockDef::uniform("pumpkin", "тыква", Tile::PumpkinSide)
+    },
 ];
 
 impl Block {
-    pub const ALL: [Block; 80] = [
+    pub const ALL: [Block; 81] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -711,6 +724,7 @@ impl Block {
         Block::OrangeTulip,
         Block::WhiteTulip,
         Block::PinkTulip,
+        Block::Pumpkin,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -838,6 +852,12 @@ impl Block {
                 IVec3::NEG_Y => Some(VINE_TOP),
                 _ => None,
             },
+            DataKind::Facing => Some(match normal {
+                IVec3::X => FACING_POS_X,
+                IVec3::NEG_X => FACING_NEG_X,
+                IVec3::Z => FACING_POS_Z,
+                _ => FACING_NEG_Z,
+            }),
             DataKind::Axis => Some(match normal.abs().max_position() {
                 0 => AXIS_X,
                 1 => AXIS_Y,
@@ -866,6 +886,7 @@ impl Block {
                 ATTACH_POS_Z,
                 ATTACH_NEG_Z,
             ],
+            DataKind::Facing => &[FACING_NEG_Z, FACING_POS_X, FACING_POS_Z, FACING_NEG_X],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
                 FLUID_SOURCE,
@@ -880,6 +901,15 @@ impl Block {
             ],
         };
         states.iter().copied()
+    }
+
+    pub fn facing_dir(self, data: u8) -> IVec3 {
+        match data {
+            FACING_POS_X => IVec3::X,
+            FACING_POS_Z => IVec3::Z,
+            FACING_NEG_X => IVec3::NEG_X,
+            _ => IVec3::NEG_Z,
+        }
     }
 
     pub fn axis(self, data: u8) -> usize {

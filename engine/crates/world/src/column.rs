@@ -12,6 +12,8 @@ pub struct Column {
     sections: [Section; COLUMN_SECTIONS as usize],
     pub mobs: Vec<MobRecord>,
     pub populated: bool,
+    /// Источники, поставленные генерацией: мир будит по ним жидкости при вставке колонки; не сохраняется.
+    pub springs: Vec<IVec3>,
 }
 
 impl Column {
@@ -20,6 +22,7 @@ impl Column {
             sections: std::array::from_fn(|_| Section::new()),
             mobs: Vec::new(),
             populated: false,
+            springs: Vec::new(),
         }
     }
 

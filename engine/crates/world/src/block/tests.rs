@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard())
 }
 
-const ALL: [Block; 80] = Block::ALL;
+const ALL: [Block; 81] = Block::ALL;
 
 const FLOWERS: [Block; 8] = [
     Block::Allium,
@@ -47,7 +47,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(80), Err(80));
+    assert_eq!(Block::try_from(81), Err(81));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -311,6 +311,7 @@ fn only_log_torch_and_water_use_data() {
             | Block::AcaciaLog
             | Block::DarkOakLog => DataKind::Axis,
             Block::Vine => DataKind::Sides,
+            Block::Pumpkin => DataKind::Facing,
             Block::Torch => DataKind::Attachment,
             Block::Water | Block::Lava => DataKind::Fluid,
             _ => DataKind::None,
@@ -522,6 +523,7 @@ fn states_cover_every_data_kind() {
             DataKind::Attachment => 5,
             DataKind::Fluid => usize::from(FLUID_MAX_LEVEL) + 2,
             DataKind::Sides => 5,
+            DataKind::Facing => 4,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -852,4 +854,24 @@ fn flowers_are_selectable_non_solid_crosses_with_their_own_tiles() {
         assert!(flower.def().selectable && !flower.is_solid() && flower.needs_support());
         assert!(!tiles[..i].contains(&tiles[i]), "{flower:?}");
     }
+}
+
+#[test]
+fn pumpkin_faces_the_side_it_was_placed_against() {
+    use crate::block::{FACING_NEG_X, FACING_NEG_Z, FACING_POS_X, FACING_POS_Z};
+    let pumpkin = Block::Pumpkin;
+    assert_eq!(pumpkin.data_kind(), DataKind::Facing);
+    assert!(pumpkin.is_opaque() && pumpkin.is_solid());
+    assert_eq!(pumpkin.tile(Facing::Top), Some(Tile::PumpkinTop));
+    assert_eq!(pumpkin.tile(Facing::Side), Some(Tile::PumpkinSide));
+    for (normal, data) in [
+        (IVec3::X, FACING_POS_X),
+        (IVec3::NEG_X, FACING_NEG_X),
+        (IVec3::Z, FACING_POS_Z),
+        (IVec3::NEG_Z, FACING_NEG_Z),
+    ] {
+        assert_eq!(pumpkin.placement_data(normal), Some(data));
+        assert_eq!(pumpkin.facing_dir(data), normal);
+    }
+    assert_eq!(pumpkin.placement_data(IVec3::Y), Some(FACING_NEG_Z));
 }

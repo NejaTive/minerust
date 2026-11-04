@@ -175,7 +175,8 @@ fn no_air_under_water() {
     for key in keys(lake, 2) {
         let column = terrain.generate(key);
         for p in blocks(key).map(local) {
-            if column.get(p) != Block::Water {
+            let world = key.origin() + p;
+            if column.get(p) != Block::Water || terrain.lake_covers(world.x, world.z) {
                 continue;
             }
             water += 1;
@@ -203,6 +204,9 @@ fn trees_stand_on_ground() {
                 let Some(tree) = tree_at(&terrain, x, z) else {
                     continue;
                 };
+                if terrain.lake_covers(x, z) {
+                    continue;
+                }
                 trees += 1;
                 for dy in 1..=ROOF {
                     let p = local(tree.base - IVec3::Y * dy);
