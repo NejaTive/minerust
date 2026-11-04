@@ -91,6 +91,15 @@ impl Section {
         *slot = block;
     }
 
+    pub(crate) fn set_plain(&mut self, index: usize, block: Block) {
+        let slot = &mut self.blocks[index];
+        self.emitters -= u16::from(slot.emission() > 0);
+        self.emitters += u16::from(block.emission() > 0);
+        self.tickable -= u16::from(slot.random_ticks());
+        self.tickable += u16::from(block.random_ticks());
+        *slot = block;
+    }
+
     fn index(local: IVec3) -> usize {
         assert!(
             Self::contains(local),

@@ -8,11 +8,11 @@ use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::mob::{MobKind, MobRecord};
 use crate::section::{SECTION_SIZE, SECTION_VOLUME};
 
-pub const FORMAT_VERSION: u8 = 4;
+pub const FORMAT_VERSION: u8 = 5;
 
 type Migration = fn(&[u8]) -> Result<Vec<u8>, SaveError>;
 
-const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3, v3_to_v4];
+const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3, v3_to_v4, v4_to_v5];
 
 fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut out = Vec::with_capacity(body.len() + 1);
@@ -38,6 +38,10 @@ fn v3_to_v4(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     Ok(out)
 }
 
+fn v4_to_v5(_: &[u8]) -> Result<Vec<u8>, SaveError> {
+    Err(SaveError::UnsupportedVersion(4))
+}
+
 const _: () = assert!(MIGRATIONS.len() + 1 == FORMAT_VERSION as usize);
 
 const MAGIC: &[u8; 3] = b"MRC";
@@ -45,9 +49,7 @@ const COLUMN_VOLUME: usize = (SECTION_SIZE * SECTION_SIZE * WORLD_HEIGHT) as usi
 const RUN_SIZE: usize = 3;
 const MOB_SIZE: usize = 17;
 
-const _: () = assert!(COLUMN_SECTIONS <= 8);
-
-const _: () = assert!(COLUMN_VOLUME <= u16::MAX as usize);
+const _: () = assert!(COLUMN_SECTIONS <= 16);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SaveError {
@@ -84,7 +86,10 @@ pub fn encode_column(column: &Column) -> Vec<u8> {
             data.iter().any(|&b| b != 0).then_some((sy, data))
         })
         .collect();
-    bytes.push(with_data.iter().fold(0, |flags, &(sy, _)| flags | 1 << sy));
+    let flags = with_data
+        .iter()
+        .fold(0u16, |flags, &(sy, _)| flags | 1 << sy);
+    bytes.extend_from_slice(&flags.to_le_bytes());
     bytes.push(u8::from(column.populated));
     bytes.extend_from_slice(&(column.mobs.len() as u16).to_le_bytes());
     for mob in &column.mobs {
@@ -98,7 +103,7 @@ pub fn encode_column(column: &Column) -> Vec<u8> {
     }
     let mut push_run = |block: Block, len: usize| {
         bytes.push(block as u8);
-        bytes.extend_from_slice(&(len as u16).to_le_bytes());
+        bytes.extend_from_slice(&((len - 1) as u16).to_le_bytes());
     };
     let mut run = (column.get(position(0)), 0);
     for i in 0..COLUMN_VOLUME {
@@ -117,7 +122,8 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     let body = bytes.strip_prefix(MAGIC).ok_or(SaveError::BadMagic)?;
     let (&version, body) = body.split_first().ok_or(SaveError::Truncated)?;
     let body = upgrade(version, body, MIGRATIONS)?;
-    let (&flags, body) = body.split_first().ok_or(SaveError::Truncated)?;
+    let (flags, body) = body.split_at_checked(2).ok_or(SaveError::Truncated)?;
+    let flags = u16::from_le_bytes([flags[0], flags[1]]);
     let (&populated, mut body) = body.split_first().ok_or(SaveError::Truncated)?;
     let mut column = Column::new();
     column.populated = populated != 0;
@@ -154,7 +160,7 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
             return Err(SaveError::Truncated);
         };
         let block = Block::try_from(block).map_err(SaveError::UnknownBlock)?;
-        let end = index + usize::from(u16::from_le_bytes([lo, hi]));
+        let end = index + usize::from(u16::from_le_bytes([lo, hi])) + 1;
         if end > COLUMN_VOLUME {
             return Err(SaveError::Overflow);
         }

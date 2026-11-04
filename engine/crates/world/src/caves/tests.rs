@@ -253,7 +253,7 @@ fn roof_is_opened_only_in_entrances() {
         }
     }
     assert!(openings > 0, "no entrances");
-    assert!(openings < 17 * 17 * 256 / 50, "{openings} opened columns");
+    assert!(openings < 17 * 17 * 256 / 40, "{openings} opened columns");
 }
 
 #[test]

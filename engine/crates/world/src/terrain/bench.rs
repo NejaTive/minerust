@@ -99,3 +99,28 @@ fn share_report() {
         println!("seed {seed}: {}", report.join(", "));
     }
 }
+
+#[test]
+#[ignore]
+fn climate_timing() {
+    let terrain = Terrain::new(1337);
+    let keys: Vec<ColumnPos> = (-8..8)
+        .flat_map(|z| (-8..8).map(move |x| ColumnPos::new(x, z)))
+        .collect();
+    let start = std::time::Instant::now();
+    for &key in &keys {
+        std::hint::black_box(terrain.compute_climate(key.x(), key.z()));
+    }
+    println!(
+        "climate: {:?} per column",
+        start.elapsed() / keys.len() as u32
+    );
+    let start = std::time::Instant::now();
+    for &key in &keys {
+        std::hint::black_box(terrain.generate_ground(key));
+    }
+    println!(
+        "ground: {:?} per column",
+        start.elapsed() / keys.len() as u32
+    );
+}

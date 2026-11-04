@@ -4,7 +4,7 @@ use crate::block::Block;
 use crate::mob::MobRecord;
 use crate::section::{SECTION_SIZE, SECTION_VOLUME, Section};
 
-pub const COLUMN_SECTIONS: i32 = 8;
+pub const COLUMN_SECTIONS: i32 = 16;
 pub const WORLD_HEIGHT: i32 = COLUMN_SECTIONS * SECTION_SIZE;
 
 #[derive(Clone)]
@@ -59,6 +59,19 @@ impl Column {
     pub fn set_with_data(&mut self, local: IVec3, block: Block, data: u8) {
         let (sy, in_section) = Self::split(local);
         self.sections[sy].set_with_data(in_section, block, data);
+    }
+
+    /// Блоки без данных столбика `(x, z)` снизу вверх; воздух пропускается.
+    pub(crate) fn set_stack(&mut self, x: i32, z: i32, blocks: &[Block]) {
+        assert!(blocks.len() <= WORLD_HEIGHT as usize);
+        assert!((0..SECTION_SIZE).contains(&x) && (0..SECTION_SIZE).contains(&z));
+        for (y, &block) in blocks.iter().enumerate() {
+            if block != Block::Air {
+                let in_section =
+                    (y as i32 % SECTION_SIZE) * SECTION_SIZE * SECTION_SIZE + z * SECTION_SIZE + x;
+                self.sections[y / SECTION_SIZE as usize].set_plain(in_section as usize, block);
+            }
+        }
     }
 
     fn split(local: IVec3) -> (usize, IVec3) {

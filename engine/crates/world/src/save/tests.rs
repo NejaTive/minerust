@@ -2,7 +2,7 @@ use super::*;
 use crate::pos::ColumnPos;
 use crate::terrain::Terrain;
 
-const HEADER: usize = 8;
+const HEADER: usize = 9;
 
 const BLOCKS: [Block; 13] = [
     Block::Air,
@@ -88,31 +88,6 @@ fn random_blocks_round_trip() {
         column.set(position(i), BLOCKS[(state as usize) % BLOCKS.len()]);
     }
     round_trip(&column);
-}
-
-#[test]
-fn reads_columns_saved_before_new_blocks() {
-    let mut bytes = b"MRC".to_vec();
-    bytes.push(1);
-    let columns = SECTION_SIZE * SECTION_SIZE;
-    for _ in 0..columns {
-        for (block, len) in [(3u8, 60u16), (2, 3), (1, 1), (0, 64)] {
-            bytes.push(block);
-            bytes.extend_from_slice(&len.to_le_bytes());
-        }
-    }
-    let column = decode_column(&bytes).expect("old column decodes");
-    let at = |y| column.get(IVec3::new(5, y, 9));
-    assert_eq!(
-        (at(0), at(59), at(60), at(63), at(64)),
-        (
-            Block::Stone,
-            Block::Stone,
-            Block::Dirt,
-            Block::Grass,
-            Block::Air
-        )
-    );
 }
 
 #[test]
@@ -219,32 +194,23 @@ fn rejects_extra_data() {
     let mut bytes = encode_column(&Column::new());
     bytes.extend_from_slice(&[0, 0, 0]);
     assert_eq!(decode_column(&bytes).err(), Some(SaveError::Overflow));
-
-    let mut bytes = encode_column(&Column::new());
-    bytes[HEADER + 1..HEADER + 3].copy_from_slice(&(COLUMN_VOLUME as u16 + 1).to_le_bytes());
-    assert_eq!(decode_column(&bytes).err(), Some(SaveError::Overflow));
 }
 
 #[test]
-fn v1_column_migrates_with_zero_data() {
+fn v3_body_gains_the_populated_flag() {
+    let v3 = [0b101, 0, 0, 7, 8, 9];
+    assert_eq!(v3_to_v4(&v3).expect("migrates"), [0b101, 1, 0, 0, 7, 8, 9]);
+}
+
+#[test]
+fn columns_before_the_taller_world_are_rejected() {
     let mut bytes = b"MRC".to_vec();
-    bytes.push(1);
-    bytes.push(0);
-    bytes.extend_from_slice(&(COLUMN_VOLUME as u16).to_le_bytes());
-    let column = decode_column(&bytes).expect("v1 decodes");
-    assert!(column.section(0).data().is_none());
-    assert_eq!(encode_column(&column).len(), bytes.len() + 4);
-}
-
-#[test]
-fn v3_column_migrates_as_populated() {
-    let terrain = Terrain::new(1337);
-    let v4 = encode_column(&terrain.generate(ColumnPos::ZERO));
-    let mut v3 = v4[4..].to_vec();
-    v3.remove(1);
-    let mut populated = v4[4..].to_vec();
-    populated[1] = 1;
-    assert_eq!(v3_to_v4(&v3).expect("migrates"), populated);
+    bytes.push(4);
+    bytes.extend_from_slice(&[0, 1, 0, 0]);
+    assert_eq!(
+        decode_column(&bytes).err(),
+        Some(SaveError::UnsupportedVersion(4))
+    );
 }
 
 #[test]
@@ -259,16 +225,19 @@ fn populated_flag_round_trips() {
 fn block_data_round_trips() {
     let mut column = Column::new();
     column.set_with_data(IVec3::new(2, 70, 3), Block::Log, 1);
-    column.set_with_data(IVec3::new(15, 127, 15), Block::Log, 2);
+    column.set_with_data(IVec3::new(15, 255, 15), Block::Log, 2);
     column.set_with_data(IVec3::new(0, 0, 0), Block::Torch, 4);
     column.set(IVec3::new(5, 70, 5), Block::Log);
     let bytes = round_trip(&column);
     let back = decode_column(&bytes).expect("decodes");
     assert_eq!(back.get_data(IVec3::new(2, 70, 3)), 1);
-    assert_eq!(back.get_data(IVec3::new(15, 127, 15)), 2);
+    assert_eq!(back.get_data(IVec3::new(15, 255, 15)), 2);
     assert_eq!(back.get_data(IVec3::new(0, 0, 0)), 4);
     assert_eq!(back.get_data(IVec3::new(5, 70, 5)), 0);
-    assert_eq!(bytes[4], 1 | 1 << 4 | 1 << 7);
+    assert_eq!(
+        u16::from_le_bytes([bytes[4], bytes[5]]),
+        1 | 1 << 4 | 1 << 15
+    );
     assert_eq!(
         bytes.len(),
         encode_column(&Column::new()).len() - RUN_SIZE + 3 * SECTION_VOLUME + runs_len(&bytes)
@@ -276,7 +245,8 @@ fn block_data_round_trips() {
 }
 
 fn runs_len(bytes: &[u8]) -> usize {
-    bytes.len() - HEADER - bytes[4].count_ones() as usize * SECTION_VOLUME
+    let flags = u32::from(bytes[4]).count_ones() + u32::from(bytes[5]).count_ones();
+    bytes.len() - HEADER - flags as usize * SECTION_VOLUME
 }
 
 #[test]
