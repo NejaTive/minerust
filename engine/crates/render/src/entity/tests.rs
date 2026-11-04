@@ -1,8 +1,10 @@
 use super::*;
+use world::mob::horse_variant;
 
 fn instance() -> MobInstance {
     MobInstance {
         kind: ModelKind::Pig,
+        variant: 0,
         feet: Vec3::new(10.0, 64.0, -5.0),
         yaw: 0.0,
         head_yaw: 0.0,
@@ -186,6 +188,9 @@ fn models_have_the_minecraft_box_counts() {
     assert_eq!(count(ModelKind::Mooshroom), 9 + 2);
     assert_eq!(count(ModelKind::PolarBear), 10);
     assert_eq!(count(ModelKind::Wolf), 11);
+    assert_eq!(count(ModelKind::Horse), 23);
+    assert_eq!(count(ModelKind::Donkey), 23);
+    assert_eq!(count(ModelKind::Llama), 9);
 }
 
 #[test]
@@ -199,6 +204,9 @@ fn each_model_draws_from_its_own_sheets() {
         (ModelKind::Mooshroom, EntityTexture::Mooshroom, 9),
         (ModelKind::PolarBear, EntityTexture::PolarBear, 10),
         (ModelKind::Wolf, EntityTexture::Wolf, 11),
+        (ModelKind::Horse, EntityTexture::HorseWhite, 23),
+        (ModelKind::Donkey, EntityTexture::Donkey, 23),
+        (ModelKind::Llama, EntityTexture::LlamaCreamy, 9),
     ] {
         let model = of_kind(kind);
         assert_eq!(boxes_on(&model, sheet), boxes, "{kind:?} {sheet:?}");
@@ -242,6 +250,9 @@ fn every_model_stays_on_its_sheet_and_faces_outward() {
         ModelKind::Mooshroom,
         ModelKind::PolarBear,
         ModelKind::Wolf,
+        ModelKind::Horse,
+        ModelKind::Donkey,
+        ModelKind::Llama,
     ] {
         let model = of_kind(kind);
         let verts = vertices(&model);
@@ -473,4 +484,141 @@ fn polar_bear_body_is_one_connected_mass_behind_the_head() {
     );
     assert!(front_max.x - front_min.x > 0.7);
     assert!(head.0.x - front_max.x < 0.45, "gap between head and body");
+}
+
+fn position_bounds(floats: &[f32]) -> (Vec3, Vec3) {
+    let points: Vec<Vec3> = floats
+        .as_chunks::<VERTEX_FLOATS>()
+        .0
+        .iter()
+        .map(|v| Vec3::new(v[0], v[1], v[2]))
+        .collect();
+    (
+        points.iter().copied().reduce(Vec3::min).unwrap(),
+        points.iter().copied().reduce(Vec3::max).unwrap(),
+    )
+}
+
+fn uvs(floats: &[f32]) -> Vec<[f32; 2]> {
+    floats
+        .as_chunks::<VERTEX_FLOATS>()
+        .0
+        .iter()
+        .map(|v| [v[3], v[4]])
+        .collect()
+}
+
+#[test]
+fn horse_colour_picks_the_sheet() {
+    for colour in 0..7u8 {
+        let horse = MobInstance {
+            variant: horse_variant(colour, 0),
+            ..of_kind(ModelKind::Horse)
+        };
+        let drawn: Vec<usize> = EntityTexture::ALL
+            .into_iter()
+            .filter(|&sheet| boxes_on(&horse, sheet) > 0)
+            .map(|sheet| sheet as usize)
+            .collect();
+        assert_eq!(
+            drawn,
+            [EntityTexture::HorseWhite as usize + usize::from(colour)]
+        );
+    }
+}
+
+#[test]
+fn horse_markings_are_a_second_layer_with_the_same_uv() {
+    for markings in 1..5u8 {
+        let horse = MobInstance {
+            variant: horse_variant(3, markings),
+            ..of_kind(ModelKind::Horse)
+        };
+        let sheet = sheets(&horse);
+        let base = &sheet[EntityTexture::HorseBrown as usize];
+        let layer = &sheet[EntityTexture::MarkingsWhite as usize + usize::from(markings) - 1];
+        assert_eq!(uvs(base), uvs(layer));
+        let (lo, hi) = (position_bounds(base), position_bounds(layer));
+        assert!(lo.0.x > hi.0.x && lo.1.x < hi.1.x, "{lo:?} {hi:?}");
+    }
+    let bare = sheets(&of_kind(ModelKind::Horse));
+    let first = EntityTexture::MarkingsWhite as usize;
+    assert!(bare[first..first + 4].iter().all(Vec::is_empty));
+}
+
+#[test]
+fn llama_colour_picks_the_sheet() {
+    for colour in 0..4u8 {
+        let llama = MobInstance {
+            variant: colour,
+            ..of_kind(ModelKind::Llama)
+        };
+        let sheet = EntityTexture::ALL[EntityTexture::LlamaCreamy as usize + usize::from(colour)];
+        assert_eq!(boxes_on(&llama, sheet), 9);
+    }
+}
+
+#[test]
+fn horse_and_llama_sheets_use_their_vanilla_grids() {
+    assert_eq!(EntityTexture::HorseBrown.units(), Vec2::new(128.0, 128.0));
+    assert_eq!(
+        EntityTexture::MarkingsWhiteDots.units(),
+        Vec2::new(128.0, 128.0)
+    );
+    assert_eq!(EntityTexture::Donkey.units(), Vec2::new(128.0, 128.0));
+    assert_eq!(EntityTexture::LlamaGray.units(), Vec2::new(128.0, 64.0));
+}
+
+#[test]
+fn texture_order_matches_discriminants() {
+    for (i, sheet) in EntityTexture::ALL.into_iter().enumerate() {
+        assert_eq!(sheet as usize, i);
+    }
+    assert_eq!(EntityTexture::ALL.len(), TEXTURES);
+}
+
+#[test]
+fn donkey_is_the_horse_model_scaled_down() {
+    let (hmin, hmax) = bounds(&of_kind(ModelKind::Horse));
+    let (dmin, dmax) = bounds(&of_kind(ModelKind::Donkey));
+    let ratio = (dmax.x - dmin.x) / (hmax.x - hmin.x);
+    assert!((ratio - 0.87).abs() < 0.02, "{ratio}");
+}
+
+#[test]
+fn horse_and_llama_stand_on_their_feet_with_the_right_footprint() {
+    for (kind, width, length) in [(ModelKind::Horse, 1.4, 1.9), (ModelKind::Llama, 0.9, 1.1)] {
+        let model = of_kind(kind);
+        let (min, max) = bounds(&model);
+        assert!((min.y - model.feet.y).abs() < 0.01, "{kind:?} {min}");
+        assert!(max.z - min.z <= width + 0.2, "{kind:?} {min} {max}");
+        assert!(max.x - min.x >= length - 0.2, "{kind:?} {min} {max}");
+    }
+}
+
+#[test]
+fn horse_legs_swing_but_the_tail_stays() {
+    let still = of_kind(ModelKind::Horse);
+    let walking = MobInstance {
+        limb_phase: 1.0,
+        limb_swing: 1.0,
+        ..still.clone()
+    };
+    let sheet = |instance: &MobInstance| {
+        position_bounds(&sheets(instance)[EntityTexture::HorseWhite as usize])
+    };
+    assert_ne!(sheet(&still), sheet(&walking));
+    let parts = |instance: &MobInstance| -> Vec<f32> {
+        equine::horse_parts(instance)
+            .iter()
+            .filter(|part| part.pivot == Vec3::new(0.0, 3.0, 14.0))
+            .flat_map(|part| {
+                let mut out = Vec::new();
+                push_box(part, instance, &mut out);
+                out
+            })
+            .collect()
+    };
+    assert_eq!(parts(&still), parts(&walking));
+    assert_eq!(parts(&still).len(), 3 * 36 * VERTEX_FLOATS);
 }

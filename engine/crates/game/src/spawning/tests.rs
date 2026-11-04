@@ -1,4 +1,5 @@
 use super::*;
+use world::mob::{horse_colour, horse_markings};
 
 fn kinds(biome: Biome) -> Vec<(MobKind, u32, u32, u32)> {
     animals(biome)
@@ -23,7 +24,6 @@ fn farm_and(wolf_weight: u32) -> Vec<(MobKind, u32, u32, u32)> {
 #[test]
 fn plain_biomes_keep_the_farm_animals() {
     for biome in [
-        Biome::Plains,
         Biome::BirchForest,
         Biome::RoofedForest,
         Biome::FlowerForest,
@@ -109,4 +109,90 @@ fn pick_follows_the_weights() {
     assert!(share(MobKind::Wolf) > 200 && share(MobKind::Wolf) < 450);
     assert!(share(MobKind::Sheep) > share(MobKind::Cow));
     assert!(pick(&mut rng, &[]).is_none());
+}
+
+fn with(extra: &[(MobKind, u32, u32, u32)]) -> Vec<(MobKind, u32, u32, u32)> {
+    let mut list = FARM.to_vec();
+    list.extend_from_slice(extra);
+    list
+}
+
+#[test]
+fn plains_add_horses_and_donkeys() {
+    for biome in [Biome::Plains, Biome::SunflowerPlains] {
+        assert_eq!(
+            kinds(biome),
+            with(&[(MobKind::Horse, 5, 2, 6), (MobKind::Donkey, 1, 1, 3)]),
+            "{biome:?}"
+        );
+    }
+}
+
+#[test]
+fn savannas_add_horses_and_donkeys() {
+    let savanna = with(&[(MobKind::Horse, 1, 2, 6), (MobKind::Donkey, 1, 1, 1)]);
+    for biome in [Biome::Savanna, Biome::SavannaM, Biome::SavannaPlateauM] {
+        assert_eq!(kinds(biome), savanna, "{biome:?}");
+    }
+}
+
+#[test]
+fn savanna_plateau_also_has_llamas() {
+    let plateau = with(&[
+        (MobKind::Horse, 1, 2, 6),
+        (MobKind::Donkey, 1, 1, 1),
+        (MobKind::Llama, 8, 4, 4),
+    ]);
+    assert_eq!(kinds(Biome::SavannaPlateau), plateau);
+}
+
+#[test]
+fn extreme_hills_have_llamas() {
+    for biome in [
+        Biome::ExtremeHills,
+        Biome::ExtremeHillsEdge,
+        Biome::ExtremeHillsPlus,
+        Biome::ExtremeHillsM,
+        Biome::ExtremeHillsPlusM,
+    ] {
+        assert_eq!(
+            kinds(biome),
+            with(&[(MobKind::Llama, 5, 4, 6)]),
+            "{biome:?}"
+        );
+    }
+}
+
+#[test]
+fn group_colour_is_shared_and_markings_are_personal() {
+    let mut rng = Rng::new(11);
+    for _ in 0..50 {
+        let colour = group_colour(&mut rng, MobKind::Horse);
+        assert!(colour < HORSE_COLOURS);
+        let group: Vec<u8> = (0..6)
+            .map(|_| variant_in_group(&mut rng, MobKind::Horse, colour))
+            .collect();
+        assert!(group.iter().all(|&v| horse_colour(v) == colour));
+        assert!(group.iter().all(|&v| horse_markings(v) < HORSE_MARKINGS));
+    }
+    let markings: std::collections::HashSet<u8> = (0..200)
+        .map(|_| horse_markings(variant_in_group(&mut rng, MobKind::Horse, 2)))
+        .collect();
+    assert_eq!(markings.len(), usize::from(HORSE_MARKINGS));
+}
+
+#[test]
+fn llama_colour_is_the_variant_and_others_have_none() {
+    let mut rng = Rng::new(5);
+    let colours: std::collections::HashSet<u8> = (0..200)
+        .map(|_| random_variant(&mut rng, MobKind::Llama))
+        .collect();
+    assert_eq!(colours, (0..LLAMA_COLOURS).collect());
+    for kind in [MobKind::Donkey, MobKind::Pig, MobKind::Wolf] {
+        assert_eq!(random_variant(&mut rng, kind), 0);
+    }
+    let horses: std::collections::HashSet<u8> = (0..500)
+        .map(|_| horse_colour(random_variant(&mut rng, MobKind::Horse)))
+        .collect();
+    assert_eq!(horses.len(), usize::from(HORSE_COLOURS));
 }

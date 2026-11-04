@@ -16,6 +16,28 @@ const ENTITY_MOOSHROOM: &str = "assets/minecraft/textures/entity/cow/mooshroom.p
 const ENTITY_POLAR_BEAR: &str = "assets/minecraft/textures/entity/bear/polarbear.png";
 const ENTITY_WOLF: &str = "assets/minecraft/textures/entity/wolf/wolf.png";
 const BLOCK_MUSHROOM_RED: &str = "assets/minecraft/textures/blocks/mushroom_red.png";
+const ENTITY_HORSE: [&str; 7] = [
+    "assets/minecraft/textures/entity/horse/horse_white.png",
+    "assets/minecraft/textures/entity/horse/horse_creamy.png",
+    "assets/minecraft/textures/entity/horse/horse_chestnut.png",
+    "assets/minecraft/textures/entity/horse/horse_brown.png",
+    "assets/minecraft/textures/entity/horse/horse_black.png",
+    "assets/minecraft/textures/entity/horse/horse_gray.png",
+    "assets/minecraft/textures/entity/horse/horse_darkbrown.png",
+];
+const ENTITY_HORSE_MARKINGS: [&str; 4] = [
+    "assets/minecraft/textures/entity/horse/horse_markings_white.png",
+    "assets/minecraft/textures/entity/horse/horse_markings_whitefield.png",
+    "assets/minecraft/textures/entity/horse/horse_markings_whitedots.png",
+    "assets/minecraft/textures/entity/horse/horse_markings_blackdots.png",
+];
+const ENTITY_DONKEY: &str = "assets/minecraft/textures/entity/horse/donkey.png";
+const ENTITY_LLAMA: [&str; 4] = [
+    "assets/minecraft/textures/entity/llama/llama_creamy.png",
+    "assets/minecraft/textures/entity/llama/llama_white.png",
+    "assets/minecraft/textures/entity/llama/llama_brown.png",
+    "assets/minecraft/textures/entity/llama/llama_gray.png",
+];
 const ENTITY_SHEEP: &str = "assets/minecraft/textures/entity/sheep/sheep.png";
 const ENTITY_SHEEP_FUR: &str = "assets/minecraft/textures/entity/sheep/sheep_fur.png";
 const ITEM_SPAWN_EGG: &str = "assets/minecraft/textures/items/spawn_egg.png";
@@ -69,6 +91,11 @@ pub struct EntityImages {
     pub mooshroom: DecodedImage,
     pub polar_bear: DecodedImage,
     pub wolf: DecodedImage,
+    /// Листы лошади, осла и ламы квадратные (лошади, 128×128 в ванили) или 2:1 (лама, 128×64).
+    pub horse: [DecodedImage; 7],
+    pub horse_markings: [DecodedImage; 4],
+    pub donkey: DecodedImage,
+    pub llama: [DecodedImage; 4],
     /// Квадратная блочная текстура гриба для скрещённых плоскостей на спине грибной коровы.
     pub mushroom_red: DecodedImage,
     pub spawn_egg: DecodedImage,
@@ -276,6 +303,11 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
     let mooshroom = image(ENTITY_MOOSHROOM, sheet);
     let polar_bear = image(ENTITY_POLAR_BEAR, sheet);
     let wolf = image(ENTITY_WOLF, sheet);
+    let square = |i: &DecodedImage| i.width >= 128 && i.width == i.height;
+    let horse = ENTITY_HORSE.map(|path| image(path, square));
+    let horse_markings = ENTITY_HORSE_MARKINGS.map(|path| image(path, square));
+    let donkey = image(ENTITY_DONKEY, square);
+    let llama = ENTITY_LLAMA.map(|path| image(path, |i| i.width >= 128 && i.width == 2 * i.height));
     let mushroom_red = image(BLOCK_MUSHROOM_RED, |i| {
         i.width >= MIN_TILE_SIZE && i.width == i.height
     });
@@ -294,6 +326,10 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
         mooshroom,
         polar_bear,
         wolf,
+        horse,
+        horse_markings,
+        donkey,
+        llama,
         mushroom_red,
         spawn_egg,
         spawn_egg_overlay,
@@ -520,6 +556,118 @@ fn builtin_gui_file(name: &str) -> Option<&'static [u8]> {
 }
 
 const BUILTIN_ENTITIES: &[(&str, &[u8])] = &[
+    (
+        ENTITY_HORSE[0],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_white.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE[1],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_creamy.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE[2],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_chestnut.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE[3],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_brown.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE[4],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_black.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE[5],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_gray.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE[6],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_darkbrown.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE_MARKINGS[0],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_markings_white.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE_MARKINGS[1],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_markings_whitefield.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE_MARKINGS[2],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_markings_whitedots.png"
+        )),
+    ),
+    (
+        ENTITY_HORSE_MARKINGS[3],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/horse_markings_blackdots.png"
+        )),
+    ),
+    (
+        ENTITY_DONKEY,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/horse/donkey.png"
+        )),
+    ),
+    (
+        ENTITY_LLAMA[0],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/llama/llama_creamy.png"
+        )),
+    ),
+    (
+        ENTITY_LLAMA[1],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/llama/llama_white.png"
+        )),
+    ),
+    (
+        ENTITY_LLAMA[2],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/llama/llama_brown.png"
+        )),
+    ),
+    (
+        ENTITY_LLAMA[3],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/llama/llama_gray.png"
+        )),
+    ),
     (
         ENTITY_PIG,
         include_bytes!(concat!(

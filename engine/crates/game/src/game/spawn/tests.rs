@@ -67,7 +67,7 @@ fn cell_at(x: i32, z: i32) -> IVec3 {
 }
 
 fn cow_at(game: &mut Game, cell: IVec3) -> Mob {
-    game.new_mob(MobKind::Cow, cell, &mut Rng::new(5))
+    game.new_mob(MobKind::Cow, 0, cell, &mut Rng::new(5))
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use crate::mob::horse_variant;
 use crate::pos::ColumnPos;
 use crate::terrain::Terrain;
 
@@ -279,11 +280,13 @@ fn mobs_round_trip() {
             kind: MobKind::Pig,
             pos: glam::Vec3::new(3.5, 70.0, -2.25),
             yaw: 1.5,
+            variant: 0,
         },
         MobRecord {
             kind: MobKind::Pig,
             pos: glam::Vec3::new(0.5, 64.0, 9.0),
             yaw: -0.5,
+            variant: horse_variant(6, 4),
         },
     ];
     let decoded = decode_column(&encode_column(&column)).expect("decodes");
@@ -300,6 +303,7 @@ fn every_mob_kind_round_trips() {
             kind,
             pos: glam::Vec3::new(i as f32 + 0.5, 70.0, -2.25),
             yaw: i as f32 * 0.5,
+            variant: i as u8,
         })
         .collect();
     let decoded = decode_column(&encode_column(&column)).expect("decodes");
@@ -313,8 +317,36 @@ fn unknown_mob_kind_is_rejected() {
         kind: MobKind::Pig,
         pos: glam::Vec3::ZERO,
         yaw: 0.0,
+        variant: 0,
     });
     let mut bytes = encode_column(&column);
     bytes[HEADER] = 99;
     assert_eq!(decode_column(&bytes).err(), Some(SaveError::UnknownMob(99)));
+}
+
+#[test]
+fn mob_variant_survives_the_save() {
+    let mut column = Column::new();
+    column.mobs = [horse_variant(3, 2), horse_variant(0, 0), 3]
+        .into_iter()
+        .map(|variant| MobRecord {
+            kind: MobKind::Horse,
+            pos: glam::Vec3::ZERO,
+            yaw: 0.0,
+            variant,
+        })
+        .collect();
+    let decoded = decode_column(&encode_column(&column)).expect("decodes");
+    let variants: Vec<u8> = decoded.mobs.iter().map(|mob| mob.variant).collect();
+    assert_eq!(variants, [horse_variant(3, 2), 0, 3]);
+}
+
+#[test]
+fn previous_format_is_not_supported() {
+    let mut bytes = encode_column(&Column::new());
+    bytes[3] = FORMAT_VERSION - 1;
+    assert_eq!(
+        decode_column(&bytes).err(),
+        Some(SaveError::UnsupportedVersion(FORMAT_VERSION - 1))
+    );
 }

@@ -10,10 +10,13 @@ pub enum MobKind {
     Mooshroom,
     PolarBear,
     Wolf,
+    Horse,
+    Donkey,
+    Llama,
 }
 
 impl MobKind {
-    pub const ALL: [MobKind; 7] = [
+    pub const ALL: [MobKind; 10] = [
         MobKind::Pig,
         MobKind::Chicken,
         MobKind::Cow,
@@ -21,6 +24,9 @@ impl MobKind {
         MobKind::Mooshroom,
         MobKind::PolarBear,
         MobKind::Wolf,
+        MobKind::Horse,
+        MobKind::Donkey,
+        MobKind::Llama,
     ];
 }
 
@@ -40,4 +46,25 @@ pub struct MobRecord {
     pub kind: MobKind,
     pub pos: Vec3,
     pub yaw: f32,
+    pub variant: u8,
 }
+
+pub const HORSE_COLOURS: u8 = 7;
+pub const HORSE_MARKINGS: u8 = 5;
+pub const LLAMA_COLOURS: u8 = 4;
+
+/// Вариант лошади: младшие 4 бита — окрас (0..7), старшие — отметины (0 — нет, 1..=4).
+pub const fn horse_variant(colour: u8, markings: u8) -> u8 {
+    colour | markings << 4
+}
+
+pub const fn horse_colour(variant: u8) -> u8 {
+    variant & 0x0F
+}
+
+pub const fn horse_markings(variant: u8) -> u8 {
+    variant >> 4
+}
+
+#[cfg(test)]
+mod tests;

@@ -42,6 +42,9 @@ pub enum ModelKind {
     Mooshroom,
     PolarBear,
     Wolf,
+    Horse,
+    Donkey,
+    Llama,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -55,6 +58,7 @@ pub struct ShadowPatch {
 #[derive(Clone, Debug)]
 pub struct MobInstance {
     pub kind: ModelKind,
+    pub variant: u8,
     pub feet: Vec3,
     pub yaw: f32,
     pub head_yaw: f32,
@@ -89,6 +93,22 @@ pub enum EntityTexture {
     PolarBear,
     Wolf,
     Mushroom,
+    HorseWhite,
+    HorseCreamy,
+    HorseChestnut,
+    HorseBrown,
+    HorseBlack,
+    HorseGray,
+    HorseDarkBrown,
+    MarkingsWhite,
+    MarkingsWhiteField,
+    MarkingsWhiteDots,
+    MarkingsBlackDots,
+    Donkey,
+    LlamaCreamy,
+    LlamaWhite,
+    LlamaBrown,
+    LlamaGray,
 }
 
 impl EntityTexture {
@@ -102,18 +122,50 @@ impl EntityTexture {
         EntityTexture::PolarBear,
         EntityTexture::Wolf,
         EntityTexture::Mushroom,
+        EntityTexture::HorseWhite,
+        EntityTexture::HorseCreamy,
+        EntityTexture::HorseChestnut,
+        EntityTexture::HorseBrown,
+        EntityTexture::HorseBlack,
+        EntityTexture::HorseGray,
+        EntityTexture::HorseDarkBrown,
+        EntityTexture::MarkingsWhite,
+        EntityTexture::MarkingsWhiteField,
+        EntityTexture::MarkingsWhiteDots,
+        EntityTexture::MarkingsBlackDots,
+        EntityTexture::Donkey,
+        EntityTexture::LlamaCreamy,
+        EntityTexture::LlamaWhite,
+        EntityTexture::LlamaBrown,
+        EntityTexture::LlamaGray,
     ];
 
     fn units(self) -> Vec2 {
         match self {
             EntityTexture::PolarBear => Vec2::new(128.0, 64.0),
             EntityTexture::Mushroom => MUSHROOM_UNITS,
+            EntityTexture::LlamaCreamy
+            | EntityTexture::LlamaWhite
+            | EntityTexture::LlamaBrown
+            | EntityTexture::LlamaGray => Vec2::new(128.0, 64.0),
+            EntityTexture::HorseWhite
+            | EntityTexture::HorseCreamy
+            | EntityTexture::HorseChestnut
+            | EntityTexture::HorseBrown
+            | EntityTexture::HorseBlack
+            | EntityTexture::HorseGray
+            | EntityTexture::HorseDarkBrown
+            | EntityTexture::MarkingsWhite
+            | EntityTexture::MarkingsWhiteField
+            | EntityTexture::MarkingsWhiteDots
+            | EntityTexture::MarkingsBlackDots
+            | EntityTexture::Donkey => Vec2::new(128.0, 128.0),
             _ => Vec2::new(64.0, 32.0),
         }
     }
 }
 
-pub const TEXTURES: usize = 9;
+pub const TEXTURES: usize = 25;
 
 pub type MobVertices = [Vec<f32>; TEXTURES];
 
@@ -162,6 +214,8 @@ fn leg_rotation(instance: &MobInstance, phase: f32) -> Mat3 {
         (instance.limb_phase * LEG_FREQUENCY + phase).cos() * LEG_SWING * instance.limb_swing,
     )
 }
+
+mod equine;
 
 const WILD_TAIL_ANGLE: f32 = PI / 5.0;
 const MUSHROOM_YAW: f32 = 42.0 * PI / 180.0;
@@ -635,7 +689,12 @@ fn push_double_sided(quad: [(Vec3, Vec2); 4], instance: &MobInstance, out: &mut 
 }
 
 fn to_world(model: Vec3, instance: &MobInstance) -> Vec3 {
-    let local = Vec3::new(-model.x, MODEL_FEET - model.y, model.z) / PIXELS_PER_BLOCK;
+    let scale = if instance.kind == ModelKind::Donkey {
+        equine::DONKEY_SCALE
+    } else {
+        1.0
+    };
+    let local = Vec3::new(-model.x, MODEL_FEET - model.y, model.z) * scale / PIXELS_PER_BLOCK;
     instance.feet + Mat3::from_rotation_y(-instance.yaw - FRAC_PI_2) * local
 }
 
@@ -655,6 +714,9 @@ pub fn push_mob(instance: &MobInstance, out: &mut MobVertices) {
         ModelKind::PolarBear => polar_bear_parts(instance),
         ModelKind::Wolf => wolf_parts(instance),
         ModelKind::Sheep => sheep_parts(instance),
+        ModelKind::Horse => equine::horse_parts(instance),
+        ModelKind::Donkey => equine::donkey_parts(instance),
+        ModelKind::Llama => equine::llama_parts(instance),
     };
     for part in &parts {
         push_box(part, instance, &mut out[part.sheet as usize]);
@@ -892,6 +954,22 @@ pub fn create_texture_groups(
                 EntityTexture::PolarBear => &images.polar_bear,
                 EntityTexture::Wolf => &images.wolf,
                 EntityTexture::Mushroom => &images.mushroom_red,
+                EntityTexture::HorseWhite => &images.horse[0],
+                EntityTexture::HorseCreamy => &images.horse[1],
+                EntityTexture::HorseChestnut => &images.horse[2],
+                EntityTexture::HorseBrown => &images.horse[3],
+                EntityTexture::HorseBlack => &images.horse[4],
+                EntityTexture::HorseGray => &images.horse[5],
+                EntityTexture::HorseDarkBrown => &images.horse[6],
+                EntityTexture::MarkingsWhite => &images.horse_markings[0],
+                EntityTexture::MarkingsWhiteField => &images.horse_markings[1],
+                EntityTexture::MarkingsWhiteDots => &images.horse_markings[2],
+                EntityTexture::MarkingsBlackDots => &images.horse_markings[3],
+                EntityTexture::Donkey => &images.donkey,
+                EntityTexture::LlamaCreamy => &images.llama[0],
+                EntityTexture::LlamaWhite => &images.llama[1],
+                EntityTexture::LlamaBrown => &images.llama[2],
+                EntityTexture::LlamaGray => &images.llama[3],
             };
             let texture = device.create_texture_with_data(
                 queue,
