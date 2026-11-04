@@ -8,14 +8,20 @@ const emit = defineEmits<{ 'canvas-click': [] }>()
 
 const canvas = ref<HTMLCanvasElement>()
 
-const { requestLock, releaseCursor, save } = useEngine(canvas, props.worldId)
+const { engine, requestLock, releaseCursor, save } = useEngine(canvas, props.worldId)
 
 function onCanvasClick() {
-  if (gameState.locked || gameState.inventoryOpen || gameState.consoleOpen) return
+  if (
+    gameState.locked ||
+    gameState.inventoryOpen ||
+    gameState.consoleOpen ||
+    gameState.containerOpen
+  )
+    return
   emit('canvas-click')
 }
 
-defineExpose({ requestLock, releaseCursor, save })
+defineExpose({ engine, requestLock, releaseCursor, save })
 </script>
 
 <template>

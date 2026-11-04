@@ -25,7 +25,7 @@ fn sunflower_top_is_a_cross_with_a_head_on_the_east_side() {
     let layers = |tile: Tile| {
         verts
             .iter()
-            .filter(|v| v.layer() == tile.layer() as u8)
+            .filter(|v| v.layer() == tile.layer() as u16)
             .count()
     };
     assert_eq!(layers(Tile::SunflowerTop), 16);
@@ -33,7 +33,7 @@ fn sunflower_top_is_a_cross_with_a_head_on_the_east_side() {
     assert_eq!(layers(Tile::SunflowerBack), 4);
     let head_x: Vec<f32> = verts
         .iter()
-        .filter(|v| v.layer() == Tile::SunflowerFront.layer() as u8)
+        .filter(|v| v.layer() == Tile::SunflowerFront.layer() as u16)
         .map(|v| v.position()[0] - AT.x as f32)
         .collect();
     assert!(head_x.iter().all(|&x| x == 10.0 / 16.0), "{head_x:?}");

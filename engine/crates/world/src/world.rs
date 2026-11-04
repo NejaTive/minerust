@@ -6,6 +6,7 @@ use crate::pos::{ColumnPos, SectionPos};
 
 use crate::block::{Block, FLUID_SOURCE, FluidKind, VINE_SIDES, VINE_TOP, fluid_height};
 use crate::boxes::BoxList;
+use crate::chest::{HALF_NONE, half_of};
 use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::mob::MobRecord;
 use crate::section::SECTION_SIZE;
@@ -94,13 +95,39 @@ impl World {
             return false;
         }
         let (key, local) = split(pos);
+        let partner = self.chest_partner(pos);
         let Some(column) = self.columns.get_mut(&key) else {
             return false;
         };
         column.set_with_data(local, block, data);
         self.edited.insert(key);
         self.dirty.insert(key);
+        let paired = block == Block::Chest && half_of(data) != HALF_NONE;
+        if let Some(partner) = partner.filter(|_| !paired) {
+            self.unlink_chest(partner);
+        }
+        if block == Block::Chest && !paired {
+            self.link_chest(pos);
+        }
         true
+    }
+
+    pub(crate) fn rewrite_data(&mut self, pos: IVec3, data: u8) {
+        let (key, local) = split(pos);
+        if let Some(column) = self.columns.get_mut(&key) {
+            let block = column.get(local);
+            column.set_with_data(local, block, data);
+            self.edited.insert(key);
+            self.dirty.insert(key);
+        }
+    }
+
+    pub(crate) fn column_mut(&mut self, key: ColumnPos) -> Option<&mut Column> {
+        self.columns.get_mut(&key)
+    }
+
+    pub(crate) fn mark_edited(&mut self, key: ColumnPos) {
+        self.edited.insert(key);
     }
 
     pub fn vine_sides(&self, pos: IVec3, data: u8) -> u8 {
@@ -335,7 +362,7 @@ pub fn affected_sections(pos: IVec3) -> Vec<SectionPos> {
     keys
 }
 
-fn split(pos: IVec3) -> (ColumnPos, IVec3) {
+pub(crate) fn split(pos: IVec3) -> (ColumnPos, IVec3) {
     let key = ColumnPos::of_block(pos);
     let local = IVec3::new(
         pos.x.rem_euclid(SECTION_SIZE),

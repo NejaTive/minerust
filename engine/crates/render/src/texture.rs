@@ -1,7 +1,7 @@
 use wgpu::util::DeviceExt;
 use world::tile::Tile;
 
-use world::textures::TextureSet;
+use world::textures::{LAYERS_PER_ARRAY, TextureSet};
 
 pub fn mip_levels(size: u32) -> u32 {
     size.ilog2() + 1
@@ -102,33 +102,56 @@ pub(crate) fn create_animation_table(device: &wgpu::Device, set: &TextureSet) ->
     })
 }
 
+pub(crate) fn layer_bytes(size: u32) -> usize {
+    (0..mip_levels(size))
+        .map(|level| ((size >> level).pow(2) * 4) as usize)
+        .sum()
+}
+
+/// Второй массив начинается со слоя `LAYERS_PER_ARRAY`: лимит WebGPU по умолчанию — 256 слоёв
+/// на текстуру; шейдер выбирает массив по номеру слоя (`sample_layer`).
+pub(crate) fn split_layers(set: &TextureSet) -> [(u32, Vec<u8>); 2] {
+    let mut data = generate(set);
+    let first = (set.layer_count() as usize).min(LAYERS_PER_ARRAY);
+    let rest = data.split_off(first * layer_bytes(set.size()));
+    [
+        (first as u32, data),
+        (set.layer_count() - first as u32, rest),
+    ]
+}
+
 pub(crate) fn create_block_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     set: &TextureSet,
-) -> wgpu::TextureView {
-    let texture = device.create_texture_with_data(
-        queue,
-        &wgpu::TextureDescriptor {
-            label: Some("blocks"),
-            size: wgpu::Extent3d {
-                width: set.size(),
-                height: set.size(),
-                depth_or_array_layers: set.layer_count(),
+) -> [wgpu::TextureView; 2] {
+    split_layers(set).map(|(layers, data)| {
+        let layers = layers.max(1);
+        let mut data = data;
+        data.resize(layers as usize * layer_bytes(set.size()), 0);
+        let texture = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("blocks"),
+                size: wgpu::Extent3d {
+                    width: set.size(),
+                    height: set.size(),
+                    depth_or_array_layers: layers,
+                },
+                mip_level_count: mip_levels(set.size()),
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: mip_levels(set.size()),
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-        wgpu::util::TextureDataOrder::LayerMajor,
-        &generate(set),
-    );
-    texture.create_view(&wgpu::TextureViewDescriptor {
-        dimension: Some(wgpu::TextureViewDimension::D2Array),
-        ..Default::default()
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &data,
+        );
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        })
     })
 }
 

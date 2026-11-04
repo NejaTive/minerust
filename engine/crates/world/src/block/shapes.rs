@@ -5,6 +5,28 @@ use super::*;
 const FENCE_REACH_UNITS: u8 = 24;
 const GATE_REACH_UNITS: u8 = 24;
 
+pub const CAULDRON_LEVELS: u8 = 3;
+const CAULDRON_WATER_BASE: u8 = 6;
+const CAULDRON_WATER_STEP: u8 = 3;
+
+pub const POT_PLANTS: [Block; 15] = [
+    Block::Poppy,
+    Block::BlueOrchid,
+    Block::Allium,
+    Block::Houstonia,
+    Block::RedTulip,
+    Block::OrangeTulip,
+    Block::WhiteTulip,
+    Block::PinkTulip,
+    Block::OxeyeDaisy,
+    Block::Dandelion,
+    Block::RedMushroom,
+    Block::BrownMushroom,
+    Block::DeadBush,
+    Block::Fern,
+    Block::Cactus,
+];
+
 const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
 
 fn is_full_cube(block: Block) -> bool {
@@ -38,7 +60,8 @@ impl Block {
 
     /// Правая кнопка открывает и закрывает; железная дверь ждёт механизмов.
     pub fn opens_by_hand(self) -> bool {
-        self.is_gate()
+        matches!(self, Block::Chest | Block::FlowerPot)
+            || self.is_gate()
             || (self.is_door() && !matches!(self, Block::IronDoor | Block::IronDoorUpper))
     }
 
@@ -200,6 +223,100 @@ impl Block {
             RAIL_UNITS
         };
         BoxList::of(&[VoxelBox::new([0, 0, 0], [16, height, 16])])
+    }
+
+    /// Коробки сундука: в системе взгляда спереди `a` растёт вправо, `c` — вглубь от лица.
+    pub(super) fn chest_boxes(data: u8) -> BoxList {
+        let half = data >> chest::HALF_SHIFT & chest::HALF_MASK;
+        let pieces: [([u8; 2], [u8; 2], [u8; 2]); 3] = if half == chest::HALF_NONE {
+            [
+                ([1, 15], [0, 10], [1, 15]),
+                ([1, 15], [9, 14], [1, 15]),
+                ([7, 9], [7, 11], [0, 1]),
+            ]
+        } else {
+            let (lo, hi) = if half == chest::HALF_LEFT {
+                (0, 16)
+            } else {
+                (16, 32)
+            };
+            let clip = |a: [u8; 2]| [a[0].max(lo) - lo, a[1].min(hi).saturating_sub(lo)];
+            [
+                (clip([1, 31]), [0, 10], [1, 15]),
+                (clip([1, 31]), [9, 14], [1, 15]),
+                (clip([15, 17]), [7, 11], [0, 1]),
+            ]
+        };
+        let mut list = BoxList::EMPTY;
+        for (a, y, c) in pieces {
+            if a[0] >= a[1] {
+                continue;
+            }
+            let b = VoxelBox::new([16 - a[1], y[0], c[0]], [16 - a[0], y[1], c[1]]);
+            list.push(b.turned(data & chest::FACING_MASK));
+        }
+        list
+    }
+
+    pub(super) fn cauldron_boxes() -> BoxList {
+        let b = VoxelBox::new;
+        BoxList::of(&[
+            b([0, 3, 0], [16, 4, 16]),
+            b([0, 4, 0], [2, 16, 16]),
+            b([14, 4, 0], [16, 16, 16]),
+            b([2, 4, 0], [14, 16, 2]),
+            b([2, 4, 14], [14, 16, 16]),
+            b([0, 0, 0], [4, 3, 4]),
+            b([12, 0, 0], [16, 3, 4]),
+            b([0, 0, 12], [4, 3, 16]),
+            b([12, 0, 12], [16, 3, 16]),
+        ])
+    }
+
+    /// Высота воды в котле в 1/16 блока; `None` — пусто.
+    pub fn cauldron_water_units(data: u8) -> Option<u8> {
+        let level = data.min(CAULDRON_LEVELS);
+        (level > 0).then_some(CAULDRON_WATER_BASE + CAULDRON_WATER_STEP * level)
+    }
+
+    /// Плитка грани `box_index`-й коробки: у котла стенки, дно и ножки смотрят разными плитками.
+    pub fn box_tile(
+        self,
+        box_index: usize,
+        facing: Facing,
+        normal: IVec3,
+        data: u8,
+    ) -> Option<Tile> {
+        match self {
+            Block::Cauldron => Some(match (box_index, facing) {
+                (_, Facing::Bottom) => Tile::CauldronBottom,
+                (0, Facing::Top) => Tile::CauldronInner,
+                (1..=4, Facing::Top) => Tile::CauldronTop,
+                (1..=4, Facing::Side) => {
+                    let outward = [IVec3::NEG_X, IVec3::X, IVec3::NEG_Z, IVec3::Z][box_index - 1];
+                    if normal == -outward {
+                        Tile::CauldronInner
+                    } else {
+                        Tile::CauldronSide
+                    }
+                }
+                _ => Tile::CauldronSide,
+            }),
+            Block::FlowerPot if facing == Facing::Top => Some(Tile::Dirt),
+            _ => self.face_tile(facing, normal, data),
+        }
+    }
+
+    /// Растение в горшке по `data`; 0 — пусто.
+    pub fn pot_plant(data: u8) -> Option<Block> {
+        POT_PLANTS.get(usize::from(data).checked_sub(1)?).copied()
+    }
+
+    pub fn pot_code(plant: Block) -> Option<u8> {
+        POT_PLANTS
+            .iter()
+            .position(|&p| p == plant)
+            .map(|i| i as u8 + 1)
     }
 
     /// Коробки столкновений: у заборов и калиток они выше блока (1.5), у открытой калитки пусты.

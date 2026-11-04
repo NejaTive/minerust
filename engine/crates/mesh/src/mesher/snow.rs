@@ -38,7 +38,7 @@ fn snow_layer_is_a_two_sixteenths_box_in_the_solid_pass() {
     let verts = vertices(&meshes.solid);
     assert_eq!(verts.len(), 24);
     for vertex in &verts {
-        assert_eq!(vertex.layer(), Tile::Snow.layer() as u8);
+        assert_eq!(vertex.layer(), Tile::Snow.layer() as u16);
         let p = local(*vertex);
         assert!(
             (0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.z),
@@ -130,7 +130,7 @@ fn ice_goes_to_its_own_pass_as_a_full_cube() {
     assert!(meshes.solid.quads.is_empty() && meshes.cutout.quads.is_empty());
     let verts = vertices(&meshes.ice);
     assert_eq!(verts.len(), 24);
-    assert!(verts.iter().all(|v| v.layer() == Tile::Ice.layer() as u8));
+    assert!(verts.iter().all(|v| v.layer() == Tile::Ice.layer() as u16));
     let top = verts.chunks(4).find(|q| normal(q) == IVec3::Y).unwrap();
     assert!(top.iter().all(|v| (local(*v).y - 1.0).abs() < 1e-6));
 }
@@ -183,7 +183,7 @@ fn ice_keeps_underside_over_water_and_top_under_water() {
     let over = mesh_with(&[(AT, Block::Ice), (AT - IVec3::Y, Block::Water)]);
     let ice_bottom = vertices(&over.ice)
         .chunks(4)
-        .filter(|q| q[0].layer() == Tile::Ice.layer() as u8 && normal(q) == IVec3::NEG_Y)
+        .filter(|q| q[0].layer() == Tile::Ice.layer() as u16 && normal(q) == IVec3::NEG_Y)
         .count();
     assert_eq!(ice_bottom, 1);
     let under = mesh_with(&[(AT, Block::Ice), (AT + IVec3::Y, Block::Water)]);
@@ -209,7 +209,7 @@ fn water_cell_in_ice_is_closed_by_full_height_ice_sides() {
     for dir in ring {
         let wall: Vec<&[Vertex]> = quads
             .chunks(4)
-            .filter(|q| q[0].layer() == Tile::Ice.layer() as u8 && normal(q) == -dir)
+            .filter(|q| q[0].layer() == Tile::Ice.layer() as u16 && normal(q) == -dir)
             .filter(|q| {
                 q.iter()
                     .all(|v| local(*v).dot(dir.as_vec3()) == f32::from(dir.x + dir.z > 0))
@@ -225,12 +225,12 @@ fn water_cell_in_ice_is_closed_by_full_height_ice_sides() {
     }
     let water_sides = quads
         .chunks(4)
-        .filter(|q| q.iter().all(|v| v.layer() == Tile::Water.layer() as u8) && normal(q).y == 0)
+        .filter(|q| q.iter().all(|v| v.layer() == Tile::Water.layer() as u16) && normal(q).y == 0)
         .count();
     assert_eq!(water_sides, 0, "water faces toward ice are hidden");
     let top = quads
         .chunks(4)
-        .find(|q| q[0].layer() == Tile::Water.layer() as u8 && normal(q) == IVec3::Y)
+        .find(|q| q[0].layer() == Tile::Water.layer() as u16 && normal(q) == IVec3::Y)
         .expect("water top");
     assert!(top.iter().all(|v| (local(*v).y - 0.875).abs() < 1e-6));
 }
@@ -257,7 +257,7 @@ fn ice_wall_heights(water: Block, data: u8, above: Option<Block>) -> Vec<(f32, f
     let meshes = mesh_section(&section, air, full, MeshOptions::default());
     vertices(&meshes.ice)
         .chunks(4)
-        .filter(|q| q[0].layer() == Tile::Ice.layer() as u8 && normal(q) == IVec3::NEG_X)
+        .filter(|q| q[0].layer() == Tile::Ice.layer() as u16 && normal(q) == IVec3::NEG_X)
         .filter(|q| q.iter().all(|v| local(*v).x == 1.0))
         .map(|q| {
             let ys = q.iter().map(|v| local(*v).y);
@@ -316,7 +316,7 @@ mod frozen_lake {
         world
     }
 
-    fn water_quads(world: &World) -> Vec<(IVec3, IVec3, u8)> {
+    fn water_quads(world: &World) -> Vec<(IVec3, IVec3, u16)> {
         let light = world_light(world);
         let mut out = Vec::new();
         for cz in -1..=1 {
@@ -356,7 +356,7 @@ mod frozen_lake {
     #[test]
     fn no_face_is_emitted_twice_across_section_borders() {
         let quads = water_quads(&lake());
-        let mut seen: HashMap<(IVec3, IVec3, u8), usize> = HashMap::new();
+        let mut seen: HashMap<(IVec3, IVec3, u16), usize> = HashMap::new();
         for q in &quads {
             *seen.entry(*q).or_default() += 1;
         }
@@ -368,7 +368,7 @@ mod frozen_lake {
     fn every_ice_cell_has_one_top_and_one_underside_over_water() {
         let world = lake();
         let quads = water_quads(&world);
-        let ice = Tile::Ice.layer() as u8;
+        let ice = Tile::Ice.layer() as u16;
         let count = |cell: IVec3, n: IVec3| {
             quads
                 .iter()
@@ -394,8 +394,8 @@ mod frozen_lake {
     fn ice_gets_a_side_face_exactly_where_it_meets_water() {
         let world = lake();
         let quads = water_quads(&world);
-        let ice = Tile::Ice.layer() as u8;
-        let walls: Vec<&(IVec3, IVec3, u8)> = quads
+        let ice = Tile::Ice.layer() as u16;
+        let walls: Vec<&(IVec3, IVec3, u16)> = quads
             .iter()
             .filter(|q| q.2 == ice && q.1.y == 0 && world.block(q.0 + q.1) == Block::Water)
             .collect();
@@ -420,7 +420,7 @@ fn ice_has_its_own_mesh_apart_from_water() {
         blocks.push((AT + dir, Block::Ice));
     }
     let meshes = mesh_with(&blocks);
-    let ice = Tile::Ice.layer() as u8;
+    let ice = Tile::Ice.layer() as u16;
     assert!(!meshes.water.quads.is_empty() && !meshes.ice.quads.is_empty());
     assert!(meshes.water.quads.iter().all(|q| q.layer() != ice));
     assert!(meshes.ice.quads.iter().all(|q| q.layer() == ice));
@@ -437,7 +437,7 @@ fn water_under_ice_has_no_surface_of_its_own() {
         }
     }
     let meshes = mesh_with(&blocks);
-    let water = Tile::Water.layer() as u8;
+    let water = Tile::Water.layer() as u16;
     let surfaces = vertices(&meshes.water)
         .chunks(4)
         .filter(|q| q[0].layer() == water && normal(q) == IVec3::Y)
@@ -460,7 +460,7 @@ fn water_in_a_hole_keeps_its_surface_and_full_height_neighbours_under_ice() {
         blocks.push((AT + IVec3::new(x, 0, z), Block::Water));
     }
     let meshes = mesh_with(&blocks);
-    let water = Tile::Water.layer() as u8;
+    let water = Tile::Water.layer() as u16;
     let tops: Vec<f32> = vertices(&meshes.water)
         .chunks(4)
         .filter(|q| q[0].layer() == water && normal(q) == IVec3::Y)

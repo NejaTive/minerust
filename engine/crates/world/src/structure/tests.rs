@@ -603,3 +603,56 @@ fn showcase_starts_use_the_same_build_as_the_standard_world() {
         assert_eq!(found, Some((plot.center.x, plot.center.y, 0)));
     }
 }
+
+fn writer_piece(facing: Facing) -> Piece {
+    Piece {
+        bounds: BlockBox::new(IVec3::new(0, 20, 0), IVec3::new(7, 25, 7)),
+        facing,
+        kind: PieceKind::Probe,
+    }
+}
+
+#[test]
+fn writer_places_empty_chests_furnaces_cauldrons_and_pots() {
+    use crate::chest::{self, HALF_LEFT, HALF_NONE, HALF_RIGHT, front_of, half_of};
+    for facing in Facing::ALL {
+        let piece = writer_piece(facing);
+        let mut column = Column::new();
+        let front = IVec3::new(0, 0, -1);
+        let (want, cells) = {
+            let mut w = PieceWriter::new(&mut column, ColumnPos::ZERO, &piece);
+            w.chest(1, 1, 1, front);
+            w.double_chest(3, 1, 1, front);
+            w.furnace(5, 1, 1, front, true);
+            w.cauldron(6, 1, 1, 9);
+            w.flower_pot(6, 1, 3, Some(Block::Fern));
+            w.flower_pot(6, 1, 4, Some(Block::Stone));
+            let at = |x, z| w.world(x, 1, z);
+            (
+                w.world_dir(front),
+                [
+                    at(1, 1),
+                    at(3, 1),
+                    at(3, 1) + chest::right_of(w.world_dir(front)),
+                    at(5, 1),
+                    at(6, 1),
+                    at(6, 3),
+                    at(6, 4),
+                ],
+            )
+        };
+        let [single, left, right, furnace, cauldron, pot, empty_pot] = cells;
+        assert_eq!(column.get(single), Block::Chest);
+        assert_eq!(front_of(column.get_data(single)), want);
+        assert_eq!(half_of(column.get_data(single)), HALF_NONE);
+        assert_eq!(column.chests().count(), 0);
+        assert_eq!(half_of(column.get_data(left)), HALF_LEFT);
+        assert_eq!(half_of(column.get_data(right)), HALF_RIGHT);
+        assert_eq!(column.get(right), Block::Chest);
+        assert_eq!(column.get(furnace), Block::LitFurnace);
+        assert_eq!(Block::LitFurnace.facing_dir(column.get_data(furnace)), want);
+        assert_eq!(column.get_data(cauldron), 3);
+        assert_eq!(Block::pot_plant(column.get_data(pot)), Some(Block::Fern));
+        assert_eq!(column.get_data(empty_pot), 0);
+    }
+}

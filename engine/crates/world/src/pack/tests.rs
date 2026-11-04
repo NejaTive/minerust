@@ -292,8 +292,13 @@ fn builtin_pack_finds_every_tile_without_fallback() {
     assert_eq!(pack.textures.size(), 32);
     for tile in Tile::ALL {
         let name = source(tile).0;
+        let path = if name.starts_with("entity/") {
+            format!("{TEXTURES_DIR}{name}")
+        } else {
+            format!("{BLOCKS_DIR}{name}.png")
+        };
         assert!(
-            builtin_file(&format!("{BLOCKS_DIR}{name}.png")).is_some(),
+            builtin_file(&path).is_some(),
             "{tile:?}: {name}.png is not built in"
         );
     }
@@ -311,7 +316,7 @@ fn builtin_files_are_exactly_the_mapped_ones() {
     let mut built_in: Vec<String> = BUILTIN
         .iter()
         .map(|(name, _)| name.to_string())
-        .filter(|name| !name.starts_with("items/"))
+        .filter(|name| !name.starts_with("items/") && !name.starts_with("entity/"))
         .collect();
     built_in.sort();
     assert_eq!(on_disk, built_in);

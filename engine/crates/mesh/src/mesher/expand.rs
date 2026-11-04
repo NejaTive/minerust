@@ -8,7 +8,7 @@ pub struct Vertex {
     position: [u16; 3],
     uv: [u8; 2],
     shade: u8,
-    layer: u8,
+    layer: u16,
     light: [u8; 2],
 }
 
@@ -29,7 +29,7 @@ impl Vertex {
         f32::from(self.shade) / 255.0
     }
 
-    pub fn layer(self) -> u8 {
+    pub fn layer(self) -> u16 {
         self.layer
     }
 

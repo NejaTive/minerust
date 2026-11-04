@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard(), 0)
 }
 
-const ALL: [Block; 169] = Block::ALL;
+const ALL: [Block; 175] = Block::ALL;
 
 fn is_connected_family(block: Block) -> bool {
     block as usize >= Block::OakFence as usize
@@ -51,7 +51,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(169), Err(169));
+    assert_eq!(Block::try_from(175), Err(175));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -558,6 +558,9 @@ fn states_cover_every_data_kind() {
             DataKind::Hinge => 2,
             DataKind::Ladder => 4,
             DataKind::Rail => 10,
+            DataKind::Chest => 12,
+            DataKind::Furnace | DataKind::Cauldron => 4,
+            DataKind::Pot => 16,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -1367,4 +1370,72 @@ fn double_doors_pair_up_like_double_plants() {
         assert_eq!(lower.double_upper(), Some(upper));
         assert_eq!(upper.double_lower(), Some(lower));
     }
+}
+
+#[test]
+fn furnace_front_turns_to_the_player() {
+    let data = Block::Furnace
+        .placement_state(&placement(IVec3::Y, 0.0, IVec3::NEG_Z))
+        .unwrap();
+    assert_eq!(Block::Furnace.facing_dir(data), IVec3::Z);
+    for (normal, front) in [(IVec3::Z, true), (IVec3::NEG_Z, false), (IVec3::X, false)] {
+        let tile = Block::Furnace.face_tile(Facing::Side, normal, data);
+        assert_eq!(tile == Some(Tile::FurnaceFrontOff), front, "{normal}");
+    }
+    assert_eq!(
+        Block::Furnace.face_tile(Facing::Top, IVec3::Y, data),
+        Some(Tile::FurnaceTop)
+    );
+}
+
+#[test]
+fn lit_furnace_glows_and_shows_the_burning_front() {
+    assert_eq!(Block::LitFurnace.emission(), 13);
+    assert_eq!(Block::Furnace.emission(), 0);
+    let front = Block::LitFurnace.face_tile(Facing::Side, IVec3::Z, 2);
+    assert_eq!(front, Some(Tile::FurnaceFrontOn));
+    assert!(!Block::LitFurnace.def().selectable);
+    assert!(Block::stack_from_name("lit_furnace").is_none());
+    assert!(Block::stack_from_name("furnace").is_some());
+}
+
+#[test]
+fn cauldron_water_level_gives_the_surface_height() {
+    assert_eq!(Block::cauldron_water_units(0), None);
+    assert_eq!(Block::cauldron_water_units(1), Some(9));
+    assert_eq!(Block::cauldron_water_units(2), Some(12));
+    assert_eq!(Block::cauldron_water_units(3), Some(15));
+    assert_eq!(Block::cauldron_water_units(9), Some(15));
+}
+
+#[test]
+fn cauldron_is_an_open_pot_with_legs() {
+    let boxes = Block::Cauldron.boxes(0, |_| (Block::Air, 0));
+    assert_eq!(boxes.len(), 9);
+    let (min, max) = boxes.bounds();
+    assert_eq!((min, max), (Vec3::ZERO, Vec3::ONE));
+    let tiles: Vec<_> = (0..9)
+        .map(|i| Block::Cauldron.box_tile(i, Facing::Top, IVec3::Y, 0))
+        .collect();
+    assert_eq!(tiles[0], Some(Tile::CauldronInner));
+    assert_eq!(tiles[1], Some(Tile::CauldronTop));
+    assert_eq!(
+        Block::Cauldron.box_tile(1, Facing::Side, IVec3::X, 0),
+        Some(Tile::CauldronInner)
+    );
+    assert_eq!(
+        Block::Cauldron.box_tile(1, Facing::Side, IVec3::NEG_X, 0),
+        Some(Tile::CauldronSide)
+    );
+}
+
+#[test]
+fn pot_remembers_one_plant_from_the_list() {
+    assert_eq!(Block::pot_plant(0), None);
+    for (i, plant) in POT_PLANTS.iter().enumerate() {
+        assert_eq!(Block::pot_code(*plant), Some(i as u8 + 1));
+        assert_eq!(Block::pot_plant(i as u8 + 1), Some(*plant));
+    }
+    assert_eq!(Block::pot_code(Block::Stone), None);
+    assert_eq!(POT_PLANTS.len(), 15);
 }

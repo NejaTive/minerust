@@ -197,5 +197,11 @@
   { "name": "iron_door_upper", "label": "верх железной двери", "placeable": false },
   { "name": "ladder", "label": "лестница", "placeable": true },
   { "name": "web", "label": "паутина", "placeable": true },
-  { "name": "rail", "label": "рельсы", "placeable": true }
+  { "name": "rail", "label": "рельсы", "placeable": true },
+  { "name": "chest", "label": "сундук", "placeable": true },
+  { "name": "furnace", "label": "печь", "placeable": true },
+  { "name": "lit_furnace", "label": "горящая печь", "placeable": false },
+  { "name": "mob_spawner", "label": "спаунер", "placeable": true },
+  { "name": "cauldron", "label": "котёл", "placeable": true },
+  { "name": "flower_pot", "label": "цветочный горшок", "placeable": true }
 ]

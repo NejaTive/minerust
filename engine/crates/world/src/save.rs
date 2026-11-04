@@ -8,11 +8,11 @@ use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::mob::{MobKind, MobRecord};
 use crate::section::{SECTION_SIZE, SECTION_VOLUME};
 
-pub const FORMAT_VERSION: u8 = 6;
+pub const FORMAT_VERSION: u8 = 7;
 
 type Migration = fn(&[u8]) -> Result<Vec<u8>, SaveError>;
 
-const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6];
+const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6, v6_to_v7];
 
 fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut out = Vec::with_capacity(body.len() + 1);
@@ -44,6 +44,10 @@ fn v4_to_v5(_: &[u8]) -> Result<Vec<u8>, SaveError> {
 
 fn v5_to_v6(_: &[u8]) -> Result<Vec<u8>, SaveError> {
     Err(SaveError::UnsupportedVersion(5))
+}
+
+fn v6_to_v7(_: &[u8]) -> Result<Vec<u8>, SaveError> {
+    Err(SaveError::UnsupportedVersion(6))
 }
 
 const _: () = assert!(MIGRATIONS.len() + 1 == FORMAT_VERSION as usize);
@@ -103,6 +107,18 @@ pub fn encode_column(column: &Column) -> Vec<u8> {
         }
         bytes.push(mob.variant);
     }
+    let chests: Vec<_> = column.chests().collect();
+    bytes.extend_from_slice(&(chests.len() as u16).to_le_bytes());
+    for (local, slots) in chests {
+        bytes.push((local.x | local.z << 4) as u8);
+        bytes.extend_from_slice(&(local.y as u16).to_le_bytes());
+        bytes.push(slots.len() as u8);
+        for slot in slots {
+            let name = slot.as_deref().unwrap_or("").as_bytes();
+            bytes.push(name.len().min(usize::from(u8::MAX)) as u8);
+            bytes.extend_from_slice(&name[..name.len().min(usize::from(u8::MAX))]);
+        }
+    }
     for (_, data) in with_data {
         bytes.extend_from_slice(data);
     }
@@ -149,6 +165,33 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
             variant: mob[17],
         });
     }
+    let (count, rest) = body.split_at_checked(2).ok_or(SaveError::Truncated)?;
+    let chest_count = usize::from(u16::from_le_bytes([count[0], count[1]]));
+    body = rest;
+    let mut chests = Vec::with_capacity(chest_count);
+    for _ in 0..chest_count {
+        let (head, rest) = body.split_at_checked(4).ok_or(SaveError::Truncated)?;
+        body = rest;
+        let local = IVec3::new(
+            i32::from(head[0] & 15),
+            i32::from(u16::from_le_bytes([head[1], head[2]])),
+            i32::from(head[0] >> 4),
+        );
+        if local.y >= WORLD_HEIGHT {
+            return Err(SaveError::Overflow);
+        }
+        let mut slots = Vec::with_capacity(usize::from(head[3]));
+        for _ in 0..head[3] {
+            let (&len, rest) = body.split_first().ok_or(SaveError::Truncated)?;
+            let (name, rest) = rest
+                .split_at_checked(usize::from(len))
+                .ok_or(SaveError::Truncated)?;
+            body = rest;
+            let name = std::str::from_utf8(name).map_err(|_| SaveError::Truncated)?;
+            slots.push((!name.is_empty()).then(|| name.to_owned()));
+        }
+        chests.push((local, slots));
+    }
     let mut section_data = Vec::new();
     for sy in (0..COLUMN_SECTIONS).filter(|sy| flags >> sy & 1 == 1) {
         let (data, rest) = body
@@ -179,6 +222,9 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
     }
     if index < COLUMN_VOLUME {
         return Err(SaveError::Truncated);
+    }
+    for (local, slots) in chests {
+        column.insert_chest(local, slots);
     }
     for (sy, data) in section_data {
         let data: Box<[u8; SECTION_VOLUME]> = Box::new(data.try_into().expect("section data len"));

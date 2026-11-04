@@ -69,5 +69,5 @@ fn both_sides_of_a_plane_face_opposite_ways() {
 #[test]
 fn vine_uses_the_vine_tile() {
     let verts = vertices(&mesh_vine(VINE_TOP).cutout);
-    assert!(verts.iter().all(|v| v.layer() == Tile::Vine.layer() as u8));
+    assert!(verts.iter().all(|v| v.layer() == Tile::Vine.layer() as u16));
 }

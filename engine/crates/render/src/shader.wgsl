@@ -113,6 +113,9 @@ const WARM_LIGHT_TINT: vec3<f32> = vec3<f32>(1.2, 0.95, 0.7);
 var<uniform> globals: Globals;
 @group(0) @binding(1)
 var block_textures: texture_2d_array<f32>;
+// Слои от LAYERS_PER_ARRAY (256) и выше; лимит WebGPU по умолчанию — 256 слоёв на текстуру.
+@group(0) @binding(12)
+var block_textures_high: texture_2d_array<f32>;
 @group(0) @binding(2)
 var block_sampler: sampler;
 
@@ -128,7 +131,7 @@ struct TileAnim {
     tint: vec4<f32>,
 };
 @group(0) @binding(3)
-var<uniform> animation: array<TileAnim, 180>;
+var<uniform> animation: array<TileAnim, 206>;
 
 // Цвет травы, листвы (на BIOME_MAP_SIZE ниже) и воды (ещё на BIOME_MAP_SIZE ниже) на блок, тор BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
 @group(0) @binding(11)
@@ -179,7 +182,7 @@ struct Shape {
     shade: vec4<f32>,
 };
 struct ShapeTable {
-    shapes: array<Shape, 225>,
+    shapes: array<Shape, 229>,
     ao: vec4<f32>,
 };
 @group(1) @binding(1)
@@ -288,7 +291,7 @@ fn block_vertex(in: VertexIn) -> VertexOut {
         offset.y = top;
     }
     var world_pos = in.origin + cell + offset / 16.0;
-    let layer = (w0 >> 18u) & 0xFFu;
+    let layer = ((w0 >> 18u) & 0xFFu) | ((w0 >> 30u) << 8u);
     world_pos += sway_offset(world_pos, sway_kind(animation[layer].timing.w), offset.y > 0.0);
     let ao = select((w1 >> (2u * corner)) & 3u, (w1 >> (13u + 2u * corner)) & 3u, boxed == 1u);
     let light_corner = select(corner, 0u, boxed == 1u);
@@ -337,7 +340,16 @@ fn fs_shadow_cutout(in: ShadowOut) {
     }
 }
 
+fn sample_layer(uv: vec2<f32>, layer: u32, ddx: vec2<f32>, ddy: vec2<f32>) -> vec4<f32> {
+    if layer >= 256u {
+        return textureSampleGrad(block_textures_high, block_sampler, uv, layer - 256u, ddx, ddy);
+    }
+    return textureSampleGrad(block_textures, block_sampler, uv, layer, ddx, ddy);
+}
+
 fn sample_block(uv: vec2<f32>, slot: u32) -> vec4<f32> {
+    let ddx = dpdx(uv);
+    let ddy = dpdy(uv);
     let entry = animation[slot];
     let frames = u32(entry.timing.x);
     let first = u32(entry.layers.x);
@@ -345,8 +357,8 @@ fn sample_block(uv: vec2<f32>, slot: u32) -> vec4<f32> {
     let frame = u32(floor(time)) % frames;
     let blend = entry.layers.y * fract(time);
     let next = select(frame, (frame + 1u) % frames, entry.layers.y > 0.5);
-    let a = textureSample(block_textures, block_sampler, uv, first + frame);
-    let b = textureSample(block_textures, block_sampler, uv, first + next);
+    let a = sample_layer(uv, first + frame, ddx, ddy);
+    let b = sample_layer(uv, first + next, ddx, ddy);
     let texel = mix(a, b, blend);
     return vec4<f32>(texel.rgb * entry.tint.rgb, texel.a);
 }
@@ -366,7 +378,7 @@ fn block_albedo(uv: vec2<f32>, slot: u32, world_pos: vec3<f32>) -> vec4<f32> {
     texel = vec4<f32>(texel.rgb * select(vec3<f32>(1.0), biome_color(kind, world_pos), kind > 0.5), texel.a);
     let has_overlay = entry.layers.w > 0.5;
     let overlay_layer = u32(select(entry.layers.x, entry.layers.z, has_overlay));
-    let overlay = textureSample(block_textures, block_sampler, uv, overlay_layer);
+    let overlay = sample_layer(uv, overlay_layer, dpdx(uv), dpdy(uv));
     let over = select(0.0, overlay.a, has_overlay);
     return vec4<f32>(mix(texel.rgb, overlay.rgb * biome_color(1.0, world_pos), over), texel.a);
 }

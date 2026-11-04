@@ -16,6 +16,7 @@ const initialState = () => ({
   locked: false,
   inventoryOpen: false,
   consoleOpen: false,
+  containerOpen: false,
   lockLost: false,
   busy: true,
   error: undefined as string | undefined,

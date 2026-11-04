@@ -40,7 +40,7 @@ fn cocoa_is_a_cutout_pod_with_a_stem_in_the_texture_of_its_stage() {
         assert!(meshes.solid.quads.is_empty());
         let verts = vertices(&meshes.cutout);
         assert_eq!(verts.len(), 4 * COCOA_PARTS as usize);
-        assert!(verts.iter().all(|v| v.layer() == tile.layer() as u8));
+        assert!(verts.iter().all(|v| v.layer() == tile.layer() as u16));
     }
 }
 

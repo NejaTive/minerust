@@ -80,7 +80,7 @@ pub struct FrameCounts {
 }
 
 struct GlobalSources {
-    block_textures: wgpu::TextureView,
+    block_textures: [wgpu::TextureView; 2],
     block_sampler: wgpu::Sampler,
     animation_table: wgpu::Buffer,
     cloud_view: wgpu::TextureView,
@@ -109,7 +109,11 @@ impl GlobalSources {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.block_textures),
+                    resource: wgpu::BindingResource::TextureView(&self.block_textures[0]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::TextureView(&self.block_textures[1]),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -266,7 +270,11 @@ fn shadow_pass_groups(
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&global_sources.block_textures),
+                    resource: wgpu::BindingResource::TextureView(&global_sources.block_textures[0]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::TextureView(&global_sources.block_textures[1]),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -404,6 +412,16 @@ impl Renderer {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 12,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -575,6 +593,16 @@ impl Renderer {
                     uniform_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT),
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 12,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },

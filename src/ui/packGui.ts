@@ -14,6 +14,7 @@ export function bindPackGui(state: Pick<PackState, 'gui'>, root: StyleTarget) {
       set('--gui-widgets', `url("${gui.widgets}")`)
       set('--gui-icons', `url("${gui.icons}")`)
       set('--gui-inventory', `url("${gui.inventory}")`)
+      set('--gui-container', `url("${gui.container}")`)
       set('--gui-panel', `url("${gui.panel}")`)
       set('--gui-panel-slice', String(gui.panelSlice))
     },

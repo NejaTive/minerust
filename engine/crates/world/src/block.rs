@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 use glam::{IVec3, Vec3};
 
 use crate::boxes::{BoxList, VoxelBox};
+use crate::chest;
 use crate::textures::TextureSet;
 use crate::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW, Tile};
 
@@ -179,6 +180,12 @@ pub enum Block {
     Ladder,
     Web,
     Rail,
+    Chest,
+    Furnace,
+    LitFurnace,
+    MobSpawner,
+    Cauldron,
+    FlowerPot,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -239,6 +246,9 @@ pub enum BoxKind {
     Door,
     Ladder,
     Rail,
+    Chest,
+    Cauldron,
+    Pot,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -258,12 +268,17 @@ pub enum DataKind {
     Hinge,
     Ladder,
     Rail,
+    Chest,
+    Furnace,
+    Cauldron,
+    Pot,
 }
 
 pub const AXIS_Y: u8 = 0;
 pub const AXIS_X: u8 = 1;
 pub const AXIS_Z: u8 = 2;
 
+pub const FACING_MASK_2BIT: u8 = 3;
 pub const FACING_NEG_Z: u8 = 0;
 pub const FACING_POS_X: u8 = 1;
 pub const FACING_POS_Z: u8 = 2;
@@ -668,7 +683,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 169] = [
+pub const BLOCKS: [BlockDef; 175] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -1422,12 +1437,64 @@ pub const BLOCKS: [BlockDef; 169] = [
         boxes: BoxKind::Rail,
         ..BlockDef::uniform("rail", "рельсы", Tile::RailNormal)
     },
+    BlockDef {
+        layer: RenderLayer::Cutout,
+        ..BlockDef::boxed(
+            "chest",
+            "сундук",
+            BoxKind::Chest,
+            DataKind::Chest,
+            (Tile::ChestTop, Tile::ChestFront, Tile::ChestBottom),
+        )
+    },
+    BlockDef {
+        data: DataKind::Furnace,
+        top: Some(Tile::FurnaceTop),
+        bottom: Some(Tile::FurnaceTop),
+        ..BlockDef::uniform("furnace", "печь", Tile::FurnaceSide)
+    },
+    BlockDef {
+        data: DataKind::Furnace,
+        selectable: false,
+        emission: 13,
+        top: Some(Tile::FurnaceTop),
+        bottom: Some(Tile::FurnaceTop),
+        ..BlockDef::uniform("lit_furnace", "горящая печь", Tile::FurnaceSide)
+    },
+    BlockDef {
+        opaque: false,
+        layer: RenderLayer::Cutout,
+        ..BlockDef::uniform("mob_spawner", "спаунер", Tile::MobSpawner)
+    },
+    BlockDef {
+        layer: RenderLayer::Cutout,
+        ..BlockDef::boxed(
+            "cauldron",
+            "котёл",
+            BoxKind::Cauldron,
+            DataKind::Cauldron,
+            (Tile::CauldronTop, Tile::CauldronSide, Tile::CauldronBottom),
+        )
+    },
+    BlockDef {
+        needs_support: true,
+        layer: RenderLayer::Cutout,
+        ..BlockDef::open_boxed(
+            "flower_pot",
+            "цветочный горшок",
+            BoxKind::Pot,
+            DataKind::Pot,
+            Tile::FlowerPot,
+        )
+    },
 ];
 
 mod shapes;
 
+pub use shapes::{CAULDRON_LEVELS, POT_PLANTS};
+
 impl Block {
-    pub const ALL: [Block; 169] = [
+    pub const ALL: [Block; 175] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -1597,6 +1664,12 @@ impl Block {
         Block::Ladder,
         Block::Web,
         Block::Rail,
+        Block::Chest,
+        Block::Furnace,
+        Block::LitFurnace,
+        Block::MobSpawner,
+        Block::Cauldron,
+        Block::FlowerPot,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -1751,6 +1824,9 @@ impl Block {
                 unit([0, 0, 0], [2, 16, 16]).map(|b| b.turned(turns))
             }
             BoxKind::Rail => Self::rail_boxes(data),
+            BoxKind::Chest => Self::chest_boxes(data),
+            BoxKind::Cauldron => Self::cauldron_boxes(),
+            BoxKind::Pot => unit([5, 0, 5], [11, 6, 11]),
             BoxKind::Carpet => unit([0, 0, 0], [16, CARPET_UNITS, 16]),
             BoxKind::Slab => match data {
                 SLAB_DOUBLE => BoxList::of(&[VoxelBox::FULL]),
@@ -1877,6 +1953,7 @@ impl Block {
                 Some(facing_code(placement.look) | if upper { STAIRS_TOP } else { 0 })
             }
             DataKind::Gate | DataKind::Door => Some(facing_code(placement.look)),
+            DataKind::Chest | DataKind::Furnace => Some(facing_code(-placement.look)),
             _ => self.placement_data(placement.normal),
         }
     }
@@ -1891,6 +1968,10 @@ impl Block {
             | DataKind::Gate
             | DataKind::Door
             | DataKind::Hinge
+            | DataKind::Chest
+            | DataKind::Furnace
+            | DataKind::Cauldron
+            | DataKind::Pot
             | DataKind::Rail => Some(0),
             DataKind::Ladder => match normal {
                 IVec3::X | IVec3::NEG_X | IVec3::Z | IVec3::NEG_Z => Some(facing_code(normal)),
@@ -1953,6 +2034,9 @@ impl Block {
             DataKind::Hinge => &[0, DOOR_HINGE_RIGHT],
             DataKind::Ladder => &[FACING_NEG_Z, FACING_POS_X, FACING_POS_Z, FACING_NEG_X],
             DataKind::Rail => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            DataKind::Chest => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            DataKind::Furnace | DataKind::Cauldron => &[0, 1, 2, 3],
+            DataKind::Pot => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
                 FLUID_SOURCE,
@@ -2167,6 +2251,21 @@ impl Block {
     }
 
     pub fn face_tile(self, facing: Facing, normal: IVec3, data: u8) -> Option<Tile> {
+        match self {
+            Block::Chest => return Some(chest::tile_for(data, normal)),
+            Block::Furnace | Block::LitFurnace if facing == Facing::Side => {
+                return Some(if normal == facing_dir_of(data & FACING_MASK_2BIT) {
+                    if self == Block::LitFurnace {
+                        Tile::FurnaceFrontOn
+                    } else {
+                        Tile::FurnaceFrontOff
+                    }
+                } else {
+                    Tile::FurnaceSide
+                });
+            }
+            _ => {}
+        }
         if self == Block::CraftingTable
             && facing == Facing::Side
             && (normal == IVec3::NEG_Z || normal == IVec3::NEG_X)
@@ -2256,6 +2355,15 @@ pub struct Placement {
     pub hit_z: f32,
     pub look: IVec3,
     pub variant: u8,
+}
+
+pub fn facing_dir_of(code: u8) -> IVec3 {
+    match code {
+        FACING_POS_X => IVec3::X,
+        FACING_POS_Z => IVec3::Z,
+        FACING_NEG_X => IVec3::NEG_X,
+        _ => IVec3::NEG_Z,
+    }
 }
 
 pub fn facing_code(dir: IVec3) -> u8 {

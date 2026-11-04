@@ -45,7 +45,7 @@ fn log_axis_puts_ends_on_the_axis_faces_and_bark_elsewhere() {
             let on_axis = n.abs() == axis_vector(axis);
             let want = if on_axis { Tile::LogTop } else { Tile::LogSide };
             assert!(
-                quad.iter().all(|v| v.layer() == want.layer() as u8),
+                quad.iter().all(|v| v.layer() == want.layer() as u16),
                 "axis {axis} normal {n}"
             );
         }
@@ -58,7 +58,7 @@ fn bark_fibers_run_along_the_axis() {
         let verts = vertices(&single(Block::Log, data).solid);
         let mut checked = 0;
         for quad in verts.chunks(4) {
-            if quad[0].layer() != Tile::LogSide.layer() as u8 {
+            if quad[0].layer() != Tile::LogSide.layer() as u16 {
                 continue;
             }
             for (a, b) in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)] {
@@ -135,7 +135,11 @@ fn wall_torch_leans_away_from_the_wall_in_its_hitbox() {
         let mesh = single(Block::Torch, data).cutout;
         let verts = vertices(&mesh);
         assert_eq!(verts.len(), 20, "{data}");
-        assert!(verts.iter().all(|v| v.layer() == Tile::Torch.layer() as u8));
+        assert!(
+            verts
+                .iter()
+                .all(|v| v.layer() == Tile::Torch.layer() as u16)
+        );
         let (mut min, mut max) = (Vec3::MAX, Vec3::MIN);
         for v in &verts {
             min = min.min(v.position().into());
@@ -243,7 +247,7 @@ fn pumpkin_shows_its_face_on_one_side_only() {
                 Tile::PumpkinSide
             };
             assert!(
-                quad.iter().all(|v| v.layer() == want.layer() as u8),
+                quad.iter().all(|v| v.layer() == want.layer() as u16),
                 "{data} {n}"
             );
             faces += usize::from(want == Tile::PumpkinFace);

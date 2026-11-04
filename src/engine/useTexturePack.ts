@@ -12,6 +12,7 @@ function guiBytes(sheets: GuiSheets): GuiBytes {
     widgets: sheets.widgets,
     icons: sheets.icons,
     inventory: sheets.inventory,
+    container: sheets.container,
     panel: sheets.panel,
     panelSlice: sheets.panelSlice,
   }

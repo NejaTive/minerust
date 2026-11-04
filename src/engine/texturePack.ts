@@ -5,6 +5,7 @@ export interface GuiBytes {
   widgets: Uint8Array
   icons: Uint8Array
   inventory: Uint8Array
+  container: Uint8Array
   panel: Uint8Array
   panelSlice: number
 }
@@ -13,6 +14,7 @@ export interface GuiUrls {
   widgets: string
   icons: string
   inventory: string
+  container: string
   panel: string
   panelSlice: number
 }
@@ -80,10 +82,11 @@ export function createPackManager(deps: {
       widgets: gui.url(source.widgets),
       icons: gui.url(source.icons),
       inventory: gui.url(source.inventory),
+      container: gui.url(source.container),
       panel: gui.url(source.panel),
       panelSlice: source.panelSlice,
     }
-    if (old) for (const url of [old.widgets, old.icons, old.inventory, old.panel]) gui.revoke(url)
+    if (old) for (const url of [old.widgets, old.icons, old.inventory, old.container, old.panel]) gui.revoke(url)
   }
 
   function show(name: string, info: PackDescription) {

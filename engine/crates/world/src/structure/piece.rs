@@ -1,6 +1,7 @@
 use glam::IVec3;
 
-use crate::block::Block;
+use crate::block::{Block, CAULDRON_LEVELS, facing_code};
+use crate::chest;
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
@@ -208,6 +209,53 @@ impl<'a> PieceWriter<'a> {
         if let Some(local) = self.local(self.world(x, y, z)) {
             self.column.set_with_data(local, block, data);
         }
+    }
+
+    /// Направление части (x вдоль ширины, z вдоль глубины) в мировое.
+    pub fn world_dir(&self, local: IVec3) -> IVec3 {
+        self.world(local.x, local.y, local.z) - self.world(0, 0, 0)
+    }
+
+    fn set_world(&mut self, at: IVec3, block: Block, data: u8) {
+        if let Some(local) = self.local(at) {
+            self.column.set_with_data(local, block, data);
+        }
+    }
+
+    /// Пустой одинарный сундук лицом в `front` (направление части); содержимое появится при первом открытии.
+    pub fn chest(&mut self, x: i32, y: i32, z: i32, front: IVec3) {
+        let data = chest::data(self.world_dir(front), chest::HALF_NONE);
+        self.set_with_data(x, y, z, Block::Chest, data);
+    }
+
+    /// Двойной сундук: левая половина в `(x, y, z)`, правая — справа от неё, если смотреть на лицо.
+    pub fn double_chest(&mut self, x: i32, y: i32, z: i32, front: IVec3) {
+        let front = self.world_dir(front);
+        let left = self.world(x, y, z);
+        let right = left + chest::right_of(front);
+        self.set_world(left, Block::Chest, chest::data(front, chest::HALF_LEFT));
+        self.set_world(right, Block::Chest, chest::data(front, chest::HALF_RIGHT));
+    }
+
+    pub fn furnace(&mut self, x: i32, y: i32, z: i32, front: IVec3, lit: bool) {
+        let block = if lit {
+            Block::LitFurnace
+        } else {
+            Block::Furnace
+        };
+        let data = facing_code(self.world_dir(front));
+        self.set_with_data(x, y, z, block, data);
+    }
+
+    /// Котёл с водой `level` от 0 до 3.
+    pub fn cauldron(&mut self, x: i32, y: i32, z: i32, level: u8) {
+        self.set_with_data(x, y, z, Block::Cauldron, level.min(CAULDRON_LEVELS));
+    }
+
+    /// Горшок с растением; растение вне списка горшка оставляет горшок пустым.
+    pub fn flower_pot(&mut self, x: i32, y: i32, z: i32, plant: Option<Block>) {
+        let data = plant.and_then(Block::pot_code).unwrap_or(0);
+        self.set_with_data(x, y, z, Block::FlowerPot, data);
     }
 
     /// Блок под координатой части; вне колонки — воздух, как у `getBlockStateFromPos` вне рамки.
