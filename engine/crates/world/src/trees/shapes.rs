@@ -441,3 +441,62 @@ pub(super) fn mushroom(base: IVec3, height: i32, red: bool) -> Parts {
     }
     parts
 }
+
+/// `WorldGenTaiga1`: высокий голый ствол, узкая верхушка из чередующихся слоёв.
+pub(super) fn taiga_pine(base: IVec3, height: i32, shape: u32) -> Parts {
+    let mut rng = Rng(u64::from(shape) ^ 0x7a1);
+    let bare = height - rng.below(2) - 3;
+    let top_size = height - bare;
+    let widest = 1 + rng.below(top_size as u32 + 1);
+    let mut leaves = Vec::new();
+    let mut radius = 0;
+    for dy in (bare..=height).rev() {
+        square(&mut leaves, base + IVec3::Y * dy, radius);
+        if radius >= 1 && dy == bare + 1 {
+            radius -= 1;
+        } else if radius < widest {
+            radius += 1;
+        }
+    }
+    Parts {
+        logs: column(base, height - 1),
+        leaves,
+        vines: Vec::new(),
+    }
+}
+
+/// `WorldGenTaiga2`: ярусы-конусы по всей высоте над коротким голым стволом.
+pub(super) fn taiga_spruce(base: IVec3, height: i32, shape: u32) -> Parts {
+    let mut rng = Rng(u64::from(shape) ^ 0x7a2);
+    let bare = 1 + rng.below(2);
+    let layers = height - bare;
+    let widest = 2 + rng.below(2);
+    let (mut radius, mut tier, mut restart) = (rng.below(2), 1, 0);
+    let mut leaves = Vec::new();
+    for layer in 0..=layers {
+        square(&mut leaves, base + IVec3::Y * (height - layer), radius);
+        if radius >= tier {
+            radius = restart;
+            restart = 1;
+            tier = (tier + 1).min(widest);
+        } else {
+            radius += 1;
+        }
+    }
+    let cut = rng.below(3);
+    Parts {
+        logs: column(base, height - cut),
+        leaves,
+        vines: Vec::new(),
+    }
+}
+
+fn square(leaves: &mut Vec<IVec3>, center: IVec3, radius: i32) {
+    for dz in -radius..=radius {
+        for dx in -radius..=radius {
+            if radius <= 0 || dx.abs() != radius || dz.abs() != radius {
+                leaves.push(center + IVec3::new(dx, 0, dz));
+            }
+        }
+    }
+}
