@@ -405,11 +405,14 @@ fn showcase() -> Game {
 #[test]
 fn locate_unbuilt_structures_are_reported_missing() {
     let mut g = game();
-    for entry in LOCATE_NAMES {
+    for entry in LOCATE_NAMES.into_iter().filter(|entry| !entry.ready()) {
         let text = err(&mut g, &format!("/locate {}", entry.name.to_lowercase()));
         assert!(text.contains("пока нет"), "{}: {text}", entry.name);
     }
-    assert_eq!(g.complete_command("/locate ").options, ["biome"]);
+    assert_eq!(
+        g.complete_command("/locate ").options,
+        ["biome", "Temple", "Swamp_Hut"]
+    );
 }
 
 #[test]
@@ -417,7 +420,10 @@ fn locate_names_appear_once_the_structure_is_built() {
     let g = game();
     g.terrain.set_structure_built(StructureKind::Village, true);
     assert_eq!(g.complete_command("/locate vi").options, ["Village"]);
-    assert_eq!(g.complete_command("/locate ").options, ["biome", "Village"]);
+    assert_eq!(
+        g.complete_command("/locate ").options,
+        ["biome", "Village", "Temple", "Swamp_Hut"]
+    );
 }
 
 #[test]
@@ -430,8 +436,9 @@ fn showcase_locate_returns_the_plot_center() {
     assert!(out.ok, "{}", out.text);
     assert!(out.text.contains("[96, ~, 0] (96 блоков)"), "{}", out.text);
     assert_eq!(out.suggest.as_deref(), Some("/tp 96 ~ 0"));
-    let igloo = g.run_command("/locate igloo");
-    assert!(igloo.text.contains("[1440, ~, 0]"), "{}", igloo.text);
+    let hut = g.run_command("/locate swamp_hut");
+    assert!(hut.text.contains("[1248, ~, 0]"), "{}", hut.text);
+    assert!(err(&mut g, "/locate igloo").contains("пока нет"));
     assert!(ok(&mut g, "/locate Stronghold").contains("[2016, ~, 0]"));
 }
 

@@ -271,7 +271,7 @@ impl Game {
             ["locate"] => {
                 let built = world::structure::LOCATE_NAMES
                     .into_iter()
-                    .filter(|entry| self.terrain.structure_built(entry.kind))
+                    .filter(|entry| entry.ready() && self.terrain.structure_built(entry.kind))
                     .map(|entry| entry.name);
                 std::iter::once("biome").chain(built).collect()
             }
@@ -477,7 +477,7 @@ impl Game {
                 &format!("Неизвестная структура «{name}»"),
             ));
         };
-        if !self.terrain.structure_built(target.kind) {
+        if !target.ready() || !self.terrain.structure_built(target.kind) {
             return Err(format!("Структуры «{}» в игре пока нет", target.name));
         }
         let origin = self.player.eye().floor().as_ivec3();

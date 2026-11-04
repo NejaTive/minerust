@@ -13,6 +13,7 @@ use crate::terrain::Terrain;
 mod piece;
 mod placement;
 mod showcase;
+mod swamp_hut;
 
 pub use piece::{BlockBox, Facing, Piece, PieceKind, PieceWriter};
 pub use showcase::{
@@ -98,7 +99,21 @@ impl StructureKind {
     }
 }
 
+impl Variant {
+    /// Варианты без построек не создаются: старт не строится, `/locate` их не знает.
+    pub fn ready(self) -> bool {
+        match self {
+            Variant::Temple(kind) => kind.ready(),
+            Variant::Plain | Variant::Mineshaft(_) => true,
+        }
+    }
+}
+
 impl TempleKind {
+    pub fn ready(self) -> bool {
+        matches!(self, TempleKind::SwampHut)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             TempleKind::DesertPyramid => "Desert_Pyramid",
@@ -155,6 +170,10 @@ impl LocateName {
         }
     }
 
+    pub fn ready(self) -> bool {
+        self.variant.is_none_or(Variant::ready)
+    }
+
     pub fn find(name: &str) -> Option<LocateName> {
         LOCATE_NAMES
             .into_iter()
@@ -191,7 +210,7 @@ impl StructureStart {
 }
 
 pub fn build(terrain: &Terrain, kind: StructureKind, origin: ColumnPos) -> Option<StructureStart> {
-    let variant = placement::variant(terrain, kind, origin)?;
+    let variant = placement::variant(terrain, kind, origin).filter(|variant| variant.ready())?;
     let anchor = placement::anchor(terrain, origin);
     let mut rng = placement::stream(
         terrain.seed(),
@@ -216,7 +235,6 @@ pub fn build(terrain: &Terrain, kind: StructureKind, origin: ColumnPos) -> Optio
     })
 }
 
-#[cfg(test)]
 fn layout(
     terrain: &Terrain,
     kind: StructureKind,
@@ -224,21 +242,34 @@ fn layout(
     anchor: (i32, i32),
     rng: &mut Stream,
 ) -> Vec<Piece> {
-    tests::layout(terrain, kind, variant, anchor, rng)
-}
-
-#[cfg(not(test))]
-fn layout(_: &Terrain, _: StructureKind, _: Variant, _: (i32, i32), _: &mut Stream) -> Vec<Piece> {
-    Vec::new()
+    match variant {
+        Variant::Temple(TempleKind::SwampHut) => swamp_hut::layout(terrain, anchor, rng),
+        #[cfg(test)]
+        _ => tests::layout(terrain, kind, variant, anchor, rng),
+        #[cfg(not(test))]
+        _ => {
+            let _ = (kind, anchor, rng);
+            Vec::new()
+        }
+    }
 }
 
 type StartCache = HashMap<(StructureKind, i32, i32), Arc<Option<StructureStart>>>;
 
-#[derive(Default)]
 pub struct Structures {
     built: AtomicU8,
     cache: Mutex<StartCache>,
     strongholds: OnceLock<Vec<ColumnPos>>,
+}
+
+impl Default for Structures {
+    fn default() -> Self {
+        Self {
+            built: AtomicU8::new(1 << StructureKind::Temple.index()),
+            cache: Mutex::default(),
+            strongholds: OnceLock::new(),
+        }
+    }
 }
 
 impl Structures {
