@@ -18,5 +18,8 @@ fn new_kinds_are_appended_after_the_old_ones() {
     assert_eq!(MobKind::Donkey as u8, 8);
     assert_eq!(MobKind::Llama as u8, 9);
     assert_eq!(MobKind::try_from(9), Ok(MobKind::Llama));
-    assert_eq!(MobKind::try_from(10), Err(10));
+    assert_eq!(MobKind::Rabbit as u8, 10);
+    assert_eq!(MobKind::Ocelot as u8, 11);
+    assert_eq!(MobKind::try_from(11), Ok(MobKind::Ocelot));
+    assert_eq!(MobKind::try_from(12), Err(12));
 }

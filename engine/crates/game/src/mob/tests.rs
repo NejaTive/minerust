@@ -47,6 +47,8 @@ fn hitboxes_match_minecraft() {
         (MobKind::Mooshroom, 0.9, 1.4),
         (MobKind::PolarBear, 1.3, 1.4),
         (MobKind::Wolf, 0.6, 0.85),
+        (MobKind::Rabbit, 0.4, 0.5),
+        (MobKind::Ocelot, 0.6, 0.7),
     ] {
         let (min, max) = mob(kind, 1).body.aabb();
         let expected = Vec3::new(width, height, width);
@@ -228,7 +230,11 @@ fn every_kind_wanders_and_stays_on_the_ground() {
     for kind in MobKind::ALL {
         let mut mob = mob(kind, 7);
         run(&mut mob, 3000, &flat, &dry);
-        assert_eq!(mob.body.feet.y, 64.0, "{kind:?}");
+        if kind == MobKind::Rabbit {
+            assert!((64.0..64.5).contains(&mob.body.feet.y), "{kind:?}");
+        } else {
+            assert_eq!(mob.body.feet.y, 64.0, "{kind:?}");
+        }
         assert!(
             mob.body.feet.distance(Vec3::new(0.5, 64.0, 0.5)) > 1.0,
             "{kind:?}"
@@ -278,4 +284,76 @@ fn other_kinds_never_flap() {
     run(&mut cow, 40, &flat, &dry);
     assert_eq!(cow.pose().flap_amount, 0.0);
     assert_eq!(cow.pose().flap_phase, 0.0);
+}
+
+fn walking_rabbit() -> Mob {
+    let mut rabbit = mob(MobKind::Rabbit, 5);
+    rabbit.plan = Plan::Walk {
+        target: Vec2::new(60.0, 0.5),
+        ticks: 0,
+        checkpoint: Vec2::new(0.5, 0.5),
+    };
+    rabbit
+}
+
+#[test]
+fn rabbit_moves_only_while_hopping() {
+    let mut rabbit = walking_rabbit();
+    let around = Surroundings {
+        collision: &flat,
+        fluid: &dry,
+        player_eye: Vec3::new(0.5, 65.6, 0.5),
+    };
+    let (mut hops, mut grounded_ticks, mut rest_ticks) = (0, 0, 0);
+    let mut was_grounded = true;
+    for _ in 0..600 {
+        let before = rabbit.body.feet;
+        let resting = rabbit.hop_rest > 0 && rabbit.body.on_ground;
+        rabbit.tick(&around);
+        let moved = (rabbit.body.feet - before).truncate().length();
+        if resting {
+            rest_ticks += 1;
+            assert!(moved < 1e-4, "slid while resting");
+        }
+        if rabbit.body.on_ground {
+            grounded_ticks += 1;
+        }
+        if !was_grounded && rabbit.body.on_ground {
+            hops += 1;
+        }
+        was_grounded = rabbit.body.on_ground;
+    }
+    assert!(hops >= 5, "{hops}");
+    assert!(rest_ticks > 0 && grounded_ticks > 0);
+    assert!(rabbit.body.feet.x > 3.0);
+}
+
+#[test]
+fn rabbit_hops_low_and_other_mobs_do_not_hop() {
+    let around = Surroundings {
+        collision: &flat,
+        fluid: &dry,
+        player_eye: Vec3::new(0.5, 65.6, 0.5),
+    };
+    let mut rabbit = walking_rabbit();
+    let mut peak = 64.0_f32;
+    for _ in 0..300 {
+        rabbit.tick(&around);
+        peak = peak.max(rabbit.body.feet.y);
+    }
+    assert!(peak > 64.2 && peak < 64.6, "{peak}");
+    assert_eq!(rabbit.pose().hop > 0.0, !rabbit.body.on_ground);
+    let mut ocelot = mob(MobKind::Ocelot, 5);
+    run(&mut ocelot, 600, &flat, &dry);
+    assert_eq!(ocelot.pose().hop, 0.0);
+}
+
+#[test]
+fn standing_rabbit_stays_on_the_ground() {
+    let mut rabbit = mob(MobKind::Rabbit, 5);
+    run(&mut rabbit, 100, &flat, &dry);
+    if matches!(rabbit.plan, Plan::Idle) {
+        assert_eq!(rabbit.body.feet.y, 64.0);
+        assert_eq!(rabbit.pose().hop, 0.0);
+    }
 }

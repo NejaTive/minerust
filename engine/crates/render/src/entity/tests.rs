@@ -13,6 +13,7 @@ fn instance() -> MobInstance {
         limb_swing: 0.0,
         flap_phase: 0.0,
         flap_amount: 0.0,
+        hop: 0.0,
         sky_level: 15.0,
         block_level: 0.0,
         shadow_radius: 0.7,
@@ -191,6 +192,8 @@ fn models_have_the_minecraft_box_counts() {
     assert_eq!(count(ModelKind::Horse), 23);
     assert_eq!(count(ModelKind::Donkey), 23);
     assert_eq!(count(ModelKind::Llama), 9);
+    assert_eq!(count(ModelKind::Rabbit), 12);
+    assert_eq!(count(ModelKind::Ocelot), 11);
 }
 
 #[test]
@@ -207,6 +210,8 @@ fn each_model_draws_from_its_own_sheets() {
         (ModelKind::Horse, EntityTexture::HorseWhite, 23),
         (ModelKind::Donkey, EntityTexture::Donkey, 23),
         (ModelKind::Llama, EntityTexture::LlamaCreamy, 9),
+        (ModelKind::Rabbit, EntityTexture::RabbitBrown, 12),
+        (ModelKind::Ocelot, EntityTexture::Ocelot, 11),
     ] {
         let model = of_kind(kind);
         assert_eq!(boxes_on(&model, sheet), boxes, "{kind:?} {sheet:?}");
@@ -621,4 +626,50 @@ fn horse_legs_swing_but_the_tail_stays() {
     };
     assert_eq!(parts(&still), parts(&walking));
     assert_eq!(parts(&still).len(), 3 * 36 * VERTEX_FLOATS);
+}
+
+#[test]
+fn rabbit_variant_picks_the_sheet() {
+    for variant in 0..6u8 {
+        let rabbit = MobInstance {
+            variant,
+            ..of_kind(ModelKind::Rabbit)
+        };
+        let sheet = EntityTexture::ALL[EntityTexture::RabbitBrown as usize + usize::from(variant)];
+        assert_eq!(boxes_on(&rabbit, sheet), 12);
+    }
+}
+
+#[test]
+fn rabbit_and_ocelot_sheets_use_the_vanilla_grid() {
+    for sheet in [EntityTexture::RabbitSalt, EntityTexture::Ocelot] {
+        assert_eq!(sheet.units(), Vec2::new(64.0, 32.0));
+    }
+}
+
+#[test]
+fn rabbit_stretches_out_in_the_air() {
+    let sitting = of_kind(ModelKind::Rabbit);
+    let leaping = MobInstance {
+        hop: 0.5,
+        ..of_kind(ModelKind::Rabbit)
+    };
+    assert_ne!(vertices(&sitting), vertices(&leaping));
+    let (lo, hi) = bounds(&sitting);
+    assert!(hi.y - lo.y > 0.4 && hi.y - lo.y < 0.8);
+    assert!((lo.y - 64.0).abs() < 0.05);
+}
+
+#[test]
+fn ocelot_walk_moves_legs_and_it_stands_on_the_ground() {
+    let still = of_kind(ModelKind::Ocelot);
+    let walking = MobInstance {
+        limb_phase: 1.0,
+        limb_swing: 1.0,
+        ..of_kind(ModelKind::Ocelot)
+    };
+    assert_ne!(vertices(&still), vertices(&walking));
+    let (lo, hi) = bounds(&still);
+    assert!((lo.y - 64.0).abs() < 0.05);
+    assert!(hi.y - lo.y < 1.0);
 }

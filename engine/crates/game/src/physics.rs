@@ -115,6 +115,7 @@ pub struct Player {
     pub auto_step: bool,
     pub step_offset: f32,
     pub terminal_speed: f32,
+    pub jump_speed: f32,
     pub walk_multiplier: f32,
     pub fly_multiplier: f32,
 }
@@ -136,6 +137,7 @@ impl Player {
             auto_step: true,
             step_offset: 0.0,
             terminal_speed: TERMINAL_SPEED,
+            jump_speed: JUMP_SPEED,
             walk_multiplier: 1.0,
             fly_multiplier: 1.0,
         }
@@ -304,7 +306,7 @@ impl Player {
                 self.velocity.x = horizontal.x;
                 self.velocity.z = horizontal.y;
                 if self.on_ground && input.jump {
-                    self.velocity.y = JUMP_SPEED;
+                    self.velocity.y = self.jump_speed;
                 }
                 self.velocity.y = (self.velocity.y - GRAVITY * TICK).max(-self.terminal_speed);
             }

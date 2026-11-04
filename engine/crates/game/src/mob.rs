@@ -4,7 +4,7 @@ use glam::{IVec3, Vec2, Vec3};
 use world::block::FluidKind;
 use world::mob::{MobKind, MobRecord};
 
-use crate::physics::{Collision, Input, Mode, Player};
+use crate::physics::{Collision, Input, JUMP_SPEED, Mode, Player};
 use crate::rng::Rng;
 
 pub struct MobSpec {
@@ -92,6 +92,24 @@ pub const LLAMA: MobSpec = MobSpec {
     fall_speed: None,
 };
 
+pub const RABBIT: MobSpec = MobSpec {
+    width: 0.4,
+    height: 0.5,
+    eye: 0.4,
+    walk_input: 0.6,
+    shadow_radius: 0.3,
+    fall_speed: None,
+};
+
+pub const OCELOT: MobSpec = MobSpec {
+    width: 0.6,
+    height: 0.7,
+    eye: 0.6,
+    walk_input: 0.5,
+    shadow_radius: 0.4,
+    fall_speed: None,
+};
+
 pub fn spec(kind: MobKind) -> &'static MobSpec {
     match kind {
         MobKind::Pig => &PIG,
@@ -104,6 +122,8 @@ pub fn spec(kind: MobKind) -> &'static MobSpec {
         MobKind::Horse => &HORSE,
         MobKind::Donkey => &DONKEY,
         MobKind::Llama => &LLAMA,
+        MobKind::Rabbit => &RABBIT,
+        MobKind::Ocelot => &OCELOT,
     }
 }
 
@@ -138,6 +158,9 @@ const FLAP_RATE_SCALE: f32 = 0.3;
 const FLAP_KICK: f32 = 1.0;
 const FLAP_DECAY: f32 = 0.9;
 const FLAP_PHASE_SPEED: f32 = 2.0;
+const RABBIT_JUMP_SPEED: f32 = 5.0;
+const HOP_REST_TICKS: u32 = 15;
+const HOP_AIR_TICKS: f32 = 20.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Pose {
@@ -149,6 +172,7 @@ pub struct Pose {
     pub limb_swing: f32,
     pub flap_phase: f32,
     pub flap_amount: f32,
+    pub hop: f32,
 }
 
 impl Pose {
@@ -162,6 +186,7 @@ impl Pose {
             limb_swing: self.limb_swing + (next.limb_swing - self.limb_swing) * alpha,
             flap_phase: self.flap_phase + (next.flap_phase - self.flap_phase) * alpha,
             flap_amount: self.flap_amount + (next.flap_amount - self.flap_amount) * alpha,
+            hop: self.hop + (next.hop - self.hop) * alpha,
         }
     }
 }
@@ -188,6 +213,8 @@ pub struct Mob {
     flap_phase: f32,
     flap_amount: f32,
     flap_speed: f32,
+    air_ticks: u32,
+    hop_rest: u32,
     plan: Plan,
     head_goal: Vec2,
     head_hold: u32,
@@ -222,6 +249,8 @@ impl Mob {
             flap_phase: 0.0,
             flap_amount: 0.0,
             flap_speed: 0.0,
+            air_ticks: 0,
+            hop_rest: 0,
             plan: Plan::Idle,
             head_goal: Vec2::ZERO,
             head_hold: 0,
@@ -236,6 +265,7 @@ impl Mob {
                 limb_swing: 0.0,
                 flap_phase: 0.0,
                 flap_amount: 0.0,
+                hop: 0.0,
             },
         };
         mob.prev = mob.pose();
@@ -268,6 +298,7 @@ impl Mob {
             limb_swing: self.limb_swing,
             flap_phase: self.flap_phase,
             flap_amount: self.flap_amount,
+            hop: self.hop(),
         }
     }
 
@@ -298,19 +329,52 @@ impl Mob {
             }
             None => 0.0,
         };
+        let hopper = self.kind == MobKind::Rabbit;
+        let was_grounded = self.body.on_ground;
+        let mut forward = forward;
+        if hopper && was_grounded && self.hop_rest > 0 {
+            self.hop_rest -= 1;
+            forward = 0.0;
+        }
+        let climbing = forward > 0.0 && was_grounded && self.can_hop(around);
+        self.body.jump_speed = if hopper && !climbing {
+            RABBIT_JUMP_SPEED
+        } else {
+            JUMP_SPEED
+        };
         let before = self.body.feet;
         let input = Input {
             forward,
             strafe: 0.0,
-            jump: swimming || forward > 0.0 && self.body.on_ground && self.can_hop(around),
+            jump: swimming || forward > 0.0 && was_grounded && (hopper || climbing),
             descend: false,
         };
         self.body
             .step_with(&input, self.yaw, around.collision, around.fluid);
+        if hopper {
+            if self.body.on_ground {
+                self.air_ticks = 0;
+                if !was_grounded {
+                    self.hop_rest = HOP_REST_TICKS;
+                    self.body.velocity.x = 0.0;
+                    self.body.velocity.z = 0.0;
+                }
+            } else {
+                self.air_ticks += 1;
+            }
+        }
         let moved = Vec2::new(self.body.feet.x - before.x, self.body.feet.z - before.z).length();
         self.animate_limbs(moved);
         self.animate_wings();
         self.animate_head(around);
+    }
+
+    fn hop(&self) -> f32 {
+        if self.air_ticks == 0 {
+            0.0
+        } else {
+            (self.air_ticks as f32 / HOP_AIR_TICKS).min(1.0)
+        }
     }
 
     fn think<C, F>(&mut self, around: &Surroundings<C, F>) -> Option<f32>

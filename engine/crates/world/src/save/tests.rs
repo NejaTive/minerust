@@ -1,5 +1,5 @@
 use super::*;
-use crate::mob::horse_variant;
+use crate::mob::{RABBIT_COLOURS, horse_variant};
 use crate::pos::ColumnPos;
 use crate::terrain::Terrain;
 
@@ -349,4 +349,21 @@ fn previous_format_is_not_supported() {
         decode_column(&bytes).err(),
         Some(SaveError::UnsupportedVersion(FORMAT_VERSION - 1))
     );
+}
+
+#[test]
+fn rabbit_variant_survives_the_save() {
+    let mut column = Column::new();
+    column.mobs = (0..RABBIT_COLOURS)
+        .map(|variant| MobRecord {
+            kind: MobKind::Rabbit,
+            pos: glam::Vec3::ZERO,
+            yaw: 0.0,
+            variant,
+        })
+        .collect();
+    let decoded = decode_column(&encode_column(&column)).expect("decodes");
+    let variants: Vec<u8> = decoded.mobs.iter().map(|mob| mob.variant).collect();
+    assert_eq!(variants, (0..RABBIT_COLOURS).collect::<Vec<_>>());
+    assert!(decoded.mobs.iter().all(|mob| mob.kind == MobKind::Rabbit));
 }

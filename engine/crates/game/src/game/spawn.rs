@@ -11,8 +11,8 @@ use crate::mob::Mob;
 use crate::rng::Rng;
 use crate::spawning::{
     ATTEMPTS_PER_GROUP, CYCLE_GROUP_SIZE, CYCLE_REACH, CYCLE_TICKS, GENERATION_ONE_IN,
-    GENERATION_REACH, GROUPS_PER_COLUMN, MIN_LIGHT, MIN_PLAYER_DISTANCE, RADIUS, animals, cap,
-    group_colour, group_size, pick, reach_offset, variant_in_group,
+    GENERATION_REACH, GROUPS_PER_COLUMN, MIN_LIGHT, MIN_PLAYER_DISTANCE, OCELOT_MIN_Y, RADIUS,
+    animals, cap, group_colour, group_size, pick, reach_offset, variant_in_group,
 };
 
 const COLUMN_SIZE: i32 = 16;
@@ -56,7 +56,8 @@ impl Game {
         let mut rng = column_rng(self.seed, key);
         let origin = key.origin();
         let center = COLUMN_SIZE / 2;
-        let list = animals(self.terrain.biome_at(origin.x + center, origin.z + center));
+        let biome = self.terrain.biome_at(origin.x + center, origin.z + center);
+        let list = animals(biome);
         let mut records = Vec::new();
         while !list.is_empty() && rng.chance(GENERATION_ONE_IN) {
             let Some(entry) = pick(&mut rng, list) else {
@@ -64,7 +65,7 @@ impl Game {
             };
             let kind = entry.kind;
             let group = group_size(&mut rng, entry);
-            let colour = group_colour(&mut rng, kind);
+            let colour = group_colour(&mut rng, kind, biome);
             let mut local = (
                 rng.below(COLUMN_SIZE as u32) as i32,
                 rng.below(COLUMN_SIZE as u32) as i32,
@@ -72,7 +73,7 @@ impl Game {
             for _ in 0..group {
                 for _ in 0..ATTEMPTS_PER_GROUP {
                     let (x, z) = (origin.x + local.0, origin.z + local.1);
-                    let placed = self.grass_surface(x, z).and_then(|feet| {
+                    let placed = self.generation_surface(x, z).and_then(|feet| {
                         let mob = self.new_mob(kind, colour, feet, &mut rng);
                         self.mob_fits(&mob).then(|| mob.record())
                     });
@@ -87,12 +88,13 @@ impl Game {
         records
     }
 
-    fn grass_surface(&self, x: i32, z: i32) -> Option<IVec3> {
+    fn generation_surface(&self, x: i32, z: i32) -> Option<IVec3> {
         let top = (0..WORLD_HEIGHT).rev().find(|&y| {
             let block = self.world.block(IVec3::new(x, y, z));
             block.collision_height() > 0.0 || block.fluid().is_some()
         })?;
-        spawn_ground(self.world.block(IVec3::new(x, top, z))).then(|| IVec3::new(x, top + 1, z))
+        generation_ground(self.world.block(IVec3::new(x, top, z)))
+            .then(|| IVec3::new(x, top + 1, z))
     }
 
     fn new_mob(&self, kind: MobKind, colour: u8, cell: IVec3, rng: &mut Rng) -> Mob {
@@ -147,8 +149,9 @@ impl Game {
                     continue;
                 }
                 if chosen.is_none() {
-                    chosen = pick(rng, animals(self.terrain.biome_at(gx, gz)))
-                        .map(|e| (e.kind, group_colour(rng, e.kind)));
+                    let biome = self.terrain.biome_at(gx, gz);
+                    chosen = pick(rng, animals(biome))
+                        .map(|e| (e.kind, group_colour(rng, e.kind, biome)));
                 }
                 let Some((kind, colour)) = chosen else {
                     break;
@@ -169,7 +172,8 @@ impl Game {
     }
 
     fn may_spawn_here(&self, mob: &Mob, cell: IVec3) -> bool {
-        spawn_ground(self.world.block(cell - IVec3::Y))
+        cycle_ground(mob.kind, self.world.block(cell - IVec3::Y))
+            && (mob.kind != MobKind::Ocelot || cell.y >= OCELOT_MIN_Y)
             && self.spawn_light(cell) >= MIN_LIGHT
             && mob.body.feet.distance(self.player.feet) >= MIN_PLAYER_DISTANCE
             && self.mob_fits(mob)
@@ -183,8 +187,12 @@ impl Game {
     }
 }
 
-fn spawn_ground(block: Block) -> bool {
-    block.is_grass() || block == Block::Mycelium
+fn cycle_ground(kind: MobKind, block: Block) -> bool {
+    block.is_grass() || block == Block::Mycelium || kind == MobKind::Ocelot && block.is_leaves()
+}
+
+fn generation_ground(block: Block) -> bool {
+    block == Block::Snow || block.collision_height() >= 1.0 && block.is_opaque()
 }
 
 fn column_rng(seed: i32, key: ColumnPos) -> Rng {

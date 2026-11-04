@@ -480,3 +480,11 @@ fn pack_horse_and_llama_sheets_need_their_own_shape() {
     assert_eq!(entities.llama[1].width, 128);
     assert_eq!(entities.llama[2].width, builtin.llama[2].width);
 }
+
+#[test]
+fn builtin_rabbit_and_ocelot_sheets_are_two_to_one() {
+    let entities = builtin_entities();
+    for sheet in entities.rabbit.iter().chain([&entities.ocelot]) {
+        assert!(sheet.width >= 128 && sheet.width == 2 * sheet.height);
+    }
+}
