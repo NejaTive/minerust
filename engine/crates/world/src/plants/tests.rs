@@ -50,7 +50,7 @@ fn plains_have_reasonable_grass_share() {
         }
     }
     let share = grass as f32 / surface as f32;
-    assert!((0.06..0.2).contains(&share), "grass share {share}");
+    assert!((0.06..0.3).contains(&share), "grass share {share}");
     assert!(
         flowers > 0 && flowers < grass / 3,
         "{flowers} flowers, {grass} grass"

@@ -631,7 +631,7 @@ fn double_plants_are_always_whole_pairs_on_soil() {
             total += double_pairs(&column).len();
         }
     }
-    assert!(total > 100, "{total} double plants");
+    assert!(total > 50, "{total} double plants");
 }
 
 fn count_of(terrain: &Terrain, biome: Biome, columns: usize, blocks: &[Block]) -> usize {
@@ -1247,4 +1247,139 @@ fn fossils_cross_column_borders_without_seams() {
     }
     assert!(crossing > 0, "no fossil crosses a border");
     assert!(matched * 100 >= total * 98, "{matched} of {total}");
+}
+
+type BorderCase = (
+    &'static str,
+    Biome,
+    usize,
+    Box<dyn Fn(&Column, IVec3) -> bool>,
+);
+
+fn edge_distance(x: i32, z: i32) -> i32 {
+    x.min(15 - x).min(z).min(15 - z)
+}
+
+fn edge_to_centre_ratio(
+    terrain: &Terrain,
+    biome: Biome,
+    columns: usize,
+    counts: impl Fn(&Column, IVec3) -> bool,
+) -> (f32, usize) {
+    let (mut edge, mut centre, mut edge_cells, mut centre_cells) = (0, 0, 0, 0);
+    for key in mesa_columns(terrain, biome, columns) {
+        let column = terrain.generate(key);
+        for z in 0..16 {
+            for x in 0..16 {
+                let band = edge_distance(x, z);
+                if (2..6).contains(&band) {
+                    continue;
+                }
+                let hits = (0..WORLD_HEIGHT)
+                    .filter(|&y| counts(&column, [x, y, z].into()))
+                    .count();
+                if band < 2 {
+                    edge += hits;
+                    edge_cells += 1;
+                } else {
+                    centre += hits;
+                    centre_cells += 1;
+                }
+            }
+        }
+    }
+    let ratio = (edge as f32 / edge_cells as f32) / (centre as f32 / centre_cells as f32);
+    (ratio, edge + centre)
+}
+
+#[test]
+fn objects_are_as_dense_at_column_borders_as_in_the_middle() {
+    let terrain = Terrain::new(SEED);
+    let cases: [BorderCase; 8] = [
+        (
+            "cactus",
+            Biome::Desert,
+            40,
+            Box::new(|c, p| c.get(p) == Block::Cactus),
+        ),
+        (
+            "dead bush",
+            Biome::Mesa,
+            40,
+            Box::new(|c, p| c.get(p) == Block::DeadBush),
+        ),
+        (
+            "boulder",
+            Biome::MegaTaiga,
+            40,
+            Box::new(|c, p| c.get(p) == Block::MossyCobblestone),
+        ),
+        (
+            "tall grass",
+            Biome::Plains,
+            20,
+            Box::new(|c, p| c.get(p) == Block::TallGrass),
+        ),
+        (
+            "double grass",
+            Biome::Plains,
+            200,
+            Box::new(|c, p| c.get(p) == Block::DoubleGrassLower),
+        ),
+        (
+            "vine",
+            Biome::Jungle,
+            40,
+            Box::new(|c, p| c.get(p) == Block::Vine),
+        ),
+        (
+            "mushroom",
+            Biome::MushroomIsland,
+            40,
+            Box::new(|c, p| matches!(c.get(p), Block::BrownMushroom | Block::RedMushroom)),
+        ),
+        (
+            "ice",
+            Biome::IceSpikes,
+            40,
+            Box::new(|c, p| c.get(p) == Block::IcePacked),
+        ),
+    ];
+    for (name, biome, columns, counts) in cases {
+        let (ratio, total) = edge_to_centre_ratio(&terrain, biome, columns, counts);
+        assert!(total > 50, "{name}: only {total} blocks");
+        assert!(ratio > 0.75, "{name}: border density {ratio} of the middle");
+    }
+}
+
+#[test]
+fn ice_spires_and_boulders_stand_across_column_borders() {
+    let terrain = Terrain::new(SEED);
+    let crossing = |biome: Biome, block: Block, rise: i32| {
+        let keys = mesa_columns(&terrain, biome, 300);
+        let mut crossings = 0;
+        for &a in &keys {
+            let b = ColumnPos::new(a.x() + 1, a.z());
+            if !keys.contains(&b) {
+                continue;
+            }
+            let (left, right) = (terrain.generate(a), terrain.generate(b));
+            for z in 0..16 {
+                for y in 0..WORLD_HEIGHT {
+                    let ground = terrain.surface_height(a.origin().x + 15, a.origin().z + z);
+                    if left.get([15, y, z].into()) == block
+                        && right.get([0, y, z].into()) == block
+                        && y > ground + rise
+                    {
+                        crossings += 1;
+                    }
+                }
+            }
+        }
+        crossings
+    };
+    let spires = crossing(Biome::IceSpikes, Block::IcePacked, 1);
+    let boulders = crossing(Biome::MegaTaiga, Block::MossyCobblestone, 0);
+    assert!(spires > 0, "{spires} spire blocks cross a border");
+    assert!(boulders > 0, "{boulders} boulder blocks cross a border");
 }

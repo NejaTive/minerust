@@ -1,7 +1,9 @@
 use glam::IVec3;
 
 use crate::block::Block;
-use crate::column::{Column, WORLD_HEIGHT};
+use crate::column::Column;
+#[cfg(test)]
+use crate::column::WORLD_HEIGHT;
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
 use crate::stream::Stream;
@@ -103,20 +105,6 @@ fn pick_grass(biome: Biome, rng: &mut Stream) -> Block {
     if fern { Block::Fern } else { Block::TallGrass }
 }
 
-fn highest(column: &Column, x: i32, z: i32) -> Option<i32> {
-    (0..WORLD_HEIGHT)
-        .rev()
-        .find(|&y| column.get([x, y, z].into()) != Block::Air)
-}
-
-fn start(rng: &mut Stream, column: &Column) -> Option<IVec3> {
-    let x = rng.below(SECTION_SIZE as u32) as i32;
-    let z = rng.below(SECTION_SIZE as u32) as i32;
-    let top = highest(column, x, z)?;
-    let y = rng.below((top + 1) as u32 + SKY_REACH) as i32;
-    Some(IVec3::new(x, y, z))
-}
-
 fn grow_cluster(rng: &mut Stream, column: &mut Column, center: IVec3, block: Block, tries: u32) {
     for _ in 0..tries {
         let at = center
@@ -138,20 +126,34 @@ fn grow_cluster(rng: &mut Stream, column: &mut Column, center: IVec3, block: Blo
     }
 }
 
-pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
-    if terrain.world_type() != WorldType::Standard {
-        return;
-    }
-    let origin = key.origin();
+fn reaches(center: IVec3) -> bool {
+    let reach = SPREAD as i32;
+    center.x + reach >= 0
+        && center.x - reach < SECTION_SIZE
+        && center.z + reach >= 0
+        && center.z - reach < SECTION_SIZE
+}
+
+/// Кластеры колонки `(sx, sz)`; в `column` ложатся только блоки колонки `key`, поэтому пятна у границы целые.
+fn plant_source(terrain: &Terrain, key: ColumnPos, column: &mut Column, sx: i32, sz: i32) {
+    let origin = IVec3::new(sx * SECTION_SIZE, 0, sz * SECTION_SIZE);
+    let shift = IVec3::new(origin.x - key.origin().x, 0, origin.z - key.origin().z);
     let biome = terrain.biome_at(origin.x + CENTER, origin.z + CENTER);
     let counts = attempts(biome);
-    let state = u64::from(hash(terrain.seed(), key.x(), key.z(), SALT_PLANTS))
-        | u64::from(hash(terrain.seed(), key.x(), key.z(), SALT_PLANTS + 100)) << 32;
+    let state = u64::from(hash(terrain.seed(), sx, sz, SALT_PLANTS))
+        | u64::from(hash(terrain.seed(), sx, sz, SALT_PLANTS + 100)) << 32;
     let mut rng = Stream::new(state);
+    let start = |rng: &mut Stream| {
+        let x = rng.below(SECTION_SIZE as u32) as i32;
+        let z = rng.below(SECTION_SIZE as u32) as i32;
+        let top = terrain
+            .surface_height(origin.x + x, origin.z + z)
+            .max(WATER_LEVEL);
+        let y = rng.below((top + 1) as u32 + SKY_REACH) as i32;
+        (IVec3::new(x, y, z), top)
+    };
     for _ in 0..counts.flowers {
-        let Some(center) = start(&mut rng, column) else {
-            continue;
-        };
+        let (center, _) = start(&mut rng);
         let flower = pick_flower(
             terrain,
             biome,
@@ -159,17 +161,30 @@ pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
             origin.x + center.x,
             origin.z + center.z,
         );
-        grow_cluster(&mut rng, column, center, flower, FLOWER_TRIES);
+        let mut tries = rng.fork();
+        if reaches(center + shift) {
+            grow_cluster(&mut tries, column, center + shift, flower, FLOWER_TRIES);
+        }
     }
     for _ in 0..counts.grass {
-        let Some(mut center) = start(&mut rng, column) else {
-            continue;
-        };
+        let (mut center, top) = start(&mut rng);
         let block = pick_grass(biome, &mut rng);
-        while center.y > 0 && matches!(column.get(center), b if b == Block::Air || b.is_leaves()) {
-            center.y -= 1;
+        center.y = center.y.min(top);
+        let mut tries = rng.fork();
+        if reaches(center + shift) {
+            grow_cluster(&mut tries, column, center + shift, block, GRASS_TRIES);
         }
-        grow_cluster(&mut rng, column, center, block, GRASS_TRIES);
+    }
+}
+
+pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
+    if terrain.world_type() != WorldType::Standard {
+        return;
+    }
+    for sz in key.z() - 1..=key.z() + 1 {
+        for sx in key.x() - 1..=key.x() + 1 {
+            plant_source(terrain, key, column, sx, sz);
+        }
     }
 }
 

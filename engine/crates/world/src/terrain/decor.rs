@@ -2,7 +2,7 @@ use super::*;
 use crate::block::VINE_SIDES;
 use crate::stream::Stream;
 
-const SALT_DECOR: u64 = 33;
+const SALT_DECOR: u64 = 170;
 const REED_ATTEMPTS: u32 = 10;
 const CACTUS_TRIES: u32 = 10;
 const CACTUS_SPREAD: u32 = 8;
@@ -42,7 +42,8 @@ const GRASS_DOUBLES: u32 = 7;
 const SUNFLOWERS: u32 = 10;
 const SPIKES: u32 = 3;
 const SPIKE_PATHS: u32 = 2;
-const SPIKE_INNER_MARGIN: i32 = 3;
+const SPIKE_REACH: i32 = 4;
+const SPIKE_SOIL_DEPTH: i32 = 3;
 const SPIKE_FLOOR: i32 = 50;
 const SPIKE_BASE_HEIGHT: i32 = 7;
 const SPIKE_HIGH_ONE_IN: u32 = 60;
@@ -52,12 +53,25 @@ const SPIKE_EDGE_KEPT: u32 = 3;
 const SPIKE_SHAFT_LEN: i32 = 50;
 const PATH_WIDTH_SPAN: u32 = 2;
 const PATH_WIDTH_MIN: i32 = 2;
+const BOULDER_REACH: i32 = 4;
 const BOULDER_PASSES: u32 = 3;
 const BOULDER_MAX: u32 = 3;
 const BOULDER_BLOB_SCALE: f32 = 0.333;
 const BOULDER_BLOB_BASE: f32 = 0.5;
 const PLAINS_TALL_GRASS_NOISE_SCALE: f32 = 200.0;
 const PLAINS_TULIP_BELOW: f32 = -0.55;
+
+const STREAM_CACTI: u64 = 0;
+const STREAM_BUSHES: u64 = 1;
+const STREAM_REEDS: u64 = 2;
+const STREAM_MELONS: u64 = 3;
+const STREAM_VINES: u64 = 4;
+const STREAM_LILIES: u64 = 5;
+const STREAM_MUSHROOMS: u64 = 6;
+const STREAM_SPIKES: u64 = 7;
+const STREAM_PATHS: u64 = 8;
+const STREAM_BOULDERS: u64 = 9;
+const STREAM_DOUBLES: u64 = 10;
 
 const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
 
@@ -175,55 +189,143 @@ struct Spot {
     z: i32,
 }
 
+struct Source {
+    sx: i32,
+    sz: i32,
+    biome: Biome,
+    climate: Arc<ColumnClimate>,
+    origin: IVec3,
+    shift: IVec3,
+}
+
+impl Source {
+    fn surface(&self, spot: &Spot) -> i32 {
+        self.climate.surface[ColumnClimate::index(spot.x, spot.z)]
+    }
+
+    fn target(&self, spot: &Spot) -> Spot {
+        Spot {
+            x: spot.x + self.shift.x,
+            z: spot.z + self.shift.z,
+        }
+    }
+
+    fn touches(&self, spot: &Spot, reach: u32) -> bool {
+        let at = self.target(spot);
+        let reach = reach as i32;
+        at.x + reach >= 0
+            && at.x - reach < SECTION_SIZE
+            && at.z + reach >= 0
+            && at.z - reach < SECTION_SIZE
+    }
+}
+
+fn inside(spot: &Spot) -> bool {
+    (0..SECTION_SIZE).contains(&spot.x) && (0..SECTION_SIZE).contains(&spot.z)
+}
+
+fn pick(rng: &mut Stream) -> Spot {
+    Spot {
+        x: rng.below(SECTION_SIZE as u32) as i32,
+        z: rng.below(SECTION_SIZE as u32) as i32,
+    }
+}
+
+fn around(rng: &mut Stream, spot: &Spot, spread: u32) -> Spot {
+    Spot {
+        x: spot.x + rng.spread(spread),
+        z: spot.z + rng.spread(spread),
+    }
+}
+
 impl Terrain {
     pub(crate) fn decorate(&self, key: ColumnPos, column: &mut Column) {
         if self.world_type != WorldType::Standard {
             return;
         }
         let climate = self.climate(key.x(), key.z());
-        let biome = climate.biomes[ColumnClimate::index(CENTER, CENTER)];
-        let counts = counts(biome);
-        let state = u64::from(hash(self.seed, key.x(), key.z(), SALT_DECOR))
-            | u64::from(hash(self.seed, key.x(), key.z(), SALT_DECOR + 1)) << 32;
-        let mut rng = Stream::new(state);
-        let surface = |spot: &Spot| climate.surface[ColumnClimate::index(spot.x, spot.z)];
-        let pick = |rng: &mut Stream| Spot {
-            x: rng.below(SECTION_SIZE as u32) as i32,
-            z: rng.below(SECTION_SIZE as u32) as i32,
-        };
-        let near = |rng: &mut Stream, spot: &Spot, spread: u32| {
-            let at = Spot {
-                x: spot.x + rng.spread(spread),
-                z: spot.z + rng.spread(spread),
-            };
-            (0..SECTION_SIZE)
-                .contains(&at.x)
-                .then_some(())
-                .filter(|()| (0..SECTION_SIZE).contains(&at.z))
-                .map(|()| at)
-        };
+        let origin = key.origin();
+        for sz in key.z() - 1..=key.z() + 1 {
+            for sx in key.x() - 1..=key.x() + 1 {
+                let source_climate = self.climate(sx, sz);
+                let source = Source {
+                    sx,
+                    sz,
+                    biome: source_climate.biomes[ColumnClimate::index(CENTER, CENTER)],
+                    climate: source_climate,
+                    origin: IVec3::new(sx * SECTION_SIZE, 0, sz * SECTION_SIZE),
+                    shift: IVec3::new(
+                        sx * SECTION_SIZE - origin.x,
+                        0,
+                        sz * SECTION_SIZE - origin.z,
+                    ),
+                };
+                self.decorate_source(key, column, &climate, &source);
+            }
+        }
+        self.grow_disks(key, column);
+        self.grow_pumpkins(key, column);
+        self.grow_springs(key, column);
+    }
 
+    fn source_stream(&self, source: &Source, kind: u64) -> Stream {
+        let salt = SALT_DECOR + 2 * kind;
+        let state = u64::from(hash(self.seed, source.sx, source.sz, salt))
+            | u64::from(hash(self.seed, source.sx, source.sz, salt + 1)) << 32;
+        Stream::new(state)
+    }
+
+    fn decorate_source(
+        &self,
+        key: ColumnPos,
+        column: &mut Column,
+        climate: &ColumnClimate,
+        source: &Source,
+    ) {
+        let counts = counts(source.biome);
+        let shift = source.shift;
+
+        let mut rng = self.source_stream(source, STREAM_CACTI);
         for _ in 0..counts.cacti {
             let spot = pick(&mut rng);
-            let reach = 2 * surface(&spot) as u32;
+            let reach = 2 * source.surface(&spot) as u32;
             if !rng.chance(CACTUS_SURFACE_REACH, reach) {
                 continue;
             }
+            let mut tries = rng.fork();
+            if !source.touches(&spot, CACTUS_SPREAD) {
+                continue;
+            }
             for _ in 0..CACTUS_TRIES {
-                let height = 1 + rng.taper() as i32;
-                if let Some(at) = near(&mut rng, &spot, CACTUS_SPREAD) {
-                    self.plant_cactus(key, column, &climate, &at, height);
+                let height = 1 + tries.taper() as i32;
+                let at = source.target(&around(&mut tries, &spot, CACTUS_SPREAD));
+                if inside(&at) {
+                    self.plant_cactus(key, column, climate, &at, height);
                 }
             }
         }
+
+        let mut rng = self.source_stream(source, STREAM_BUSHES);
         for _ in 0..counts.bushes {
             let spot = pick(&mut rng);
-            if !rng.chance(BUSH_SKY_REACH, surface(&spot) as u32 + BUSH_SKY_REACH) {
+            if !rng.chance(
+                BUSH_SKY_REACH,
+                source.surface(&spot) as u32 + BUSH_SKY_REACH,
+            ) {
+                continue;
+            }
+            let mut tries = rng.fork();
+            if !source.touches(&spot, BUSH_SPREAD) {
                 continue;
             }
             for _ in 0..BUSH_TRIES {
-                if let Some(at) = near(&mut rng, &spot, BUSH_SPREAD) {
-                    let ground = IVec3::new(at.x, surface(&at), at.z);
+                let at = source.target(&around(&mut tries, &spot, BUSH_SPREAD));
+                if inside(&at) {
+                    let ground = IVec3::new(
+                        at.x,
+                        climate.surface[ColumnClimate::index(at.x, at.z)],
+                        at.z,
+                    );
                     let above = ground + IVec3::Y;
                     if Block::DeadBush.stands_on(column.get(ground))
                         && column.get(above) == Block::Air
@@ -233,27 +335,40 @@ impl Terrain {
                 }
             }
         }
+
+        let mut rng = self.source_stream(source, STREAM_REEDS);
         for _ in 0..REED_ATTEMPTS + counts.reeds {
             let spot = pick(&mut rng);
-            if !rng.chance(1, 2 * surface(&spot) as u32) {
+            if !rng.chance(1, 2 * source.surface(&spot) as u32) {
+                continue;
+            }
+            let mut tries = rng.fork();
+            if !source.touches(&spot, REED_SPREAD) {
                 continue;
             }
             for _ in 0..REED_TRIES {
-                let height = 2 + rng.taper() as i32;
-                if let Some(at) = near(&mut rng, &spot, REED_SPREAD) {
-                    self.plant_reeds(key, column, &climate, &at, height);
+                let height = 2 + tries.taper() as i32;
+                let at = source.target(&around(&mut tries, &spot, REED_SPREAD));
+                if inside(&at) {
+                    self.plant_reeds(key, column, climate, &at, height);
                 }
             }
         }
+
+        let mut rng = self.source_stream(source, STREAM_MELONS);
         for _ in 0..counts.melons {
             let spot = pick(&mut rng);
-            let reach = 2 * surface(&spot) as u32;
+            let reach = 2 * source.surface(&spot) as u32;
             let y = rng.below(reach.max(1)) as i32;
+            let mut tries = rng.fork();
+            if !source.touches(&spot, MELON_SPREAD) {
+                continue;
+            }
             for _ in 0..MELON_TRIES {
                 let at = IVec3::new(
-                    spot.x + rng.spread(MELON_SPREAD),
-                    y + rng.spread(MELON_VERTICAL_SPREAD),
-                    spot.z + rng.spread(MELON_SPREAD),
+                    spot.x + shift.x + tries.spread(MELON_SPREAD),
+                    y + tries.spread(MELON_VERTICAL_SPREAD),
+                    spot.z + shift.z + tries.spread(MELON_SPREAD),
                 );
                 if Column::contains(at)
                     && column.get(at) == Block::Air
@@ -263,29 +378,48 @@ impl Terrain {
                 }
             }
         }
+
+        let mut rng = self.source_stream(source, STREAM_VINES);
         for _ in 0..counts.vines {
             let spot = pick(&mut rng);
-            self.grow_vines(&mut rng, column, IVec3::new(spot.x, WATER_LEVEL, spot.z));
+            let mut walk = rng.fork();
+            self.grow_vines(key, &mut walk, column, source, &spot);
         }
+
+        let mut rng = self.source_stream(source, STREAM_LILIES);
         for _ in 0..counts.lilies {
             let spot = pick(&mut rng);
-            let mut y = (rng.below(2 * surface(&spot) as u32) as i32).min(WORLD_HEIGHT - 1);
-            while y > 0 && column.get(IVec3::new(spot.x, y - 1, spot.z)) == Block::Air {
-                y -= 1;
+            let y = (rng.below(2 * source.surface(&spot) as u32) as i32).min(WORLD_HEIGHT - 1);
+            let mut tries = rng.fork();
+            if !source.touches(&spot, LILY_SPREAD) {
+                continue;
             }
-            self.grow_lilies(&mut rng, column, IVec3::new(spot.x, y, spot.z));
+            let top = source.surface(&spot).max(WATER_LEVEL);
+            let start = IVec3::new(spot.x + shift.x, y.min(top + 1), spot.z + shift.z);
+            self.grow_lilies(&mut tries, column, start);
         }
+
+        let mut rng = self.source_stream(source, STREAM_MUSHROOMS);
+        let mut mushrooms =
+            |rng: &mut Stream, block: Block, height: &dyn Fn(&mut Stream, &Spot) -> i32| {
+                let spot = pick(rng);
+                let y = height(rng, &spot);
+                let mut tries = rng.fork();
+                if source.touches(&spot, MUSHROOM_SPREAD) {
+                    let start = IVec3::new(spot.x + shift.x, y, spot.z + shift.z);
+                    self.grow_mushrooms(&mut tries, column, climate, block, start);
+                }
+            };
         for _ in 0..counts.mushrooms {
             if rng.below(BROWN_MUSHROOM_ONE_IN) == 0 {
-                let spot = pick(&mut rng);
-                let start = IVec3::new(spot.x, surface(&spot) + 1, spot.z);
-                self.grow_mushrooms(&mut rng, column, &climate, Block::BrownMushroom, start);
+                mushrooms(&mut rng, Block::BrownMushroom, &|_, spot| {
+                    source.surface(spot) + 1
+                });
             }
             if rng.below(RED_MUSHROOM_ONE_IN) == 0 {
-                let spot = pick(&mut rng);
-                let y = rng.below(2 * surface(&spot) as u32) as i32;
-                let start = IVec3::new(spot.x, y, spot.z);
-                self.grow_mushrooms(&mut rng, column, &climate, Block::RedMushroom, start);
+                mushrooms(&mut rng, Block::RedMushroom, &|rng, spot| {
+                    rng.below(2 * source.surface(spot) as u32) as i32
+                });
             }
         }
         for (block, one_in) in [
@@ -293,51 +427,44 @@ impl Terrain {
             (Block::RedMushroom, RED_MUSHROOM_ONE_IN),
         ] {
             if rng.below(one_in) == 0 {
-                let spot = pick(&mut rng);
-                let y = rng.below(CAVE_MUSHROOM_CEILING) as i32;
-                let start = IVec3::new(spot.x, y, spot.z);
-                self.grow_mushrooms(&mut rng, column, &climate, block, start);
+                mushrooms(&mut rng, block, &|rng, _| {
+                    rng.below(CAVE_MUSHROOM_CEILING) as i32
+                });
             }
         }
-        self.grow_disks(key, column);
-        self.decorate_cold_and_flowers(&mut rng, column, &climate, &counts, key);
-        self.grow_pumpkins(key, column);
-        self.grow_springs(key, column);
+
+        self.decorate_cold_and_flowers(column, &counts, source);
     }
 
-    fn decorate_cold_and_flowers(
-        &self,
-        rng: &mut Stream,
-        column: &mut Column,
-        climate: &ColumnClimate,
-        counts: &Counts,
-        key: ColumnPos,
-    ) {
-        let inner = |rng: &mut Stream| Spot {
-            x: SPIKE_INNER_MARGIN
-                + rng.below((SECTION_SIZE - 2 * SPIKE_INNER_MARGIN) as u32) as i32,
-            z: SPIKE_INNER_MARGIN
-                + rng.below((SECTION_SIZE - 2 * SPIKE_INNER_MARGIN) as u32) as i32,
-        };
-        let anywhere = |rng: &mut Stream| Spot {
-            x: rng.below(SECTION_SIZE as u32) as i32,
-            z: rng.below(SECTION_SIZE as u32) as i32,
-        };
+    fn decorate_cold_and_flowers(&self, column: &mut Column, counts: &Counts, source: &Source) {
+        let mut rng = self.source_stream(source, STREAM_SPIKES);
         for _ in 0..counts.spikes {
-            let spot = inner(rng);
-            self.grow_ice_spike(rng, column, climate, &spot);
-        }
-        for _ in 0..counts.paths {
-            let spot = inner(rng);
-            self.grow_ice_path(rng, column, climate, &spot);
-        }
-        if counts.boulders {
-            for _ in 0..rng.below(BOULDER_MAX) {
-                let spot = inner(rng);
-                self.grow_boulder(rng, column, climate, &spot);
+            let spot = pick(&mut rng);
+            let mut shape = rng.fork();
+            if source.touches(&spot, SPIKE_REACH as u32) {
+                self.grow_ice_spike(&mut shape, column, source, &spot);
             }
         }
-        let origin = key.origin();
+        let mut rng = self.source_stream(source, STREAM_PATHS);
+        for _ in 0..counts.paths {
+            let spot = pick(&mut rng);
+            let radius = rng.below(PATH_WIDTH_SPAN) as i32 + PATH_WIDTH_MIN;
+            if source.touches(&spot, radius as u32) {
+                self.grow_ice_path(column, source, &spot, radius);
+            }
+        }
+        let mut rng = self.source_stream(source, STREAM_BOULDERS);
+        if counts.boulders {
+            for _ in 0..rng.below(BOULDER_MAX) {
+                let spot = pick(&mut rng);
+                let mut blob = rng.fork();
+                if source.touches(&spot, BOULDER_REACH as u32) {
+                    self.grow_boulder(&mut blob, column, source, &spot);
+                }
+            }
+        }
+
+        let origin = source.origin;
         let tall_grass_here = self.color_noise(
             origin.x + CENTER,
             origin.z + CENTER,
@@ -352,15 +479,20 @@ impl Terrain {
             ),
             (counts.sunflowers, Block::SunflowerLower, true),
         ];
+        let mut rng = self.source_stream(source, STREAM_DOUBLES);
         for (count, kind, enabled) in doubles {
             if !enabled {
                 continue;
             }
             for _ in 0..count {
-                let spot = anywhere(rng);
-                let reach = climate.surface[ColumnClimate::index(spot.x, spot.z)] as u32;
+                let spot = pick(&mut rng);
+                let reach = source.surface(&spot) as u32;
                 let y = rng.below(reach + DOUBLE_SKY_REACH) as i32;
-                self.grow_double(rng, column, kind, IVec3::new(spot.x, y, spot.z));
+                let mut tries = rng.fork();
+                if source.touches(&spot, DOUBLE_SPREAD) {
+                    let start = IVec3::new(spot.x, y, spot.z);
+                    self.grow_double(&mut tries, column, kind, source, start, false);
+                }
             }
         }
         if let Some(extra) = counts.flower_doubles {
@@ -368,10 +500,12 @@ impl Terrain {
             for _ in 0..kinds.max(0) {
                 let kind = FLOWER_DOUBLE_KINDS[rng.below(3) as usize];
                 for _ in 0..DOUBLE_SPOTS {
-                    let spot = anywhere(rng);
-                    let reach = climate.surface[ColumnClimate::index(spot.x, spot.z)] as u32;
+                    let spot = pick(&mut rng);
+                    let reach = source.surface(&spot) as u32;
                     let y = rng.below(reach + DOUBLE_SKY_REACH) as i32;
-                    if self.grow_double(rng, column, kind, IVec3::new(spot.x, y, spot.z)) {
+                    let mut tries = rng.fork();
+                    let start = IVec3::new(spot.x, y, spot.z);
+                    if self.grow_double(&mut tries, column, kind, source, start, true) {
                         break;
                     }
                 }
@@ -379,24 +513,28 @@ impl Terrain {
         }
     }
 
+    /// Возвращает `true`, если хоть одна попытка легла бы на траву по рельефу: решение не зависит от буфера колонки.
     fn grow_double(
         &self,
-        rng: &mut Stream,
+        tries: &mut Stream,
         column: &mut Column,
         lower: Block,
+        source: &Source,
         start: IVec3,
+        predict: bool,
     ) -> bool {
         let Some(upper) = lower.double_upper() else {
             return false;
         };
-        let mut placed = false;
+        let mut lands = false;
         for _ in 0..DOUBLE_TRIES {
-            let at = start
+            let at_source = start
                 + IVec3::new(
-                    rng.spread(DOUBLE_SPREAD),
-                    rng.spread(DOUBLE_VERTICAL_SPREAD),
-                    rng.spread(DOUBLE_SPREAD),
+                    tries.spread(DOUBLE_SPREAD),
+                    tries.spread(DOUBLE_VERTICAL_SPREAD),
+                    tries.spread(DOUBLE_SPREAD),
                 );
+            let at = at_source + source.shift;
             if at.y > 0
                 && Column::contains(at + IVec3::Y)
                 && column.get(at) == Block::Air
@@ -408,27 +546,35 @@ impl Terrain {
             {
                 column.set(at, lower);
                 column.set(at + IVec3::Y, upper);
-                placed = true;
             }
+            lands = lands || (predict && self.double_lands(source, at_source));
         }
-        placed
+        lands
     }
 
-    fn grow_ice_spike(
-        &self,
-        rng: &mut Stream,
-        column: &mut Column,
-        climate: &ColumnClimate,
-        spot: &Spot,
-    ) {
+    fn double_lands(&self, source: &Source, at: IVec3) -> bool {
+        let (x, z) = (source.origin.x + at.x, source.origin.z + at.z);
+        at.y > WATER_LEVEL
+            && self.surface_height(x, z) == at.y - 1
+            && matches!(
+                self.biome_at(x, z).surface_blocks().top,
+                Block::Grass | Block::Dirt | Block::Podzol | Block::CoarseDirt
+            )
+    }
+
+    fn grow_ice_spike(&self, rng: &mut Stream, column: &mut Column, source: &Source, spot: &Spot) {
         let index = ColumnClimate::index(spot.x, spot.z);
-        if climate.biomes[index] != Biome::IceSpikes || climate.surface[index] < WATER_LEVEL {
+        if source.climate.biomes[index] != Biome::IceSpikes
+            || source.climate.surface[index] < WATER_LEVEL
+        {
             return;
         }
-        if column.get(IVec3::new(spot.x, climate.surface[index], spot.z)) != Block::SnowBlock {
-            return;
-        }
-        let mut base = IVec3::new(spot.x, climate.surface[index] + rng.below(4) as i32, spot.z);
+        let ground = source.climate.surface[index];
+        let mut base = IVec3::new(
+            spot.x + source.shift.x,
+            ground + rng.below(4) as i32,
+            spot.z + source.shift.z,
+        );
         let height = rng.below(4) as i32 + SPIKE_BASE_HEIGHT;
         let radius = height / 4 + rng.below(2) as i32;
         if radius > 1 && rng.below(SPIKE_HIGH_ONE_IN) == 0 {
@@ -457,15 +603,15 @@ impl Terrain {
         for dx in -shaft..=shaft {
             for dz in -shaft..=shaft {
                 let mut at = base + IVec3::new(dx, -1, dz);
+                let soil_floor = self
+                    .surface_height(source.origin.x + spot.x + dx, source.origin.z + spot.z + dz)
+                    - SPIKE_SOIL_DEPTH;
                 let mut left = SPIKE_SHAFT_LEN;
                 if dx.abs() == 1 && dz.abs() == 1 {
                     left = rng.below(5) as i32;
                 }
-                while at.y > SPIKE_FLOOR {
-                    if !Column::contains(at) || !freezes(column.get(at)) {
-                        break;
-                    }
-                    column.set(at, Block::IcePacked);
+                while at.y > SPIKE_FLOOR && at.y >= soil_floor {
+                    freeze(column, at);
                     at.y -= 1;
                     left -= 1;
                     if left <= 0 {
@@ -477,26 +623,22 @@ impl Terrain {
         }
     }
 
-    fn grow_ice_path(
-        &self,
-        rng: &mut Stream,
-        column: &mut Column,
-        climate: &ColumnClimate,
-        spot: &Spot,
-    ) {
+    fn grow_ice_path(&self, column: &mut Column, source: &Source, spot: &Spot, radius: i32) {
         let index = ColumnClimate::index(spot.x, spot.z);
-        if climate.biomes[index] != Biome::IceSpikes || climate.surface[index] < WATER_LEVEL {
+        if source.climate.biomes[index] != Biome::IceSpikes
+            || source.climate.surface[index] < WATER_LEVEL
+        {
             return;
         }
-        let ground = climate.surface[index];
-        let radius = rng.below(PATH_WIDTH_SPAN) as i32 + PATH_WIDTH_MIN;
+        let ground = source.climate.surface[index];
+        let center = source.target(spot);
         for dx in -radius..=radius {
             for dz in -radius..=radius {
                 if dx * dx + dz * dz > radius * radius {
                     continue;
                 }
                 for y in ground - 1..=ground + 1 {
-                    let at = IVec3::new(spot.x + dx, y, spot.z + dz);
+                    let at = IVec3::new(center.x + dx, y, center.z + dz);
                     if Column::contains(at)
                         && matches!(
                             column.get(at),
@@ -517,22 +659,12 @@ impl Terrain {
         }
     }
 
-    fn grow_boulder(
-        &self,
-        rng: &mut Stream,
-        column: &mut Column,
-        climate: &ColumnClimate,
-        spot: &Spot,
-    ) {
-        let surface = climate.surface[ColumnClimate::index(spot.x, spot.z)];
-        let ground = IVec3::new(spot.x, surface, spot.z);
-        if !matches!(
-            column.get(ground),
-            Block::Grass | Block::Dirt | Block::Podzol | Block::CoarseDirt
-        ) && !column.get(ground).is_stone()
-        {
+    fn grow_boulder(&self, rng: &mut Stream, column: &mut Column, source: &Source, spot: &Spot) {
+        let surface = source.surface(spot);
+        if surface < WATER_LEVEL {
             return;
         }
+        let ground = IVec3::new(spot.x + source.shift.x, surface, spot.z + source.shift.z);
         let mut center = ground + IVec3::Y;
         for _ in 0..BOULDER_PASSES {
             let (j, k, l) = (
@@ -561,13 +693,13 @@ impl Terrain {
         }
     }
 
-    fn grow_lilies(&self, rng: &mut Stream, column: &mut Column, start: IVec3) {
+    fn grow_lilies(&self, tries: &mut Stream, column: &mut Column, start: IVec3) {
         for _ in 0..LILY_TRIES {
             let at = start
                 + IVec3::new(
-                    rng.spread(LILY_SPREAD),
-                    rng.spread(LILY_VERTICAL_SPREAD),
-                    rng.spread(LILY_SPREAD),
+                    tries.spread(LILY_SPREAD),
+                    tries.spread(LILY_VERTICAL_SPREAD),
+                    tries.spread(LILY_SPREAD),
                 );
             if Column::contains(at)
                 && column.get(at) == Block::Air
@@ -581,7 +713,7 @@ impl Terrain {
 
     fn grow_mushrooms(
         &self,
-        rng: &mut Stream,
+        tries: &mut Stream,
         column: &mut Column,
         climate: &ColumnClimate,
         block: Block,
@@ -590,9 +722,9 @@ impl Terrain {
         for _ in 0..MUSHROOM_TRIES {
             let at = start
                 + IVec3::new(
-                    rng.spread(MUSHROOM_SPREAD),
-                    rng.spread(MUSHROOM_VERTICAL_SPREAD),
-                    rng.spread(MUSHROOM_SPREAD),
+                    tries.spread(MUSHROOM_SPREAD),
+                    tries.spread(MUSHROOM_VERTICAL_SPREAD),
+                    tries.spread(MUSHROOM_SPREAD),
                 );
             if Column::contains(at)
                 && Column::contains(at - IVec3::Y)
@@ -604,25 +736,51 @@ impl Terrain {
         }
     }
 
-    fn grow_vines(&self, rng: &mut Stream, column: &mut Column, start: IVec3) {
-        let mut at = start;
+    /// Путь лианы решает рельеф (воздух выше поверхности), а не буфер колонки: у всех колонок он одинаков.
+    fn grow_vines(
+        &self,
+        key: ColumnPos,
+        walk: &mut Stream,
+        column: &mut Column,
+        source: &Source,
+        spot: &Spot,
+    ) {
+        let ground_at = |x: i32, z: i32| {
+            self.surface_height(source.origin.x + x, source.origin.z + z)
+                .max(WATER_LEVEL)
+        };
+        let mut at = IVec3::new(spot.x, WATER_LEVEL, spot.z);
+        let mut top = ground_at(at.x, at.z);
         while at.y < VINE_CEILING {
-            if column.get(at) == Block::Air {
-                let side = VINE_SIDES[..4].iter().find(|&&(_, dir)| {
-                    Column::contains(at + dir) && column.get(at + dir).is_opaque()
-                });
-                if let Some(&(bit, _)) = side {
-                    column.set_with_data(at, Block::Vine, bit);
+            if at.y > top {
+                let local = at + source.shift;
+                if Column::contains(local) && column.get(local) == Block::Air {
+                    let side = VINE_SIDES[..4]
+                        .iter()
+                        .find(|&&(_, dir)| self.opaque_beside(key, column, local + dir));
+                    if let Some(&(bit, _)) = side {
+                        column.set_with_data(local, Block::Vine, bit);
+                    }
                 }
             } else {
-                at.x += rng.spread(VINE_SPREAD);
-                at.z += rng.spread(VINE_SPREAD);
-                if !Column::contains(at) {
+                at.x += walk.spread(VINE_SPREAD);
+                at.z += walk.spread(VINE_SPREAD);
+                let window = -SECTION_SIZE..2 * SECTION_SIZE;
+                if !window.contains(&at.x) || !window.contains(&at.z) {
                     return;
                 }
+                top = ground_at(at.x, at.z);
             }
             at.y += 1;
         }
+    }
+
+    fn opaque_beside(&self, key: ColumnPos, column: &Column, side: IVec3) -> bool {
+        if Column::contains(side) {
+            return column.get(side).is_opaque();
+        }
+        let origin = key.origin();
+        self.surface_height(origin.x + side.x, origin.z + side.z) >= side.y
     }
 
     fn plant_cactus(
