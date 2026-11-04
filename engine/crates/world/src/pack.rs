@@ -8,6 +8,7 @@ use crate::textures::{
 };
 use crate::tile::Tile;
 
+const TEXTURES_DIR: &str = "assets/minecraft/textures/";
 const BLOCKS_DIR: &str = "assets/minecraft/textures/blocks/";
 const ENTITY_PIG: &str = "assets/minecraft/textures/entity/pig/pig.png";
 const ENTITY_CHICKEN: &str = "assets/minecraft/textures/entity/chicken.png";
@@ -291,6 +292,33 @@ fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
         Tile::WoolGreen => ("wool_colored_green", WHITE, BiomeTint::None),
         Tile::WoolRed => ("wool_colored_red", WHITE, BiomeTint::None),
         Tile::WoolBlack => ("wool_colored_black", WHITE, BiomeTint::None),
+        Tile::GlassPaneTop => ("glass_pane_top", WHITE, BiomeTint::None),
+        Tile::IronBars => ("iron_bars", WHITE, BiomeTint::None),
+        Tile::Ladder => ("ladder", WHITE, BiomeTint::None),
+        Tile::Web => ("web", WHITE, BiomeTint::None),
+        Tile::RailNormal => ("rail_normal", WHITE, BiomeTint::None),
+        Tile::RailTurned => ("rail_normal_turned", WHITE, BiomeTint::None),
+        Tile::DoorOakLower => ("door_wood_lower", WHITE, BiomeTint::None),
+        Tile::DoorOakUpper => ("door_wood_upper", WHITE, BiomeTint::None),
+        Tile::DoorSpruceLower => ("door_spruce_lower", WHITE, BiomeTint::None),
+        Tile::DoorSpruceUpper => ("door_spruce_upper", WHITE, BiomeTint::None),
+        Tile::DoorBirchLower => ("door_birch_lower", WHITE, BiomeTint::None),
+        Tile::DoorBirchUpper => ("door_birch_upper", WHITE, BiomeTint::None),
+        Tile::DoorJungleLower => ("door_jungle_lower", WHITE, BiomeTint::None),
+        Tile::DoorJungleUpper => ("door_jungle_upper", WHITE, BiomeTint::None),
+        Tile::DoorAcaciaLower => ("door_acacia_lower", WHITE, BiomeTint::None),
+        Tile::DoorAcaciaUpper => ("door_acacia_upper", WHITE, BiomeTint::None),
+        Tile::DoorDarkOakLower => ("door_dark_oak_lower", WHITE, BiomeTint::None),
+        Tile::DoorDarkOakUpper => ("door_dark_oak_upper", WHITE, BiomeTint::None),
+        Tile::DoorIronLower => ("door_iron_lower", WHITE, BiomeTint::None),
+        Tile::DoorIronUpper => ("door_iron_upper", WHITE, BiomeTint::None),
+        Tile::DoorOakItem => ("items/door_wood", WHITE, BiomeTint::None),
+        Tile::DoorSpruceItem => ("items/door_spruce", WHITE, BiomeTint::None),
+        Tile::DoorBirchItem => ("items/door_birch", WHITE, BiomeTint::None),
+        Tile::DoorJungleItem => ("items/door_jungle", WHITE, BiomeTint::None),
+        Tile::DoorAcaciaItem => ("items/door_acacia", WHITE, BiomeTint::None),
+        Tile::DoorDarkOakItem => ("items/door_dark_oak", WHITE, BiomeTint::None),
+        Tile::DoorIronItem => ("items/door_iron", WHITE, BiomeTint::None),
     }
 }
 
@@ -649,10 +677,40 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
     "wool_colored_green.png",
     "wool_colored_red.png",
     "wool_colored_black.png",
+    "glass_pane_top.png",
+    "iron_bars.png",
+    "ladder.png",
+    "web.png",
+    "rail_normal.png",
+    "rail_normal_turned.png",
+    "door_wood_lower.png",
+    "door_wood_upper.png",
+    "door_spruce_lower.png",
+    "door_spruce_upper.png",
+    "door_birch_lower.png",
+    "door_birch_upper.png",
+    "door_jungle_lower.png",
+    "door_jungle_upper.png",
+    "door_acacia_lower.png",
+    "door_acacia_upper.png",
+    "door_dark_oak_lower.png",
+    "door_dark_oak_upper.png",
+    "door_iron_lower.png",
+    "door_iron_upper.png",
+    "items/door_wood.png",
+    "items/door_spruce.png",
+    "items/door_birch.png",
+    "items/door_jungle.png",
+    "items/door_acacia.png",
+    "items/door_dark_oak.png",
+    "items/door_iron.png",
 ];
 
 fn builtin_file(path: &str) -> Option<&'static [u8]> {
-    let name = path.strip_prefix(BLOCKS_DIR)?;
+    let name = path.strip_prefix(BLOCKS_DIR).or_else(|| {
+        path.strip_prefix(TEXTURES_DIR)
+            .filter(|n| n.starts_with("items/"))
+    })?;
     BUILTIN
         .iter()
         .find(|(file, _)| *file == name)
@@ -969,8 +1027,13 @@ fn build(
     let mut found: Vec<Option<Found>> = Vec::new();
     for &tile in &Tile::ALL {
         let stem = source(tile).0;
-        let image = read(&format!("{BLOCKS_DIR}{stem}.png")).and_then(|b| decode_png(&b).ok());
-        let meta = read(&format!("{BLOCKS_DIR}{stem}.png.mcmeta"));
+        let dir = if stem.starts_with("items/") {
+            TEXTURES_DIR
+        } else {
+            BLOCKS_DIR
+        };
+        let image = read(&format!("{dir}{stem}.png")).and_then(|b| decode_png(&b).ok());
+        let meta = read(&format!("{dir}{stem}.png.mcmeta"));
         let tile_found = image.and_then(|image| {
             if image.width == 0 || image.height < image.width {
                 return None;

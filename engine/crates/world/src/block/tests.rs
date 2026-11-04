@@ -9,7 +9,11 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard(), 0)
 }
 
-const ALL: [Block; 138] = Block::ALL;
+const ALL: [Block; 169] = Block::ALL;
+
+fn is_connected_family(block: Block) -> bool {
+    block as usize >= Block::OakFence as usize
+}
 
 const FLOWERS: [Block; 8] = [
     Block::Allium,
@@ -47,7 +51,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(138), Err(138));
+    assert_eq!(Block::try_from(169), Err(169));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -89,6 +93,9 @@ fn icon_is_side_face() {
 #[test]
 fn solid_and_opaque() {
     for block in ALL {
+        if is_connected_family(block) {
+            continue;
+        }
         let plant = matches!(
             block,
             Block::TallGrass
@@ -143,6 +150,9 @@ fn solid_and_opaque() {
 #[test]
 fn render_layers() {
     for block in ALL {
+        if is_connected_family(block) {
+            continue;
+        }
         let layer = match block {
             Block::Leaves
             | Block::BirchLeaves
@@ -309,6 +319,9 @@ fn support_direction_by_block() {
 #[test]
 fn only_log_torch_and_water_use_data() {
     for block in ALL {
+        if is_connected_family(block) {
+            continue;
+        }
         let expected = match block {
             Block::Log
             | Block::BirchLog
@@ -451,6 +464,9 @@ fn snow_is_a_thin_replaceable_layer_on_support() {
 #[test]
 fn collision_height_is_full_for_solids_only() {
     for block in ALL {
+        if is_connected_family(block) {
+            continue;
+        }
         let expected = match block {
             Block::Snow => 2.0 / 16.0,
             Block::Cactus => 15.0 / 16.0,
@@ -538,7 +554,10 @@ fn states_cover_every_data_kind() {
             DataKind::Cocoa => usize::from(COCOA_STAGES) * 4,
             DataKind::Color => 16,
             DataKind::Slab => 3,
-            DataKind::Stairs => 8,
+            DataKind::Stairs | DataKind::Gate | DataKind::Door => 8,
+            DataKind::Hinge => 2,
+            DataKind::Ladder => 4,
+            DataKind::Rail => 10,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -607,6 +626,9 @@ fn sandstone_has_distinct_top_side_bottom() {
 #[test]
 fn only_dead_bush_and_reeds_are_new_crosses() {
     for block in ALL {
+        if is_connected_family(block) {
+            continue;
+        }
         assert_eq!(
             block.shape() == Shape::Cross,
             matches!(
@@ -1073,7 +1095,9 @@ fn slab_and_stairs_block_light_but_are_not_opaque() {
 fn placement(normal: IVec3, hit_y: f32, look: IVec3) -> Placement {
     Placement {
         normal,
+        hit_x: 0.5,
         hit_y,
+        hit_z: 0.5,
         look,
         variant: 0,
     }
@@ -1172,4 +1196,175 @@ fn stone_slab_uses_its_own_top_and_side_tiles() {
         Block::StoneSlab.tile(Facing::Side),
         Some(Tile::StoneSlabSide)
     );
+}
+
+fn neighbors(around: &[(IVec3, Block, u8)]) -> impl Fn(IVec3) -> (Block, u8) + '_ {
+    move |offset| {
+        around
+            .iter()
+            .find(|(at, ..)| *at == offset)
+            .map_or((Block::Air, 0), |&(_, block, data)| (block, data))
+    }
+}
+
+#[test]
+fn a_lone_fence_is_a_post_and_joins_fences_gates_and_full_blocks() {
+    let alone = Block::OakFence.boxes(0, neighbors(&[]));
+    assert_eq!(alone.len(), 1);
+    let joined = Block::OakFence.boxes(
+        0,
+        neighbors(&[
+            (IVec3::X, Block::SpruceFence, 0),
+            (IVec3::NEG_X, Block::Stone, 0),
+            (IVec3::Z, Block::Leaves, 0),
+            (IVec3::NEG_Z, Block::Glowstone, 0),
+        ]),
+    );
+    assert_eq!(joined.len(), 1 + 3 * 2);
+    let (min, max) = joined.bounds();
+    assert_eq!((min.x, max.x), (0.0, 1.0));
+    assert_eq!((min.z, max.z), (0.0, 10.0 / 16.0));
+}
+
+#[test]
+fn a_gate_joins_a_fence_only_along_its_own_line() {
+    let gate = |data| neighbors_for(Block::OakFenceGate, data);
+    let along = Block::OakFence.boxes(0, gate(FACING_POS_Z));
+    let across = Block::OakFence.boxes(0, gate(FACING_POS_X));
+    assert_eq!(along.len(), 3);
+    assert_eq!(across.len(), 1);
+}
+
+fn neighbors_for(block: Block, data: u8) -> impl Fn(IVec3) -> (Block, u8) {
+    move |offset| {
+        if offset == IVec3::X {
+            (block, data)
+        } else {
+            (Block::Air, 0)
+        }
+    }
+}
+
+#[test]
+fn a_fence_collides_to_one_and_a_half_but_is_selected_to_one() {
+    let around = neighbors(&[(IVec3::X, Block::OakFence, 0)]);
+    let collision = Block::OakFence.collision_boxes(0, &around);
+    assert_eq!(collision.top(), 1.5);
+    assert_eq!(collision.len(), 2);
+    let outline = Block::OakFence.boxes(0, &around);
+    assert_eq!(outline.top(), 1.0);
+}
+
+#[test]
+fn an_open_gate_does_not_collide_and_a_closed_one_is_one_and_a_half_high() {
+    use crate::block::GATE_OPEN;
+    let closed = Block::OakFenceGate.collision_boxes(FACING_NEG_Z, neighbors(&[]));
+    assert_eq!(closed.top(), 1.5);
+    let open = Block::OakFenceGate.collision_boxes(FACING_NEG_Z | GATE_OPEN, neighbors(&[]));
+    assert!(open.is_empty());
+    assert!(
+        !Block::OakFenceGate
+            .boxes(FACING_NEG_Z | GATE_OPEN, neighbors(&[]))
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_lone_pane_is_a_cross_and_joins_panes_glass_and_full_blocks() {
+    assert_eq!(Block::GlassPane.boxes(0, neighbors(&[])).len(), 1 + 4);
+    let list = Block::GlassPane.boxes(
+        0,
+        neighbors(&[
+            (IVec3::X, Block::IronBars, 0),
+            (IVec3::NEG_X, Block::Glass, 0),
+            (IVec3::Z, Block::Stone, 0),
+        ]),
+    );
+    assert_eq!(list.len(), 1 + 3);
+    let none = Block::IronBars.boxes(0, neighbors(&[(IVec3::X, Block::Leaves, 0)]));
+    assert_eq!(none.len(), 5);
+}
+
+#[test]
+fn a_door_slab_follows_facing_opening_and_hinge() {
+    use crate::block::DOOR_OPEN;
+    let slab = |data, upper: u8| {
+        let list = Block::OakDoor.boxes(data, neighbors(&[(IVec3::Y, Block::OakDoorUpper, upper)]));
+        assert_eq!(list.len(), 1);
+        list.bounds()
+    };
+    let (min, max) = slab(FACING_POS_X, 0);
+    assert_eq!((min.x, max.x, max.y), (0.0, 3.0 / 16.0, 1.0));
+    let (min, max) = slab(FACING_POS_X | DOOR_OPEN, 1);
+    assert_eq!((min.z, max.z), (13.0 / 16.0, 1.0));
+    let (min, max) = slab(FACING_POS_X | DOOR_OPEN, 0);
+    assert_eq!((min.z, max.z), (0.0, 3.0 / 16.0));
+    let (min, _) = slab(FACING_NEG_X, 0);
+    assert_eq!(min.x, 13.0 / 16.0);
+}
+
+#[test]
+fn the_upper_door_half_reads_the_lower_one() {
+    use crate::block::DOOR_OPEN;
+    let around = neighbors(&[(IVec3::NEG_Y, Block::OakDoor, FACING_POS_Z | DOOR_OPEN)]);
+    let list = Block::OakDoorUpper.boxes(0, around);
+    let (min, max) = list.bounds();
+    assert_eq!((min.x, max.x), (13.0 / 16.0, 1.0));
+}
+
+#[test]
+fn a_ladder_hugs_the_wall_it_is_placed_on() {
+    assert_eq!(Block::Ladder.placement_data(IVec3::Y), None);
+    assert_eq!(Block::Ladder.placement_data(IVec3::NEG_Y), None);
+    assert_eq!(Block::Ladder.placement_data(IVec3::X), Some(FACING_POS_X));
+    assert_eq!(Block::Ladder.support_dir(FACING_POS_X), Some(IVec3::NEG_X));
+    let (min, max) = Block::Ladder.bounds(FACING_POS_X);
+    assert_eq!((min.x, max.x), (0.0, 2.0 / 16.0));
+    assert!(
+        Block::Ladder
+            .collision_boxes(FACING_POS_X, neighbors(&[]))
+            .len()
+            == 1
+    );
+}
+
+#[test]
+fn the_new_blocks_are_in_the_creative_inventory_with_russian_labels() {
+    for name in [
+        "oak_fence",
+        "dark_oak_fence_gate",
+        "glass_pane",
+        "iron_bars",
+        "oak_door",
+        "iron_door",
+        "ladder",
+        "web",
+        "rail",
+    ] {
+        let stack = Block::stack_from_name(name).unwrap_or_else(|| panic!("{name}"));
+        assert!(
+            stack.label.chars().any(|c| ('а'..='я').contains(&c)),
+            "{name}"
+        );
+    }
+    assert!(Block::stack_from_name("oak_door_upper").is_none());
+    assert!(Block::stack_from_name("iron_door_upper").is_none());
+}
+
+#[test]
+fn rails_need_a_full_block_below_and_webs_need_nothing() {
+    assert!(Block::Rail.stands_on(Block::Stone));
+    assert!(!Block::Rail.stands_on(Block::OakFence));
+    assert!(!Block::Rail.stands_on(Block::Air));
+    assert!(!Block::Web.needs_support());
+    assert_eq!(Block::Web.collision_height(), 0.0);
+    assert_eq!(Block::Rail.collision_height(), 0.0);
+}
+
+#[test]
+fn double_doors_pair_up_like_double_plants() {
+    for (lower, upper) in crate::block::DOORS {
+        assert_eq!(lower.double_upper(), Some(upper));
+        assert_eq!(upper.double_lower(), Some(lower));
+    }
 }

@@ -5,13 +5,13 @@ mod boxes;
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
     AO_BRIGHTNESS, CACTUS, COCOA, COCOA_PARTS, CROSS, CUBE_FACE, FACES, Face, LILY, LOG_BARK_X,
-    LOG_BARK_Z, SNOW_SIDE, SNOW_TOP, SUNFLOWER_HEAD, TORCH_SIDE, TORCH_TOP, TORCH_WALL,
+    LOG_BARK_Z, RAIL, SNOW_SIDE, SNOW_TOP, SUNFLOWER_HEAD, TORCH_SIDE, TORCH_TOP, TORCH_WALL,
     TORCH_WALL_PARTS, VINE, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SIDE_SLOPED,
     WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
 use world::block::{
     ATTACH_NEG_Z, ATTACH_POS_X, Block, COCOA_STAGE_SHIFT, COCOA_STAGES, Facing, FluidKind,
-    RenderLayer, Shape, VINE_SIDES, fluid_height_units,
+    RAIL_SHAPES, RAIL_SOUTH_EAST, RenderLayer, Shape, VINE_SIDES, fluid_height_units,
 };
 use world::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use world::light::{ColumnLight, LightMap, MAX_LIGHT, block_level, sky_level};
@@ -613,6 +613,15 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
     };
     match block.shape() {
         Shape::Cube | Shape::Layer | Shape::Cactus | Shape::Boxes => {}
+        Shape::Rail => {
+            let layer = if data >= RAIL_SOUTH_EAST {
+                Tile::RailTurned
+            } else {
+                Tile::RailNormal
+            };
+            mesh.quads
+                .push(quad(RAIL + data.min(RAIL_SHAPES - 1), layer.layer() as u8));
+        }
         Shape::Vine => {
             let layer = Tile::Vine.layer() as u8;
             for (side, &(bit, _)) in VINE_SIDES.iter().enumerate() {
@@ -756,6 +765,8 @@ mod bench;
 mod cactus;
 #[cfg(test)]
 mod cocoa;
+#[cfg(test)]
+mod connected;
 #[cfg(test)]
 mod expand;
 #[cfg(test)]

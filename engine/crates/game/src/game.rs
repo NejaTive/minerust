@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use glam::{IVec3, Vec2, Vec3};
 use world::block::{
-    Block, FLUID_SOURCE, FluidKind, Placement, SLAB_BOTTOM, SLAB_DOUBLE, SLAB_TOP, Shape,
+    Block, BoxKind, DOOR_PLACED_RIGHT, FLUID_SOURCE, FluidKind, Placement, SLAB_BOTTOM,
+    SLAB_DOUBLE, SLAB_TOP, Shape, facing_code,
 };
 use world::boxes::BoxList;
 use world::clouds::cloud_drift;
@@ -38,7 +39,7 @@ const REACH: f32 = 6.0;
 fn cell_collision(world: &World, pos: IVec3) -> Collision {
     let block = world.block(pos);
     if block.shape() == Shape::Boxes {
-        return Collision::of_boxes(world.boxes_at(pos), false);
+        return Collision::of_boxes(world.collision_boxes_at(pos), false);
     }
     Collision {
         height: block.collision_height(),
@@ -505,7 +506,19 @@ impl Game {
             self.apply_edit(&changed, &[], &mut dirty, &mut lit);
             target = self.pick();
         }
-        if let Some(Held::Item(item)) = self.selected {
+        let uses_target = target.is_some_and(|hit| self.world.block(hit.block).opens_by_hand());
+        if uses_target {
+            if editable
+                && self.placing.fire_once()
+                && let Some(hit) = target
+            {
+                let changed = self.world.toggle_by_hand(hit.block, self.look_dir());
+                if !changed.is_empty() {
+                    self.apply_edit(&changed, &[], &mut dirty, &mut lit);
+                    target = self.pick();
+                }
+            }
+        } else if let Some(Held::Item(item)) = self.selected {
             if self.placing.fire_once()
                 && let Some(hit) = target
             {
@@ -516,7 +529,14 @@ impl Game {
             && self.placing.fire(time)
             && let Some((pos, data)) = self.placement(target, block, variant)
         {
-            let changed = self.world.set_block_supported_with_data(pos, block, data);
+            let mut changed = if block.is_door() {
+                self.world.place_door(pos, block, data)
+            } else {
+                self.world.set_block_supported_with_data(pos, block, data)
+            };
+            if block.is_rail() && !changed.is_empty() {
+                changed.extend(self.world.connect_rail(pos));
+            }
             if !changed.is_empty() {
                 self.apply_edit(&changed, &[], &mut dirty, &mut lit);
                 target = self.pick();
@@ -528,10 +548,12 @@ impl Game {
 
     pub fn target_block(&self) -> Option<(IVec3, (Vec3, Vec3))> {
         self.target.map(|hit| {
-            let bounds = self
-                .world
-                .block(hit.block)
-                .bounds(self.world.block_data(hit.block));
+            let block = self.world.block(hit.block);
+            let bounds = if block.box_kind() == BoxKind::None {
+                block.bounds(self.world.block_data(hit.block))
+            } else {
+                self.world.boxes_at(hit.block).bounds()
+            };
             (hit.block, bounds)
         })
     }
@@ -561,11 +583,24 @@ impl Game {
         let point = self.camera.position + self.camera.forward() * hit.distance;
         let placement = Placement {
             normal: hit.normal,
+            hit_x: (point.x - hit.block.x as f32).clamp(0.0, 1.0),
             hit_y: (point.y - hit.block.y as f32).clamp(0.0, 1.0),
+            hit_z: (point.z - hit.block.z as f32).clamp(0.0, 1.0),
             look: self.look_dir(),
             variant,
         };
-        let data = block.placement_state(&placement)?;
+        let mut data = block.placement_state(&placement)?;
+        if block.is_door() {
+            if !self.world.can_place_door(pos, block) || self.bodies_overlap(pos, block, data) {
+                return None;
+            }
+            let look = self.look_dir();
+            let right =
+                self.world
+                    .door_hinge_right(pos, block, look, (placement.hit_x, placement.hit_z));
+            data = facing_code(look) | if right { DOOR_PLACED_RIGHT } else { 0 };
+            return Some((pos, data));
+        }
         (self.world.can_place_with_data(pos, block, data)
             && (block.fluid().is_some() || !self.bodies_overlap(pos, block, data)))
         .then_some((pos, data))
@@ -573,7 +608,7 @@ impl Game {
 
     fn bodies_overlap(&self, pos: IVec3, block: Block, data: u8) -> bool {
         if block.shape() == Shape::Boxes {
-            let boxes: BoxList = block.boxes(data, |offset| {
+            let boxes: BoxList = block.collision_boxes(data, |offset| {
                 (
                     self.world.block(pos + offset),
                     self.world.block_data(pos + offset),
@@ -623,7 +658,7 @@ impl Game {
             let block = self.world.block(pos);
             if !block.is_targetable() {
                 Probe::Miss
-            } else if block.shape() == Shape::Boxes {
+            } else if block.box_kind() != BoxKind::None {
                 Probe::Boxes(self.world.boxes_at(pos))
             } else {
                 Probe::Full
@@ -747,6 +782,7 @@ impl Game {
             let loaded = (lo.x()..=hi.x())
                 .all(|x| (lo.z()..=hi.z()).all(|z| world.column(ColumnPos::new(x, z)).is_some()));
             if loaded {
+                mob.body.in_web = mob.body.touches(|pos| world.block(pos) == Block::Web);
                 mob.tick(&around);
             }
         }
@@ -845,6 +881,11 @@ impl Game {
                 break;
             }
             self.sync_prev();
+            let feet_cell = self.player.feet.floor().as_ivec3();
+            self.player.on_ladder = self.world.block(feet_cell).is_ladder();
+            self.player.in_web = self
+                .player
+                .touches(|pos| self.world.block(pos) == Block::Web);
             self.player.step_with(
                 &input,
                 self.camera.yaw,

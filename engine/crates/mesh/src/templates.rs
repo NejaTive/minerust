@@ -9,7 +9,10 @@ use glam::IVec3;
 use crate::mesh::POSITION_UNITS;
 use world::block::{
     CACTUS_INSET_UNITS, COCOA_BACK, COCOA_PODS, COCOA_STAGES, COCOA_STEM, COCOA_STEM_DEPTH, Facing,
-    LILY_UNITS, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, VINE_INSET_UNITS, WATER_SURFACE,
+    LILY_UNITS, RAIL_ASCENDING_EAST, RAIL_ASCENDING_NORTH, RAIL_ASCENDING_SOUTH,
+    RAIL_ASCENDING_WEST, RAIL_EAST_WEST, RAIL_NORTH_EAST, RAIL_NORTH_WEST, RAIL_SHAPES,
+    RAIL_SOUTH_WEST, SNOW_UNITS, TORCH_WALL_RISE, TORCH_WALL_SHIFT, VINE_INSET_UNITS,
+    WATER_SURFACE,
 };
 use world::tile::{PIXEL_GRID, TORCH_PIXELS, TORCH_TOP_ROW};
 
@@ -102,7 +105,8 @@ pub const LILY: u8 = 79;
 pub const SUNFLOWER_HEAD: u8 = 81;
 pub const COCOA: u8 = 83;
 pub const COCOA_PARTS: u8 = 11;
-pub const TEMPLATE_COUNT: usize = COCOA as usize + COCOA_STAGES as usize * 4 * COCOA_PARTS as usize;
+pub const RAIL: u8 = COCOA + COCOA_STAGES * 4 * COCOA_PARTS;
+pub const TEMPLATE_COUNT: usize = RAIL as usize + RAIL_SHAPES as usize;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -348,6 +352,45 @@ fn cocoa(stage: usize, direction: u32) -> Vec<Template> {
         .collect()
 }
 
+/// Рельс лежит на 1/16 над полом; поднятый край выше ещё на целый блок.
+fn rail(shape: u8) -> Template {
+    let turns = match shape {
+        RAIL_EAST_WEST | RAIL_ASCENDING_EAST | RAIL_ASCENDING_WEST | RAIL_SOUTH_WEST => 1,
+        RAIL_NORTH_WEST => 2,
+        RAIL_NORTH_EAST => 3,
+        _ => 0,
+    };
+    let lift = |x: i32, z: i32| {
+        let raised = match shape {
+            RAIL_ASCENDING_EAST => x == 1,
+            RAIL_ASCENDING_WEST => x == 0,
+            RAIL_ASCENDING_NORTH => z == 0,
+            RAIL_ASCENDING_SOUTH => z == 1,
+            _ => false,
+        };
+        1 + if raised { POSITION_UNITS } else { 0 }
+    };
+    let corners = std::array::from_fn(|i| {
+        let [x, _, z] = FACES[0].corners[i];
+        let (mut u, mut v) = (x, z);
+        for _ in 0..turns {
+            (u, v) = (v, 1 - u);
+        }
+        Corner {
+            pos: [
+                (x * POSITION_UNITS) as u8,
+                lift(x, z) as u8,
+                (z * POSITION_UNITS) as u8,
+            ],
+            uv: [(u * POSITION_UNITS) as u8, (v * POSITION_UNITS) as u8],
+        }
+    });
+    Template {
+        corners,
+        shade: 1.0,
+    }
+}
+
 fn vine_plane(face: &Face) -> Template {
     let mut template = cube_face(face, POSITION_UNITS);
     let axis = face.normal.abs().max_position();
@@ -416,6 +459,7 @@ fn build() -> [Template; TEMPLATE_COUNT] {
             out.extend(cocoa(stage, direction));
         }
     }
+    out.extend((0..RAIL_SHAPES).map(rail));
     out.try_into().expect("template count")
 }
 
