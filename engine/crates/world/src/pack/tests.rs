@@ -403,7 +403,32 @@ fn builtin_entity_sheets_are_two_to_one() {
         &entities.cow,
         &entities.sheep,
         &entities.sheep_fur,
+        &entities.mooshroom,
+        &entities.polar_bear,
+        &entities.wolf,
     ] {
         assert!(sheet.width >= 64 && sheet.width == 2 * sheet.height);
     }
+}
+
+#[test]
+fn builtin_mushroom_texture_is_square() {
+    let mushroom = builtin_entities().mushroom_red;
+    assert!(mushroom.width >= 16 && mushroom.width == mushroom.height);
+}
+
+#[test]
+fn pack_entity_sheets_are_validated_by_shape() {
+    let entity = |name: &str| format!("assets/minecraft/textures/entity/{name}");
+    let bytes = zip(&[
+        (&block("dirt.png"), png(16, 16, [1, 2, 3, 255])),
+        (&entity("wolf/wolf.png"), png(64, 64, [9, 9, 9, 255])),
+        (&entity("bear/polarbear.png"), png(64, 32, [8, 8, 8, 255])),
+        (&block("mushroom_red.png"), png(16, 32, [7, 7, 7, 255])),
+    ]);
+    let entities = load(&bytes).unwrap().entities;
+    let builtin = builtin_entities();
+    assert_eq!(entities.wolf.width, builtin.wolf.width);
+    assert_eq!(entities.polar_bear.width, 64);
+    assert_eq!(entities.mushroom_red.width, builtin.mushroom_red.width);
 }

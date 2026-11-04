@@ -8,12 +8,12 @@ pub const VERTEX_FLOATS: usize = 8;
 pub const VERTEX_BYTES: usize = VERTEX_FLOATS * 4;
 pub const BLOB_FLOATS: usize = 6;
 pub const BLOB_BYTES: usize = BLOB_FLOATS * 4;
-const SHEET_UNITS: Vec2 = Vec2::new(64.0, 32.0);
+const MUSHROOM_UNITS: Vec2 = Vec2::new(16.0, 16.0);
 const PIXELS_PER_BLOCK: f32 = 16.0;
 const MODEL_FEET: f32 = 24.0;
-const CULL_RADIUS: f32 = 1.2;
+const CULL_RADIUS: f32 = 1.6;
 const SHADOW_DROP: f32 = 2.0;
-const CULL_HEIGHT: f32 = 1.4;
+const CULL_HEIGHT: f32 = 2.6;
 const LEG_SWING: f32 = 1.4;
 const LEG_FREQUENCY: f32 = 0.6662;
 const LAID_FLAT: Mat3 = Mat3::from_cols(
@@ -39,6 +39,9 @@ pub enum ModelKind {
     Chicken,
     Cow,
     Sheep,
+    Mooshroom,
+    PolarBear,
+    Wolf,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -82,6 +85,10 @@ pub enum EntityTexture {
     Cow,
     Sheep,
     SheepFur,
+    Mooshroom,
+    PolarBear,
+    Wolf,
+    Mushroom,
 }
 
 impl EntityTexture {
@@ -91,10 +98,22 @@ impl EntityTexture {
         EntityTexture::Cow,
         EntityTexture::Sheep,
         EntityTexture::SheepFur,
+        EntityTexture::Mooshroom,
+        EntityTexture::PolarBear,
+        EntityTexture::Wolf,
+        EntityTexture::Mushroom,
     ];
+
+    fn units(self) -> Vec2 {
+        match self {
+            EntityTexture::PolarBear => Vec2::new(128.0, 64.0),
+            EntityTexture::Mushroom => MUSHROOM_UNITS,
+            _ => Vec2::new(64.0, 32.0),
+        }
+    }
 }
 
-pub const TEXTURES: usize = 5;
+pub const TEXTURES: usize = 9;
 
 pub type MobVertices = [Vec<f32>; TEXTURES];
 
@@ -106,6 +125,7 @@ struct BoxPart {
     texture: Vec2,
     pivot: Vec3,
     rotation: Mat3,
+    mirror: bool,
 }
 
 fn part(
@@ -124,7 +144,13 @@ fn part(
         texture: Vec2::new(texture.0, texture.1),
         pivot: Vec3::from(pivot),
         rotation,
+        mirror: false,
     }
+}
+
+fn mirrored(mut part: BoxPart) -> BoxPart {
+    part.mirror = true;
+    part
 }
 
 fn head_rotation(instance: &MobInstance) -> Mat3 {
@@ -137,6 +163,13 @@ fn leg_rotation(instance: &MobInstance, phase: f32) -> Mat3 {
     )
 }
 
+const WILD_TAIL_ANGLE: f32 = PI / 5.0;
+const MUSHROOM_YAW: f32 = 42.0 * PI / 180.0;
+const HEAD_MUSHROOM_YAW: f32 = 12.0 * PI / 180.0;
+const CROSS_DIAGONALS: [[Vec2; 2]; 2] = [
+    [Vec2::new(-0.45, -0.45), Vec2::new(0.45, 0.45)],
+    [Vec2::new(-0.45, 0.45), Vec2::new(0.45, -0.45)],
+];
 const LEG_PHASES: [f32; 4] = [0.0, PI, PI, 0.0];
 
 fn pig_parts(instance: &MobInstance) -> Vec<BoxPart> {
@@ -183,8 +216,7 @@ fn pig_parts(instance: &MobInstance) -> Vec<BoxPart> {
     parts
 }
 
-fn cow_parts(instance: &MobInstance) -> Vec<BoxPart> {
-    let sheet = EntityTexture::Cow;
+fn cow_parts(instance: &MobInstance, sheet: EntityTexture) -> Vec<BoxPart> {
     let head = head_rotation(instance);
     let head_pivot = [0.0, 4.0, -8.0];
     let body_pivot = [0.0, 5.0, 2.0];
@@ -393,6 +425,215 @@ fn chicken_parts(instance: &MobInstance) -> Vec<BoxPart> {
     ]
 }
 
+fn polar_bear_parts(instance: &MobInstance) -> Vec<BoxPart> {
+    let sheet = EntityTexture::PolarBear;
+    let head = head_rotation(instance);
+    let head_pivot = [0.0, 10.0, -16.0];
+    let mut parts = vec![
+        part(
+            sheet,
+            (0.0, 0.0),
+            [-3.5, -3.0, -3.0],
+            [7.0, 7.0, 7.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (0.0, 44.0),
+            [-2.5, 1.0, -6.0],
+            [5.0, 3.0, 3.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (26.0, 0.0),
+            [-4.5, -4.0, -1.0],
+            [2.0, 2.0, 1.0],
+            head_pivot,
+            head,
+        ),
+        mirrored(part(
+            sheet,
+            (26.0, 0.0),
+            [2.5, -4.0, -1.0],
+            [2.0, 2.0, 1.0],
+            head_pivot,
+            head,
+        )),
+        part(
+            sheet,
+            (0.0, 19.0),
+            [-5.0, -13.0, -7.0],
+            [14.0, 14.0, 11.0],
+            [-2.0, 9.0, 12.0],
+            LAID_FLAT,
+        ),
+        part(
+            sheet,
+            (39.0, 0.0),
+            [-4.0, -25.0, -7.0],
+            [12.0, 12.0, 10.0],
+            [-2.0, 9.0, 12.0],
+            LAID_FLAT,
+        ),
+    ];
+    let legs = [
+        (-3.5, 6.0, (50.0, 22.0), 8.0),
+        (3.5, 6.0, (50.0, 22.0), 8.0),
+        (-2.5, -7.0, (50.0, 40.0), 6.0),
+        (2.5, -7.0, (50.0, 40.0), 6.0),
+    ];
+    for ((x, z, texture, depth), phase) in legs.into_iter().zip(LEG_PHASES) {
+        parts.push(part(
+            sheet,
+            texture,
+            [-2.0, 0.0, -2.0],
+            [4.0, 10.0, depth],
+            [x, 14.0, z],
+            leg_rotation(instance, phase),
+        ));
+    }
+    parts
+}
+
+fn wolf_parts(instance: &MobInstance) -> Vec<BoxPart> {
+    let sheet = EntityTexture::Wolf;
+    let head = head_rotation(instance);
+    let head_pivot = [-1.0, 13.5, -7.0];
+    let mut parts = vec![
+        part(
+            sheet,
+            (0.0, 0.0),
+            [-2.0, -3.0, -2.0],
+            [6.0, 6.0, 4.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (16.0, 14.0),
+            [-2.0, -5.0, 0.0],
+            [2.0, 2.0, 1.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (16.0, 14.0),
+            [2.0, -5.0, 0.0],
+            [2.0, 2.0, 1.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (0.0, 10.0),
+            [-0.5, 0.0, -5.0],
+            [3.0, 3.0, 4.0],
+            head_pivot,
+            head,
+        ),
+        part(
+            sheet,
+            (18.0, 14.0),
+            [-3.0, -2.0, -3.0],
+            [6.0, 9.0, 6.0],
+            [0.0, 14.0, 2.0],
+            LAID_FLAT,
+        ),
+        part(
+            sheet,
+            (21.0, 0.0),
+            [-3.0, -3.0, -3.0],
+            [8.0, 6.0, 7.0],
+            [-1.0, 14.0, -3.0],
+            LAID_FLAT,
+        ),
+        part(
+            sheet,
+            (9.0, 18.0),
+            [0.0, 0.0, -1.0],
+            [2.0, 8.0, 2.0],
+            [-1.0, 12.0, 8.0],
+            Mat3::from_rotation_x(WILD_TAIL_ANGLE),
+        ),
+    ];
+    let legs = [(-2.5, 7.0), (0.5, 7.0), (-2.5, -4.0), (0.5, -4.0)];
+    for ((x, z), phase) in legs.into_iter().zip(LEG_PHASES) {
+        parts.push(part(
+            sheet,
+            (0.0, 18.0),
+            [0.0, 0.0, -1.0],
+            [2.0, 8.0, 2.0],
+            [x, 16.0, z],
+            leg_rotation(instance, phase),
+        ));
+    }
+    parts
+}
+
+fn mushroom_frame(position: Vec3, yaw: f32) -> (Vec3, Mat3) {
+    (position, Mat3::from_rotation_y(yaw))
+}
+
+fn push_mushrooms(instance: &MobInstance, out: &mut Vec<f32>) {
+    let back = mushroom_frame(Vec3::new(0.2, 0.35, 0.5), MUSHROOM_YAW);
+    let second = (
+        back.0 + back.1 * Vec3::new(0.1, 0.0, -0.6),
+        Mat3::from_rotation_y(2.0 * MUSHROOM_YAW),
+    );
+    let head = head_rotation(instance);
+    let head_pivot = Vec3::new(0.0, 4.0, -8.0);
+    let on_head = mushroom_frame(Vec3::new(0.0, 0.7, -0.2), HEAD_MUSHROOM_YAW);
+    for (frame, rides_head) in [(back, false), (second, false), (on_head, true)] {
+        for corner in CROSS_DIAGONALS {
+            let point = |x: f32, y: f32, z: f32| {
+                let block = frame.0 + frame.1 * Vec3::new(x, y, z);
+                let model = Vec3::new(block.x, -block.y, block.z) * PIXELS_PER_BLOCK;
+                if rides_head {
+                    head_pivot + head * model
+                } else {
+                    model
+                }
+            };
+            let (a, b) = (corner[0], corner[1]);
+            let quad = [
+                (point(a.x, -0.5, a.y), Vec2::new(0.0, 16.0)),
+                (point(b.x, -0.5, b.y), Vec2::new(16.0, 16.0)),
+                (point(b.x, 0.5, b.y), Vec2::new(16.0, 0.0)),
+                (point(a.x, 0.5, a.y), Vec2::new(0.0, 0.0)),
+            ];
+            push_double_sided(quad, instance, out);
+        }
+    }
+}
+
+fn push_double_sided(quad: [(Vec3, Vec2); 4], instance: &MobInstance, out: &mut Vec<f32>) {
+    let world = quad.map(|(p, uv)| (to_world(p, instance), uv / MUSHROOM_UNITS));
+    let normal = (world[1].0 - world[0].0)
+        .cross(world[3].0 - world[0].0)
+        .normalize_or_zero();
+    let shade = face_shade(normal);
+    let reversed = [world[1], world[0], world[3], world[2]];
+    for side in [world, reversed] {
+        for index in [0, 1, 2, 0, 2, 3] {
+            let (position, uv) = side[index];
+            out.extend_from_slice(&[
+                position.x,
+                position.y,
+                position.z,
+                uv.x,
+                uv.y,
+                shade,
+                instance.sky_level,
+                instance.block_level,
+            ]);
+        }
+    }
+}
+
 fn to_world(model: Vec3, instance: &MobInstance) -> Vec3 {
     let local = Vec3::new(-model.x, MODEL_FEET - model.y, model.z) / PIXELS_PER_BLOCK;
     instance.feet + Mat3::from_rotation_y(-instance.yaw - FRAC_PI_2) * local
@@ -409,11 +650,17 @@ pub fn push_mob(instance: &MobInstance, out: &mut MobVertices) {
     let parts = match instance.kind {
         ModelKind::Pig => pig_parts(instance),
         ModelKind::Chicken => chicken_parts(instance),
-        ModelKind::Cow => cow_parts(instance),
+        ModelKind::Cow => cow_parts(instance, EntityTexture::Cow),
+        ModelKind::Mooshroom => cow_parts(instance, EntityTexture::Mooshroom),
+        ModelKind::PolarBear => polar_bear_parts(instance),
+        ModelKind::Wolf => wolf_parts(instance),
         ModelKind::Sheep => sheep_parts(instance),
     };
     for part in &parts {
         push_box(part, instance, &mut out[part.sheet as usize]);
+    }
+    if instance.kind == ModelKind::Mooshroom {
+        push_mushrooms(instance, &mut out[EntityTexture::Mushroom as usize]);
     }
 }
 
@@ -497,8 +744,25 @@ fn push_box(part: &BoxPart, instance: &MobInstance, out: &mut Vec<f32>) {
             ),
         ],
     ];
-    for face in faces {
-        let mut quad = face.map(|(p, uv)| (corner(p.x, p.y, p.z), uv / SHEET_UNITS));
+    let units = part.sheet.units();
+    let regions = [
+        (u + dz, u + dz + dx, 0.0),
+        (u + 2.0 * dz + dx, u + 2.0 * dz + 2.0 * dx, 0.0),
+        (u + dz + dx, u + 2.0 * dz + dx, -(dz + dx)),
+        (u, u + dz, dz + dx),
+        (u + dz, u + dz + dx, 0.0),
+        (u + dz + dx, u + dz + 2.0 * dx, 0.0),
+    ];
+    for (index, face) in faces.into_iter().enumerate() {
+        let flip = |uv: Vec2| {
+            let (from, to, shift) = regions[index];
+            if part.mirror {
+                Vec2::new(from + to - uv.x + shift, uv.y)
+            } else {
+                uv
+            }
+        };
+        let mut quad = face.map(|(p, uv)| (corner(p.x, p.y, p.z), flip(uv) / units));
         let face_center = quad.iter().map(|(p, _)| *p).sum::<Vec3>() / 4.0;
         let normal = (quad[1].0 - quad[0].0).cross(quad[3].0 - quad[0].0);
         if normal.dot(face_center - center) < 0.0 {
@@ -624,6 +888,10 @@ pub fn create_texture_groups(
                 EntityTexture::Cow => &images.cow,
                 EntityTexture::Sheep => &images.sheep,
                 EntityTexture::SheepFur => &images.sheep_fur,
+                EntityTexture::Mooshroom => &images.mooshroom,
+                EntityTexture::PolarBear => &images.polar_bear,
+                EntityTexture::Wolf => &images.wolf,
+                EntityTexture::Mushroom => &images.mushroom_red,
             };
             let texture = device.create_texture_with_data(
                 queue,

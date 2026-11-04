@@ -2,5 +2,8 @@
   { "name": "pig_spawn_egg", "label": "яйцо призыва свиньи" },
   { "name": "chicken_spawn_egg", "label": "яйцо призыва курицы" },
   { "name": "cow_spawn_egg", "label": "яйцо призыва коровы" },
-  { "name": "sheep_spawn_egg", "label": "яйцо призыва овцы" }
+  { "name": "sheep_spawn_egg", "label": "яйцо призыва овцы" },
+  { "name": "mooshroom_spawn_egg", "label": "яйцо призыва грибной коровы" },
+  { "name": "polar_bear_spawn_egg", "label": "яйцо призыва белого медведя" },
+  { "name": "wolf_spawn_egg", "label": "яйцо призыва волка" }
 ]

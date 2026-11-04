@@ -44,6 +44,9 @@ fn hitboxes_match_minecraft() {
         (MobKind::Chicken, 0.4, 0.7),
         (MobKind::Cow, 0.9, 1.4),
         (MobKind::Sheep, 0.9, 1.3),
+        (MobKind::Mooshroom, 0.9, 1.4),
+        (MobKind::PolarBear, 1.3, 1.4),
+        (MobKind::Wolf, 0.6, 0.85),
     ] {
         let (min, max) = mob(kind, 1).body.aabb();
         let expected = Vec3::new(width, height, width);

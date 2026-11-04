@@ -7,10 +7,21 @@ pub enum MobKind {
     Chicken,
     Cow,
     Sheep,
+    Mooshroom,
+    PolarBear,
+    Wolf,
 }
 
 impl MobKind {
-    pub const ALL: [MobKind; 4] = [MobKind::Pig, MobKind::Chicken, MobKind::Cow, MobKind::Sheep];
+    pub const ALL: [MobKind; 7] = [
+        MobKind::Pig,
+        MobKind::Chicken,
+        MobKind::Cow,
+        MobKind::Sheep,
+        MobKind::Mooshroom,
+        MobKind::PolarBear,
+        MobKind::Wolf,
+    ];
 }
 
 impl TryFrom<u8> for MobKind {
