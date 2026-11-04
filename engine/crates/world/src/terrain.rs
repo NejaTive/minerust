@@ -280,6 +280,7 @@ impl Terrain {
         let mut column = self.generate_carved(key);
         self.place_structures(key, &mut column);
         self.grow_lakes(key, &mut column);
+        self.grow_dungeons(key, &mut column);
         self.grow_ores(key, &mut column);
         self.grow_fossils(key, &mut column);
         trees::plant_where(self, key, &mut column, |tree| {

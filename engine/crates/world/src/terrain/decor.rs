@@ -915,6 +915,7 @@ fn shaded(column: &Column, at: IVec3) -> bool {
 }
 
 mod disks;
+mod dungeons;
 mod fossils;
 pub(in crate::terrain) mod lakes;
 mod ores;

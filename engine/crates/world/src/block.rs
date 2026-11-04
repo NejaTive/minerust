@@ -272,7 +272,13 @@ pub enum DataKind {
     Furnace,
     Cauldron,
     Pot,
+    Spawner,
 }
+
+pub const SPAWNER_PIG: u8 = 0;
+pub const SPAWNER_SKELETON: u8 = 1;
+pub const SPAWNER_ZOMBIE: u8 = 2;
+pub const SPAWNER_SPIDER: u8 = 3;
 
 pub const AXIS_Y: u8 = 0;
 pub const AXIS_X: u8 = 1;
@@ -1464,6 +1470,7 @@ pub const BLOCKS: [BlockDef; 175] = [
     BlockDef {
         opaque: false,
         layer: RenderLayer::Cutout,
+        data: DataKind::Spawner,
         ..BlockDef::uniform("mob_spawner", "спаунер", Tile::MobSpawner)
     },
     BlockDef {
@@ -1972,6 +1979,7 @@ impl Block {
             | DataKind::Furnace
             | DataKind::Cauldron
             | DataKind::Pot
+            | DataKind::Spawner
             | DataKind::Rail => Some(0),
             DataKind::Ladder => match normal {
                 IVec3::X | IVec3::NEG_X | IVec3::Z | IVec3::NEG_Z => Some(facing_code(normal)),
@@ -2037,6 +2045,12 @@ impl Block {
             DataKind::Chest => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
             DataKind::Furnace | DataKind::Cauldron => &[0, 1, 2, 3],
             DataKind::Pot => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            DataKind::Spawner => &[
+                SPAWNER_PIG,
+                SPAWNER_SKELETON,
+                SPAWNER_ZOMBIE,
+                SPAWNER_SPIDER,
+            ],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
                 FLUID_SOURCE,
