@@ -8,11 +8,11 @@ use crate::column::{COLUMN_SECTIONS, Column, WORLD_HEIGHT};
 use crate::mob::{MobKind, MobRecord};
 use crate::section::{SECTION_SIZE, SECTION_VOLUME};
 
-pub const FORMAT_VERSION: u8 = 5;
+pub const FORMAT_VERSION: u8 = 6;
 
 type Migration = fn(&[u8]) -> Result<Vec<u8>, SaveError>;
 
-const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3, v3_to_v4, v4_to_v5];
+const MIGRATIONS: &[Migration] = &[v1_to_v2, v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6];
 
 fn v1_to_v2(body: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut out = Vec::with_capacity(body.len() + 1);
@@ -42,12 +42,16 @@ fn v4_to_v5(_: &[u8]) -> Result<Vec<u8>, SaveError> {
     Err(SaveError::UnsupportedVersion(4))
 }
 
+fn v5_to_v6(_: &[u8]) -> Result<Vec<u8>, SaveError> {
+    Err(SaveError::UnsupportedVersion(5))
+}
+
 const _: () = assert!(MIGRATIONS.len() + 1 == FORMAT_VERSION as usize);
 
 const MAGIC: &[u8; 3] = b"MRC";
 const COLUMN_VOLUME: usize = (SECTION_SIZE * SECTION_SIZE * WORLD_HEIGHT) as usize;
 const RUN_SIZE: usize = 3;
-const MOB_SIZE: usize = 17;
+const MOB_SIZE: usize = 18;
 
 const _: () = assert!(COLUMN_SECTIONS <= 16);
 
@@ -97,6 +101,7 @@ pub fn encode_column(column: &Column) -> Vec<u8> {
         for value in [mob.pos.x, mob.pos.y, mob.pos.z, mob.yaw] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
+        bytes.push(mob.variant);
     }
     for (_, data) in with_data {
         bytes.extend_from_slice(data);
@@ -141,6 +146,7 @@ pub fn decode_column(bytes: &[u8]) -> Result<Column, SaveError> {
             kind,
             pos: Vec3::new(f(0), f(1), f(2)),
             yaw: f(3),
+            variant: mob[17],
         });
     }
     let mut section_data = Vec::new();

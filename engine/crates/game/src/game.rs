@@ -26,6 +26,7 @@ use crate::rain_cover::RainCover;
 use crate::raycast::{Hit, raycast};
 use crate::repeat::Repeat;
 use crate::rng::Rng;
+use crate::spawning::random_variant;
 use crate::weather::{self, Weather, WeatherState};
 
 const TIME_FAST_FACTOR: u32 = 60;
@@ -47,6 +48,7 @@ enum Held {
 
 pub struct MobView {
     pub kind: MobKind,
+    pub variant: u8,
     pub pose: Pose,
     pub sky_level: u8,
     pub block_level: u8,
@@ -570,7 +572,9 @@ impl Game {
         let feet = Vec3::new(cell.x as f32 + 0.5, cell.y as f32, cell.z as f32 + 0.5);
         let yaw = self.mob_rng.range(0.0, std::f32::consts::TAU);
         let seed = self.mob_rng.next_u32();
-        let mob = Mob::new(item.def().spawns, feet, yaw, seed);
+        let kind = item.def().spawns;
+        let mut mob = Mob::new(kind, feet, yaw, seed);
+        mob.variant = random_variant(&mut self.mob_rng, kind);
         if self.mob_fits(&mob) && self.world.is_loaded(cell) {
             self.mobs.push(mob);
         }
@@ -593,6 +597,7 @@ impl Game {
                 let cell = (pose.feet + Vec3::Y * 0.45).floor().as_ivec3();
                 MobView {
                     kind: mob.kind,
+                    variant: mob.variant,
                     pose,
                     sky_level: self.light.sky(cell),
                     block_level: self.light.block(cell),

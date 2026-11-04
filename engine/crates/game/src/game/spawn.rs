@@ -12,7 +12,7 @@ use crate::rng::Rng;
 use crate::spawning::{
     ATTEMPTS_PER_GROUP, CYCLE_GROUP_SIZE, CYCLE_REACH, CYCLE_TICKS, GENERATION_ONE_IN,
     GENERATION_REACH, GROUPS_PER_COLUMN, MIN_LIGHT, MIN_PLAYER_DISTANCE, RADIUS, animals, cap,
-    group_size, pick, reach_offset,
+    group_colour, group_size, pick, reach_offset, variant_in_group,
 };
 
 const COLUMN_SIZE: i32 = 16;
@@ -64,6 +64,7 @@ impl Game {
             };
             let kind = entry.kind;
             let group = group_size(&mut rng, entry);
+            let colour = group_colour(&mut rng, kind);
             let mut local = (
                 rng.below(COLUMN_SIZE as u32) as i32,
                 rng.below(COLUMN_SIZE as u32) as i32,
@@ -72,7 +73,7 @@ impl Game {
                 for _ in 0..ATTEMPTS_PER_GROUP {
                     let (x, z) = (origin.x + local.0, origin.z + local.1);
                     let placed = self.grass_surface(x, z).and_then(|feet| {
-                        let mob = self.new_mob(kind, feet, &mut rng);
+                        let mob = self.new_mob(kind, colour, feet, &mut rng);
                         self.mob_fits(&mob).then(|| mob.record())
                     });
                     local = shifted_within_column(&mut rng, local);
@@ -94,10 +95,12 @@ impl Game {
         spawn_ground(self.world.block(IVec3::new(x, top, z))).then(|| IVec3::new(x, top + 1, z))
     }
 
-    fn new_mob(&self, kind: MobKind, cell: IVec3, rng: &mut Rng) -> Mob {
+    fn new_mob(&self, kind: MobKind, colour: u8, cell: IVec3, rng: &mut Rng) -> Mob {
         let feet = Vec3::new(cell.x as f32 + 0.5, cell.y as f32, cell.z as f32 + 0.5);
         let yaw = rng.range(0.0, std::f32::consts::TAU);
-        Mob::new(kind, feet, yaw, rng.next_u32())
+        let mut mob = Mob::new(kind, feet, yaw, rng.next_u32());
+        mob.variant = variant_in_group(rng, kind, colour);
+        mob
     }
 
     fn spawn_cycle(&mut self) {
@@ -135,7 +138,7 @@ impl Game {
         let mut spawned = 0;
         for _ in 0..GROUPS_PER_COLUMN {
             let (mut gx, mut gz) = (x, z);
-            let mut chosen: Option<MobKind> = None;
+            let mut chosen: Option<(MobKind, u8)> = None;
             for _ in 0..ATTEMPTS_PER_GROUP {
                 gx += reach_offset(rng, CYCLE_REACH);
                 gz += reach_offset(rng, CYCLE_REACH);
@@ -144,15 +147,16 @@ impl Game {
                     continue;
                 }
                 if chosen.is_none() {
-                    chosen = pick(rng, animals(self.terrain.biome_at(gx, gz))).map(|e| e.kind);
+                    chosen = pick(rng, animals(self.terrain.biome_at(gx, gz)))
+                        .map(|e| (e.kind, group_colour(rng, e.kind)));
                 }
-                let Some(kind) = chosen else {
+                let Some((kind, colour)) = chosen else {
                     break;
                 };
                 if self.mobs.len() >= limit {
                     return;
                 }
-                let mob = self.new_mob(kind, cell, rng);
+                let mob = self.new_mob(kind, colour, cell, rng);
                 if self.may_spawn_here(&mob, cell) {
                     self.mobs.push(mob);
                     spawned += 1;

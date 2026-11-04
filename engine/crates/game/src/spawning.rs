@@ -1,4 +1,4 @@
-use world::mob::MobKind;
+use world::mob::{HORSE_COLOURS, HORSE_MARKINGS, LLAMA_COLOURS, MobKind, horse_variant};
 use world::terrain::Biome;
 
 use crate::physics::TICK;
@@ -42,6 +42,25 @@ const COW: SpawnEntry = entry(MobKind::Cow, 8, 4, 4);
 const FARM_ANIMALS: [SpawnEntry; 4] = [SHEEP, PIG, CHICKEN, COW];
 const FOREST_ANIMALS: [SpawnEntry; 5] = [SHEEP, PIG, CHICKEN, COW, entry(MobKind::Wolf, 5, 4, 4)];
 const TAIGA_ANIMALS: [SpawnEntry; 5] = [SHEEP, PIG, CHICKEN, COW, entry(MobKind::Wolf, 8, 4, 4)];
+const HORSE_PLAINS: SpawnEntry = entry(MobKind::Horse, 5, 2, 6);
+const DONKEY_PLAINS: SpawnEntry = entry(MobKind::Donkey, 1, 1, 3);
+const HORSE_SAVANNA: SpawnEntry = entry(MobKind::Horse, 1, 2, 6);
+const DONKEY_SAVANNA: SpawnEntry = entry(MobKind::Donkey, 1, 1, 1);
+const LLAMA_PLATEAU: SpawnEntry = entry(MobKind::Llama, 8, 4, 4);
+const LLAMA_HILLS: SpawnEntry = entry(MobKind::Llama, 5, 4, 6);
+
+const PLAINS_ANIMALS: [SpawnEntry; 6] = [SHEEP, PIG, CHICKEN, COW, HORSE_PLAINS, DONKEY_PLAINS];
+const SAVANNA_ANIMALS: [SpawnEntry; 6] = [SHEEP, PIG, CHICKEN, COW, HORSE_SAVANNA, DONKEY_SAVANNA];
+const PLATEAU_ANIMALS: [SpawnEntry; 7] = [
+    SHEEP,
+    PIG,
+    CHICKEN,
+    COW,
+    HORSE_SAVANNA,
+    DONKEY_SAVANNA,
+    LLAMA_PLATEAU,
+];
+const HILLS_ANIMALS: [SpawnEntry; 5] = [SHEEP, PIG, CHICKEN, COW, LLAMA_HILLS];
 const MUSHROOM_ANIMALS: [SpawnEntry; 1] = [entry(MobKind::Mooshroom, 8, 4, 8)];
 const SNOW_ANIMALS: [SpawnEntry; 1] = [entry(MobKind::PolarBear, 1, 1, 2)];
 
@@ -49,6 +68,14 @@ pub fn animals(biome: Biome) -> &'static [SpawnEntry] {
     match biome {
         Biome::MushroomIsland | Biome::MushroomIslandShore => &MUSHROOM_ANIMALS,
         Biome::IcePlains | Biome::IceMountains | Biome::IceSpikes => &SNOW_ANIMALS,
+        Biome::Plains | Biome::SunflowerPlains => &PLAINS_ANIMALS,
+        Biome::Savanna | Biome::SavannaM | Biome::SavannaPlateauM => &SAVANNA_ANIMALS,
+        Biome::SavannaPlateau => &PLATEAU_ANIMALS,
+        Biome::ExtremeHills
+        | Biome::ExtremeHillsEdge
+        | Biome::ExtremeHillsPlus
+        | Biome::ExtremeHillsM
+        | Biome::ExtremeHillsPlusM => &HILLS_ANIMALS,
         Biome::Forest | Biome::ForestHills => &FOREST_ANIMALS,
         Biome::Taiga
         | Biome::TaigaHills
@@ -90,6 +117,26 @@ pub fn pick(rng: &mut Rng, list: &[SpawnEntry]) -> Option<SpawnEntry> {
 
 pub fn group_size(rng: &mut Rng, entry: SpawnEntry) -> u32 {
     entry.min + rng.below(1 + entry.max - entry.min)
+}
+
+pub fn group_colour(rng: &mut Rng, kind: MobKind) -> u8 {
+    match kind {
+        MobKind::Horse => rng.below(u32::from(HORSE_COLOURS)) as u8,
+        MobKind::Llama => rng.below(u32::from(LLAMA_COLOURS)) as u8,
+        _ => 0,
+    }
+}
+
+pub fn variant_in_group(rng: &mut Rng, kind: MobKind, colour: u8) -> u8 {
+    match kind {
+        MobKind::Horse => horse_variant(colour, rng.below(u32::from(HORSE_MARKINGS)) as u8),
+        _ => colour,
+    }
+}
+
+pub fn random_variant(rng: &mut Rng, kind: MobKind) -> u8 {
+    let colour = group_colour(rng, kind);
+    variant_in_group(rng, kind, colour)
 }
 
 pub fn reach_offset(rng: &mut Rng, reach: u32) -> i32 {

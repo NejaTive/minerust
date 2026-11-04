@@ -432,3 +432,51 @@ fn pack_entity_sheets_are_validated_by_shape() {
     assert_eq!(entities.polar_bear.width, 64);
     assert_eq!(entities.mushroom_red.width, builtin.mushroom_red.width);
 }
+
+#[test]
+fn builtin_horse_sheets_are_square_and_llama_sheets_two_to_one() {
+    let entities = builtin_entities();
+    for sheet in entities
+        .horse
+        .iter()
+        .chain(&entities.horse_markings)
+        .chain([&entities.donkey])
+    {
+        assert!(sheet.width >= 128 && sheet.width == sheet.height);
+    }
+    for sheet in &entities.llama {
+        assert!(sheet.width >= 128 && sheet.width == 2 * sheet.height);
+    }
+}
+
+#[test]
+fn pack_horse_and_llama_sheets_need_their_own_shape() {
+    let entity = |name: &str| format!("assets/minecraft/textures/entity/{name}");
+    let bytes = zip(&[
+        (&block("dirt.png"), png(16, 16, [1, 2, 3, 255])),
+        (
+            &entity("horse/horse_white.png"),
+            png(128, 128, [9, 9, 9, 255]),
+        ),
+        (
+            &entity("horse/horse_brown.png"),
+            png(128, 64, [9, 9, 9, 255]),
+        ),
+        (&entity("horse/donkey.png"), png(128, 64, [9, 9, 9, 255])),
+        (
+            &entity("llama/llama_white.png"),
+            png(128, 64, [8, 8, 8, 255]),
+        ),
+        (
+            &entity("llama/llama_brown.png"),
+            png(128, 128, [8, 8, 8, 255]),
+        ),
+    ]);
+    let entities = load(&bytes).unwrap().entities;
+    let builtin = builtin_entities();
+    assert_eq!(entities.horse[0].width, 128);
+    assert_eq!(entities.horse[3].width, builtin.horse[3].width);
+    assert_eq!(entities.donkey.width, builtin.donkey.width);
+    assert_eq!(entities.llama[1].width, 128);
+    assert_eq!(entities.llama[2].width, builtin.llama[2].width);
+}

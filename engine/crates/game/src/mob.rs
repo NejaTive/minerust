@@ -72,6 +72,26 @@ pub const WOLF: MobSpec = MobSpec {
     fall_speed: None,
 };
 
+pub const HORSE: MobSpec = MobSpec {
+    width: 1.3964844,
+    height: 1.6,
+    eye: 1.52,
+    walk_input: 0.5,
+    shadow_radius: 1.0,
+    fall_speed: None,
+};
+
+pub const DONKEY: MobSpec = HORSE;
+
+pub const LLAMA: MobSpec = MobSpec {
+    width: 0.9,
+    height: 1.87,
+    eye: 1.77,
+    walk_input: 0.5,
+    shadow_radius: 0.7,
+    fall_speed: None,
+};
+
 pub fn spec(kind: MobKind) -> &'static MobSpec {
     match kind {
         MobKind::Pig => &PIG,
@@ -81,6 +101,9 @@ pub fn spec(kind: MobKind) -> &'static MobSpec {
         MobKind::Mooshroom => &MOOSHROOM,
         MobKind::PolarBear => &POLAR_BEAR,
         MobKind::Wolf => &WOLF,
+        MobKind::Horse => &HORSE,
+        MobKind::Donkey => &DONKEY,
+        MobKind::Llama => &LLAMA,
     }
 }
 
@@ -155,6 +178,7 @@ enum Plan {
 
 pub struct Mob {
     pub kind: MobKind,
+    pub variant: u8,
     pub body: Player,
     pub yaw: f32,
     head_yaw: f32,
@@ -188,6 +212,7 @@ impl Mob {
         }
         let mut mob = Mob {
             kind,
+            variant: 0,
             body,
             yaw,
             head_yaw: 0.0,
@@ -218,7 +243,10 @@ impl Mob {
     }
 
     pub fn from_record(record: &MobRecord, seed: u32) -> Mob {
-        Mob::new(record.kind, record.pos, record.yaw, seed)
+        Mob {
+            variant: record.variant,
+            ..Mob::new(record.kind, record.pos, record.yaw, seed)
+        }
     }
 
     pub fn record(&self) -> MobRecord {
@@ -226,6 +254,7 @@ impl Mob {
             kind: self.kind,
             pos: self.body.feet,
             yaw: self.yaw,
+            variant: self.variant,
         }
     }
 
