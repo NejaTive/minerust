@@ -160,10 +160,37 @@ pub enum Tile {
     WoolGreen,
     WoolRed,
     WoolBlack,
+    GlassPaneTop,
+    IronBars,
+    Ladder,
+    Web,
+    RailNormal,
+    RailTurned,
+    DoorOakLower,
+    DoorOakUpper,
+    DoorSpruceLower,
+    DoorSpruceUpper,
+    DoorBirchLower,
+    DoorBirchUpper,
+    DoorJungleLower,
+    DoorJungleUpper,
+    DoorAcaciaLower,
+    DoorAcaciaUpper,
+    DoorDarkOakLower,
+    DoorDarkOakUpper,
+    DoorIronLower,
+    DoorIronUpper,
+    DoorOakItem,
+    DoorSpruceItem,
+    DoorBirchItem,
+    DoorJungleItem,
+    DoorAcaciaItem,
+    DoorDarkOakItem,
+    DoorIronItem,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 153] = [
+    pub const ALL: [Tile; 180] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -317,6 +344,33 @@ impl Tile {
         Tile::WoolGreen,
         Tile::WoolRed,
         Tile::WoolBlack,
+        Tile::GlassPaneTop,
+        Tile::IronBars,
+        Tile::Ladder,
+        Tile::Web,
+        Tile::RailNormal,
+        Tile::RailTurned,
+        Tile::DoorOakLower,
+        Tile::DoorOakUpper,
+        Tile::DoorSpruceLower,
+        Tile::DoorSpruceUpper,
+        Tile::DoorBirchLower,
+        Tile::DoorBirchUpper,
+        Tile::DoorJungleLower,
+        Tile::DoorJungleUpper,
+        Tile::DoorAcaciaLower,
+        Tile::DoorAcaciaUpper,
+        Tile::DoorDarkOakLower,
+        Tile::DoorDarkOakUpper,
+        Tile::DoorIronLower,
+        Tile::DoorIronUpper,
+        Tile::DoorOakItem,
+        Tile::DoorSpruceItem,
+        Tile::DoorBirchItem,
+        Tile::DoorJungleItem,
+        Tile::DoorAcaciaItem,
+        Tile::DoorDarkOakItem,
+        Tile::DoorIronItem,
     ];
 
     pub fn sway(self) -> f32 {
@@ -414,6 +468,24 @@ impl Tile {
                 | Tile::CocoaStage1
                 | Tile::CocoaStage2
                 | Tile::Glass
+                | Tile::GlassPaneTop
+                | Tile::IronBars
+                | Tile::Ladder
+                | Tile::Web
+                | Tile::RailNormal
+                | Tile::RailTurned
+                | Tile::DoorOakUpper
+                | Tile::DoorJungleUpper
+                | Tile::DoorAcaciaLower
+                | Tile::DoorAcaciaUpper
+                | Tile::DoorIronUpper
+                | Tile::DoorOakItem
+                | Tile::DoorSpruceItem
+                | Tile::DoorBirchItem
+                | Tile::DoorJungleItem
+                | Tile::DoorAcaciaItem
+                | Tile::DoorDarkOakItem
+                | Tile::DoorIronItem
         )
     }
 }

@@ -1139,3 +1139,127 @@ fn a_full_block_is_not_stepped_onto_without_auto_step() {
     assert_eq!(player.feet.y, GROUND);
     assert!(player.feet.x < 2.0);
 }
+
+fn collidable(blocks: &[(IVec3, Block, u8)]) -> impl Fn(IVec3) -> Collision + use<> {
+    let blocks = blocks.to_vec();
+    move |pos| {
+        if pos.y <= FLOOR {
+            return Collision::FULL;
+        }
+        let Some(&(_, block, data)) = blocks.iter().find(|(at, ..)| *at == pos) else {
+            return Collision::NONE;
+        };
+        let around = |offset: IVec3| {
+            blocks
+                .iter()
+                .find(|(at, ..)| *at == pos + offset)
+                .map_or((Block::Air, 0), |&(_, block, data)| (block, data))
+        };
+        Collision::of_boxes(block.collision_boxes(data, around), false)
+    }
+}
+
+const JUMPING_FORWARD: Input = Input {
+    forward: 1.0,
+    strafe: 0.0,
+    jump: true,
+    descend: false,
+};
+
+#[test]
+fn a_fence_cannot_be_jumped_over_or_stepped_onto() {
+    let collision = collidable(&[(cell(2), Block::OakFence, 0)]);
+    let mut player = standing();
+    let mut highest = player.feet.y;
+    for _ in 0..240 {
+        player.step_with(&JUMPING_FORWARD, 0.0, &collision, dry);
+        highest = highest.max(player.feet.y);
+    }
+    assert!(player.feet.x < 2.1, "{}", player.feet.x);
+    assert!(highest < GROUND + 1.5, "{highest}");
+}
+
+#[test]
+fn a_falling_player_lands_on_top_of_a_fence_at_one_and_a_half() {
+    let collision = collidable(&[(cell(0), Block::OakFence, 0)]);
+    let mut player = Player::new(Vec3::new(0.5, GROUND + 4.0, 0.5), Mode::Walking);
+    run_with(&mut player, Input::default(), 120, &collision);
+    assert!(player.on_ground);
+    assert_eq!(player.feet.y, GROUND + 1.5);
+}
+
+#[test]
+fn a_closed_gate_blocks_and_an_open_one_lets_through() {
+    use world::block::GATE_OPEN;
+    let facing_x = world::block::FACING_POS_X;
+    for (data, passes) in [(facing_x, false), (facing_x | GATE_OPEN, true)] {
+        let collision = collidable(&[(cell(2), Block::OakFenceGate, data)]);
+        let mut player = standing();
+        run_with(&mut player, FORWARD, 120, &collision);
+        assert_eq!(player.feet.x > 3.0, passes, "{data}: {}", player.feet.x);
+    }
+}
+
+#[test]
+fn climbing_a_ladder_by_pushing_into_the_wall_or_jumping() {
+    let wall = wall_x(1);
+    let solid = world(&wall);
+    for input in [
+        FORWARD,
+        Input {
+            jump: true,
+            ..Input::default()
+        },
+    ] {
+        let mut player = standing();
+        for _ in 0..60 {
+            player.on_ladder = true;
+            player.step(&input, 0.0, &solid, dry);
+        }
+        assert!(
+            player.feet.y > GROUND + 3.0,
+            "{:?}: {}",
+            input,
+            player.feet.y
+        );
+    }
+}
+
+#[test]
+fn shift_holds_a_player_on_a_ladder_and_a_fall_is_slowed() {
+    let solid = world(&[]);
+    let mut held = Player::new(Vec3::new(0.5, GROUND + 6.0, 0.5), Mode::Walking);
+    let mut falling = Player::new(Vec3::new(0.5, GROUND + 6.0, 0.5), Mode::Walking);
+    let shift = Input {
+        descend: true,
+        ..Input::default()
+    };
+    for _ in 0..60 {
+        held.on_ladder = true;
+        held.step(&shift, 0.0, &solid, dry);
+        falling.on_ladder = true;
+        falling.step(&Input::default(), 0.0, &solid, dry);
+    }
+    assert_eq!(held.feet.y, GROUND + 6.0);
+    let fallen = GROUND + 6.0 - falling.feet.y;
+    assert!(
+        (2.5..=LADDER_FALL_SPEED + 0.01).contains(&fallen),
+        "{fallen}"
+    );
+}
+
+#[test]
+fn a_web_slows_walking_and_falling() {
+    let solid = world(&[]);
+    let mut free = Player::new(Vec3::new(0.5, GROUND + 6.0, 0.5), Mode::Walking);
+    let mut webbed = Player::new(Vec3::new(0.5, GROUND + 6.0, 0.5), Mode::Walking);
+    for _ in 0..30 {
+        free.step(&FORWARD, 0.0, &solid, dry);
+        webbed.in_web = true;
+        webbed.step(&FORWARD, 0.0, &solid, dry);
+    }
+    assert!(free.feet.y < GROUND + 4.0);
+    assert!(webbed.feet.y > GROUND + 5.9, "{}", webbed.feet.y);
+    let (free_run, webbed_run) = (free.feet.x - 0.5, webbed.feet.x - 0.5);
+    assert!(webbed_run < free_run * 0.3, "{webbed_run} vs {free_run}");
+}

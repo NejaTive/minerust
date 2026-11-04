@@ -1,7 +1,7 @@
 use glam::Vec3;
 
 pub const BOX_UNITS: u8 = 16;
-pub const MAX_BOXES: usize = 6;
+pub const MAX_BOXES: usize = 9;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct VoxelBox {

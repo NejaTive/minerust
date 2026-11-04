@@ -68,6 +68,13 @@ impl World {
         })
     }
 
+    pub fn collision_boxes_at(&self, pos: IVec3) -> BoxList {
+        self.block(pos)
+            .collision_boxes(self.block_data(pos), |offset| {
+                (self.block(pos + offset), self.block_data(pos + offset))
+            })
+    }
+
     pub fn block_data(&self, pos: IVec3) -> u8 {
         if !(0..WORLD_HEIGHT).contains(&pos.y) {
             return 0;

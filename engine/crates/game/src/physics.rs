@@ -22,6 +22,12 @@ pub const STEP_HEIGHT: f32 = 1.0;
 pub const BASE_STEP_HEIGHT: f32 = 0.6;
 pub const STEP_SMOOTH_TIME: f32 = 0.12;
 
+// 1.12: 0.2, 0.15 и 0.15 блока за тик при 20 тиках в секунду
+pub const LADDER_CLIMB_SPEED: f32 = 4.0;
+pub const LADDER_FALL_SPEED: f32 = 3.0;
+pub const LADDER_SIDE_SPEED: f32 = 3.0;
+pub const WEB_FACTOR: Vec3 = Vec3::new(0.25, 0.05, 0.25);
+
 pub const WATER_GRAVITY: f32 = GRAVITY / 4.0;
 pub const SWIM_DEPTH: f32 = 0.4;
 const WATER_EXIT_DEPTH: f32 = 1.0;
@@ -150,6 +156,9 @@ pub struct Player {
     pub jump_speed: f32,
     pub walk_multiplier: f32,
     pub fly_multiplier: f32,
+    pub in_web: bool,
+    pub on_ladder: bool,
+    climb_contact: bool,
 }
 
 impl Player {
@@ -172,6 +181,9 @@ impl Player {
             jump_speed: JUMP_SPEED,
             walk_multiplier: 1.0,
             fly_multiplier: 1.0,
+            in_web: false,
+            on_ladder: false,
+            climb_contact: false,
         }
     }
 
@@ -211,6 +223,14 @@ impl Player {
                 Mode::Noclip
             }
         };
+    }
+
+    pub fn touches(&self, matches: impl Fn(IVec3) -> bool) -> bool {
+        let (min, max) = self.aabb();
+        let lo = (min + EPS).floor().as_ivec3();
+        let hi = (max - EPS).floor().as_ivec3();
+        (lo.y..=hi.y)
+            .any(|y| (lo.z..=hi.z).any(|z| (lo.x..=hi.x).any(|x| matches(IVec3::new(x, y, z)))))
     }
 
     pub fn overlaps_block(&self, pos: IVec3) -> bool {
@@ -350,6 +370,17 @@ impl Player {
                     self.velocity.y = self.jump_speed;
                 }
                 self.velocity.y = (self.velocity.y - GRAVITY * TICK).max(-self.terminal_speed);
+                if self.on_ladder {
+                    self.velocity.x = self.velocity.x.clamp(-LADDER_SIDE_SPEED, LADDER_SIDE_SPEED);
+                    self.velocity.z = self.velocity.z.clamp(-LADDER_SIDE_SPEED, LADDER_SIDE_SPEED);
+                    self.velocity.y = self.velocity.y.max(-LADDER_FALL_SPEED);
+                    if input.descend && self.velocity.y < 0.0 {
+                        self.velocity.y = 0.0;
+                    }
+                    if self.climb_contact || input.jump {
+                        self.velocity.y = LADDER_CLIMB_SPEED;
+                    }
+                }
             }
             Mode::Flying | Mode::Noclip => {
                 let speed = self.fly_multiplier
@@ -362,7 +393,11 @@ impl Player {
             }
         }
 
-        let delta = self.velocity * TICK;
+        let mut delta = self.velocity * TICK;
+        if self.in_web && self.mode == Mode::Walking {
+            delta *= WEB_FACTOR;
+            self.velocity = Vec3::ZERO;
+        }
         self.on_ground = false;
         if self.mode == Mode::Noclip {
             self.feet += delta;
@@ -384,6 +419,7 @@ impl Player {
             }
             against_wall |= blocked && axis != 1;
         }
+        self.climb_contact = against_wall && self.on_ladder;
         if against_wall {
             self.sprinting = false;
         }
@@ -452,8 +488,11 @@ impl Player {
         } else {
             (self.width / 2.0, self.width / 2.0)
         };
-        let lo = (min + EPS).floor().as_ivec3();
+        let mut lo = (min + EPS).floor().as_ivec3();
         let hi = (max - EPS).floor().as_ivec3();
+        if axis != 1 {
+            lo.y -= 1;
+        }
         let (a, b) = match axis {
             0 => (1, 2),
             1 => (0, 2),
@@ -462,7 +501,7 @@ impl Player {
         let layers = if delta > 0.0 {
             (max[axis] - EPS).floor() as i32..=(max[axis] + delta - EPS).floor() as i32
         } else if axis == 1 {
-            (min.y + delta - EPS).floor() as i32..=(min.y + EPS).floor() as i32
+            (min.y + delta - EPS).floor() as i32 - 1..=(min.y + EPS).floor() as i32
         } else {
             (min[axis] + delta + EPS).floor() as i32..=(min[axis] + EPS).floor() as i32
         };

@@ -148,6 +148,37 @@ pub enum Block {
     SandstoneStairs,
     RedSandstoneStairs,
     Carpet,
+    OakFence,
+    SpruceFence,
+    BirchFence,
+    JungleFence,
+    AcaciaFence,
+    DarkOakFence,
+    OakFenceGate,
+    SpruceFenceGate,
+    BirchFenceGate,
+    JungleFenceGate,
+    AcaciaFenceGate,
+    DarkOakFenceGate,
+    GlassPane,
+    IronBars,
+    OakDoor,
+    OakDoorUpper,
+    SpruceDoor,
+    SpruceDoorUpper,
+    BirchDoor,
+    BirchDoorUpper,
+    JungleDoor,
+    JungleDoorUpper,
+    AcaciaDoor,
+    AcaciaDoorUpper,
+    DarkOakDoor,
+    DarkOakDoorUpper,
+    IronDoor,
+    IronDoorUpper,
+    Ladder,
+    Web,
+    Rail,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -193,6 +224,7 @@ pub enum Shape {
     Sunflower,
     Cocoa,
     Boxes,
+    Rail,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -201,6 +233,12 @@ pub enum BoxKind {
     Slab,
     Stairs,
     Carpet,
+    Fence,
+    Gate,
+    Pane,
+    Door,
+    Ladder,
+    Rail,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -215,6 +253,11 @@ pub enum DataKind {
     Color,
     Slab,
     Stairs,
+    Gate,
+    Door,
+    Hinge,
+    Ladder,
+    Rail,
 }
 
 pub const AXIS_Y: u8 = 0;
@@ -232,6 +275,37 @@ pub const SLAB_DOUBLE: u8 = 2;
 
 pub const STAIRS_FACING_MASK: u8 = 3;
 pub const STAIRS_TOP: u8 = 4;
+
+pub const GATE_FACING_MASK: u8 = 3;
+pub const GATE_OPEN: u8 = 4;
+pub const DOOR_OPEN: u8 = 4;
+pub const DOOR_HINGE_RIGHT: u8 = 1;
+/// Только при установке двери: бит петли рядом с поворотом нижней половины.
+pub const DOOR_PLACED_RIGHT: u8 = 8;
+
+pub const RAIL_NORTH_SOUTH: u8 = 0;
+pub const RAIL_EAST_WEST: u8 = 1;
+pub const RAIL_ASCENDING_EAST: u8 = 2;
+pub const RAIL_ASCENDING_WEST: u8 = 3;
+pub const RAIL_ASCENDING_NORTH: u8 = 4;
+pub const RAIL_ASCENDING_SOUTH: u8 = 5;
+pub const RAIL_SOUTH_EAST: u8 = 6;
+pub const RAIL_SOUTH_WEST: u8 = 7;
+pub const RAIL_NORTH_WEST: u8 = 8;
+pub const RAIL_NORTH_EAST: u8 = 9;
+pub const RAIL_SHAPES: u8 = 10;
+pub const RAIL_UNITS: u8 = 2;
+pub const RAIL_SLOPE_UNITS: u8 = 8;
+
+pub const DOORS: [(Block, Block); 7] = [
+    (Block::OakDoor, Block::OakDoorUpper),
+    (Block::SpruceDoor, Block::SpruceDoorUpper),
+    (Block::BirchDoor, Block::BirchDoorUpper),
+    (Block::JungleDoor, Block::JungleDoorUpper),
+    (Block::AcaciaDoor, Block::AcaciaDoorUpper),
+    (Block::DarkOakDoor, Block::DarkOakDoorUpper),
+    (Block::IronDoor, Block::IronDoorUpper),
+];
 
 pub const COLOR_COUNT: u8 = 16;
 pub const CARPET_UNITS: u8 = 1;
@@ -520,6 +594,58 @@ impl BlockDef {
         )
     }
 
+    const fn open_boxed(
+        name: &'static str,
+        label: &'static str,
+        kind: BoxKind,
+        data: DataKind,
+        tile: Tile,
+    ) -> BlockDef {
+        BlockDef {
+            opaque: false,
+            data,
+            shape: Shape::Boxes,
+            boxes: kind,
+            ..Self::uniform(name, label, tile)
+        }
+    }
+
+    const fn fence(name: &'static str, label: &'static str, tile: Tile) -> BlockDef {
+        Self::open_boxed(name, label, BoxKind::Fence, DataKind::None, tile)
+    }
+
+    const fn gate(name: &'static str, label: &'static str, tile: Tile) -> BlockDef {
+        Self::open_boxed(name, label, BoxKind::Gate, DataKind::Gate, tile)
+    }
+
+    const fn pane(name: &'static str, label: &'static str, side: Tile, top: Tile) -> BlockDef {
+        BlockDef {
+            layer: RenderLayer::Cutout,
+            top: Some(top),
+            bottom: Some(top),
+            ..Self::open_boxed(name, label, BoxKind::Pane, DataKind::None, side)
+        }
+    }
+
+    const fn door(name: &'static str, label: &'static str, tile: Tile, upper: bool) -> BlockDef {
+        BlockDef {
+            selectable: !upper,
+            needs_support: true,
+            layer: RenderLayer::Cutout,
+            ..Self::open_boxed(
+                name,
+                label,
+                BoxKind::Door,
+                if upper {
+                    DataKind::Hinge
+                } else {
+                    DataKind::Door
+                },
+                tile,
+            )
+        }
+    }
+
     const fn leaves(name: &'static str, label: &'static str, tile: Tile) -> BlockDef {
         BlockDef {
             opaque: false,
@@ -542,7 +668,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 138] = [
+pub const BLOCKS: [BlockDef; 169] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -1165,10 +1291,143 @@ pub const BLOCKS: [BlockDef; 138] = [
         boxes: BoxKind::Carpet,
         ..BlockDef::uniform("carpet", "ковёр", Tile::WoolWhite)
     },
+    BlockDef::fence("oak_fence", "забор из дуба", Tile::PlanksOak),
+    BlockDef::fence("spruce_fence", "забор из ели", Tile::PlanksSpruce),
+    BlockDef::fence("birch_fence", "забор из берёзы", Tile::PlanksBirch),
+    BlockDef::fence(
+        "jungle_fence",
+        "забор из тропического дерева",
+        Tile::PlanksJungle,
+    ),
+    BlockDef::fence("acacia_fence", "забор из акации", Tile::PlanksAcacia),
+    BlockDef::fence(
+        "dark_oak_fence",
+        "забор из тёмного дуба",
+        Tile::PlanksDarkOak,
+    ),
+    BlockDef::gate("oak_fence_gate", "калитка из дуба", Tile::PlanksOak),
+    BlockDef::gate("spruce_fence_gate", "калитка из ели", Tile::PlanksSpruce),
+    BlockDef::gate("birch_fence_gate", "калитка из берёзы", Tile::PlanksBirch),
+    BlockDef::gate(
+        "jungle_fence_gate",
+        "калитка из тропического дерева",
+        Tile::PlanksJungle,
+    ),
+    BlockDef::gate("acacia_fence_gate", "калитка из акации", Tile::PlanksAcacia),
+    BlockDef::gate(
+        "dark_oak_fence_gate",
+        "калитка из тёмного дуба",
+        Tile::PlanksDarkOak,
+    ),
+    BlockDef::pane(
+        "glass_pane",
+        "стеклянная панель",
+        Tile::Glass,
+        Tile::GlassPaneTop,
+    ),
+    BlockDef::pane(
+        "iron_bars",
+        "железная решётка",
+        Tile::IronBars,
+        Tile::IronBars,
+    ),
+    BlockDef::door("oak_door", "дверь из дуба", Tile::DoorOakLower, false),
+    BlockDef::door(
+        "oak_door_upper",
+        "верх двери из дуба",
+        Tile::DoorOakUpper,
+        true,
+    ),
+    BlockDef::door("spruce_door", "дверь из ели", Tile::DoorSpruceLower, false),
+    BlockDef::door(
+        "spruce_door_upper",
+        "верх двери из ели",
+        Tile::DoorSpruceUpper,
+        true,
+    ),
+    BlockDef::door("birch_door", "дверь из берёзы", Tile::DoorBirchLower, false),
+    BlockDef::door(
+        "birch_door_upper",
+        "верх двери из берёзы",
+        Tile::DoorBirchUpper,
+        true,
+    ),
+    BlockDef::door(
+        "jungle_door",
+        "дверь из тропического дерева",
+        Tile::DoorJungleLower,
+        false,
+    ),
+    BlockDef::door(
+        "jungle_door_upper",
+        "верх двери из тропического дерева",
+        Tile::DoorJungleUpper,
+        true,
+    ),
+    BlockDef::door(
+        "acacia_door",
+        "дверь из акации",
+        Tile::DoorAcaciaLower,
+        false,
+    ),
+    BlockDef::door(
+        "acacia_door_upper",
+        "верх двери из акации",
+        Tile::DoorAcaciaUpper,
+        true,
+    ),
+    BlockDef::door(
+        "dark_oak_door",
+        "дверь из тёмного дуба",
+        Tile::DoorDarkOakLower,
+        false,
+    ),
+    BlockDef::door(
+        "dark_oak_door_upper",
+        "верх двери из тёмного дуба",
+        Tile::DoorDarkOakUpper,
+        true,
+    ),
+    BlockDef::door("iron_door", "железная дверь", Tile::DoorIronLower, false),
+    BlockDef::door(
+        "iron_door_upper",
+        "верх железной двери",
+        Tile::DoorIronUpper,
+        true,
+    ),
+    BlockDef {
+        opaque: false,
+        solid: false,
+        needs_support: true,
+        data: DataKind::Ladder,
+        layer: RenderLayer::Cutout,
+        shape: Shape::Boxes,
+        boxes: BoxKind::Ladder,
+        ..BlockDef::uniform("ladder", "лестница", Tile::Ladder)
+    },
+    BlockDef {
+        opaque: false,
+        solid: false,
+        layer: RenderLayer::Cutout,
+        shape: Shape::Cross,
+        ..BlockDef::uniform("web", "паутина", Tile::Web)
+    },
+    BlockDef {
+        opaque: false,
+        solid: false,
+        needs_support: true,
+        data: DataKind::Rail,
+        layer: RenderLayer::Cutout,
+        shape: Shape::Rail,
+        boxes: BoxKind::Rail,
+        ..BlockDef::uniform("rail", "рельсы", Tile::RailNormal)
+    },
 ];
 
+mod shapes;
+
 impl Block {
-    pub const ALL: [Block; 138] = [
+    pub const ALL: [Block; 169] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -1307,6 +1566,37 @@ impl Block {
         Block::SandstoneStairs,
         Block::RedSandstoneStairs,
         Block::Carpet,
+        Block::OakFence,
+        Block::SpruceFence,
+        Block::BirchFence,
+        Block::JungleFence,
+        Block::AcaciaFence,
+        Block::DarkOakFence,
+        Block::OakFenceGate,
+        Block::SpruceFenceGate,
+        Block::BirchFenceGate,
+        Block::JungleFenceGate,
+        Block::AcaciaFenceGate,
+        Block::DarkOakFenceGate,
+        Block::GlassPane,
+        Block::IronBars,
+        Block::OakDoor,
+        Block::OakDoorUpper,
+        Block::SpruceDoor,
+        Block::SpruceDoorUpper,
+        Block::BirchDoor,
+        Block::BirchDoorUpper,
+        Block::JungleDoor,
+        Block::JungleDoorUpper,
+        Block::AcaciaDoor,
+        Block::AcaciaDoorUpper,
+        Block::DarkOakDoor,
+        Block::DarkOakDoorUpper,
+        Block::IronDoor,
+        Block::IronDoorUpper,
+        Block::Ladder,
+        Block::Web,
+        Block::Rail,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -1332,7 +1622,7 @@ impl Block {
         match self.shape() {
             Shape::Layer => SNOW_HEIGHT,
             Shape::Cactus => CACTUS_HEIGHT,
-            Shape::Boxes => 1.0,
+            Shape::Boxes if self.is_solid() => 1.0,
             _ if self.is_solid() => 1.0,
             _ => 0.0,
         }
@@ -1405,7 +1695,7 @@ impl Block {
                 let (a, b) = (rotate(min), rotate(max));
                 (a.min(b), a.max(b))
             }
-            Shape::Boxes => self.boxes(data, |_| (Block::Air, 0)).bounds(),
+            Shape::Boxes | Shape::Rail => self.boxes(data, |_| (Block::Air, 0)).bounds(),
             Shape::Layer => (Vec3::ZERO, Vec3::new(1.0, SNOW_HEIGHT, 1.0)),
             Shape::Lily => (Vec3::ZERO, Vec3::new(1.0, LILY_HEIGHT, 1.0)),
             Shape::Cactus => (
@@ -1452,6 +1742,15 @@ impl Block {
         let unit = |min, max| BoxList::of(&[VoxelBox::new(min, max)]);
         match self.box_kind() {
             BoxKind::None => BoxList::of(&[VoxelBox::FULL]),
+            BoxKind::Fence => self.fence_boxes(&around, false),
+            BoxKind::Gate => self.gate_boxes(data, false),
+            BoxKind::Pane => self.pane_boxes(&around),
+            BoxKind::Door => self.door_boxes(data, &around),
+            BoxKind::Ladder => {
+                let turns = ((data & GATE_FACING_MASK) + 3) % 4;
+                unit([0, 0, 0], [2, 16, 16]).map(|b| b.turned(turns))
+            }
+            BoxKind::Rail => Self::rail_boxes(data),
             BoxKind::Carpet => unit([0, 0, 0], [16, CARPET_UNITS, 16]),
             BoxKind::Slab => match data {
                 SLAB_DOUBLE => BoxList::of(&[VoxelBox::FULL]),
@@ -1553,6 +1852,9 @@ impl Block {
         if self.data_kind() == DataKind::Cocoa {
             return Some(self.facing_dir(data & COCOA_DIRECTION_MASK));
         }
+        if self.data_kind() == DataKind::Ladder {
+            return Some(-self.facing_dir(data & GATE_FACING_MASK));
+        }
         if self.data_kind() != DataKind::Attachment {
             return Some(IVec3::NEG_Y);
         }
@@ -1574,6 +1876,7 @@ impl Block {
             DataKind::Stairs => {
                 Some(facing_code(placement.look) | if upper { STAIRS_TOP } else { 0 })
             }
+            DataKind::Gate | DataKind::Door => Some(facing_code(placement.look)),
             _ => self.placement_data(placement.normal),
         }
     }
@@ -1584,7 +1887,15 @@ impl Block {
             | DataKind::Fluid
             | DataKind::Color
             | DataKind::Slab
-            | DataKind::Stairs => Some(0),
+            | DataKind::Stairs
+            | DataKind::Gate
+            | DataKind::Door
+            | DataKind::Hinge
+            | DataKind::Rail => Some(0),
+            DataKind::Ladder => match normal {
+                IVec3::X | IVec3::NEG_X | IVec3::Z | IVec3::NEG_Z => Some(facing_code(normal)),
+                _ => None,
+            },
             DataKind::Sides => match normal {
                 IVec3::X => Some(VINE_NEG_X),
                 IVec3::NEG_X => Some(VINE_POS_X),
@@ -1638,7 +1949,10 @@ impl Block {
             DataKind::Cocoa => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
             DataKind::Color => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             DataKind::Slab => &[SLAB_BOTTOM, SLAB_TOP, SLAB_DOUBLE],
-            DataKind::Stairs => &[0, 1, 2, 3, 4, 5, 6, 7],
+            DataKind::Stairs | DataKind::Gate | DataKind::Door => &[0, 1, 2, 3, 4, 5, 6, 7],
+            DataKind::Hinge => &[0, DOOR_HINGE_RIGHT],
+            DataKind::Ladder => &[FACING_NEG_Z, FACING_POS_X, FACING_POS_Z, FACING_NEG_X],
+            DataKind::Rail => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
                 FLUID_SOURCE,
@@ -1710,6 +2024,9 @@ impl Block {
     }
 
     pub fn double_upper(self) -> Option<Block> {
+        if let Some(upper) = self.door_upper() {
+            return Some(upper);
+        }
         Some(match self {
             Block::DoubleGrassLower => Block::DoubleGrassUpper,
             Block::DoubleFernLower => Block::DoubleFernUpper,
@@ -1722,9 +2039,11 @@ impl Block {
     }
 
     pub fn double_lower(self) -> Option<Block> {
-        Block::DOUBLE_PLANTS
-            .into_iter()
-            .find(|lower| lower.double_upper() == Some(self))
+        self.door_lower().or_else(|| {
+            Block::DOUBLE_PLANTS
+                .into_iter()
+                .find(|lower| lower.double_upper() == Some(self))
+        })
     }
 
     pub const DOUBLE_PLANTS: [Block; 6] = [
@@ -1764,6 +2083,7 @@ impl Block {
             Block::Waterlily => support == Block::Water,
             Block::Cocoa => support == Block::JungleLog,
             Block::Carpet => support != Block::Air,
+            Block::Rail => support.is_solid() && support.shape() == Shape::Cube,
             Block::Snow => {
                 support.is_leaves()
                     || (support.is_solid() && !matches!(support, Block::Ice | Block::IcePacked))
@@ -1820,8 +2140,23 @@ impl Block {
     }
 
     pub fn icon_pixels(self, textures: &TextureSet, data: u8) -> Option<Vec<u8>> {
-        self.tile_for(Facing::Side, data)
-            .map(|tile| textures.icon_pixels(tile))
+        let tile = self
+            .door_item_tile()
+            .or_else(|| self.tile_for(Facing::Side, data));
+        tile.map(|tile| textures.icon_pixels(tile))
+    }
+
+    fn door_item_tile(self) -> Option<Tile> {
+        Some(match self {
+            Block::OakDoor => Tile::DoorOakItem,
+            Block::SpruceDoor => Tile::DoorSpruceItem,
+            Block::BirchDoor => Tile::DoorBirchItem,
+            Block::JungleDoor => Tile::DoorJungleItem,
+            Block::AcaciaDoor => Tile::DoorAcaciaItem,
+            Block::DarkOakDoor => Tile::DoorDarkOakItem,
+            Block::IronDoor => Tile::DoorIronItem,
+            _ => return None,
+        })
     }
 
     pub fn tile_for(self, facing: Facing, data: u8) -> Option<Tile> {
@@ -1911,12 +2246,14 @@ pub struct Stack {
     pub placeable: bool,
 }
 
-/// Контекст установки: клик по грани `normal`, `hit_y` — высота точки клика в клетке,
-/// `look` — горизонтальное направление взгляда, `variant` — `data` предмета.
+/// Контекст установки: клик по грани `normal`, `hit_x`, `hit_y`, `hit_z` — точка клика
+/// в клетке (0..1), `look` — горизонтальное направление взгляда, `variant` — `data` предмета.
 #[derive(Clone, Copy, Debug)]
 pub struct Placement {
     pub normal: IVec3,
+    pub hit_x: f32,
     pub hit_y: f32,
+    pub hit_z: f32,
     pub look: IVec3,
     pub variant: u8,
 }

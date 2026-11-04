@@ -308,7 +308,11 @@ fn builtin_files_are_exactly_the_mapped_ones() {
         .filter(|name| !["LICENSE.txt", "gui", "entity", "items"].contains(&name.as_str()))
         .collect();
     on_disk.sort();
-    let mut built_in: Vec<String> = BUILTIN.iter().map(|(name, _)| name.to_string()).collect();
+    let mut built_in: Vec<String> = BUILTIN
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .filter(|name| !name.starts_with("items/"))
+        .collect();
     built_in.sort();
     assert_eq!(on_disk, built_in);
 }

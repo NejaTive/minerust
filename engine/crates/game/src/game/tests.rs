@@ -350,3 +350,44 @@ fn generated_springs_start_flowing_after_the_column_is_inserted() {
         "no liquid beside {spring}: {cells:?}"
     );
 }
+
+fn fall_height_after(mut game: Game, seconds: f32) -> f32 {
+    game.mobs.push(Mob::new(
+        MobKind::Pig,
+        Vec3::new(8.5, FLOOR as f32 + 8.0, 8.5),
+        0.0,
+        1,
+    ));
+    game.set_camera_state(&[8.5, FLOOR as f32 + 9.6, 12.5, 0.0, 0.0, 0.0])
+        .unwrap();
+    run(&mut game, seconds);
+    game.mobs[0].body.feet.y
+}
+
+#[test]
+fn a_web_holds_a_falling_mob_but_air_does_not() {
+    let free = fall_height_after(floor_game(), 0.5);
+    let mut webbed = floor_game();
+    for y in FLOOR + 1..FLOOR + 12 {
+        webbed.world.set_block(IVec3::new(8, y, 8), Block::Web);
+    }
+    let held = fall_height_after(webbed, 0.5);
+    assert!(free < FLOOR as f32 + 7.0, "{free}");
+    assert!(held > FLOOR as f32 + 7.8, "{held}");
+}
+
+#[test]
+fn a_web_holds_a_falling_player() {
+    let mut game = floor_game();
+    for y in FLOOR + 1..FLOOR + 12 {
+        game.world.set_block(IVec3::new(8, y, 8), Block::Web);
+    }
+    game.set_camera_state(&[8.5, FLOOR as f32 + 8.0 + EYE_HEIGHT, 8.5, 0.0, 0.0, 0.0])
+        .unwrap();
+    run(&mut game, 0.5);
+    assert!(
+        game.player().feet.y > FLOOR as f32 + 7.8,
+        "{}",
+        game.player().feet.y
+    );
+}
