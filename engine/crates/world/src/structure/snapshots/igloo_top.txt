@@ -1,0 +1,57 @@
+size 7 5 8
+legend
+. air
+_ keep
+A snow_block
+B carpet
+C bed front=-z data=116
+D bed front=-z data=112
+E crafting_table
+F furnace front=-x
+G ice
+H redstone_torch
+y 0
+__AAA__
+_AAAAA_
+AAAAAAA
+AAAAAAA
+AAAAAAA
+_AAAAA_
+__AAA__
+__AAA__
+y 1
+__AAA__
+_ABCBA_
+ABBDBBA
+AEBBBFA
+ABBBBBA
+_ABBBA_
+__A.A__
+__A.A__
+y 2
+__AGA__
+_AA.AA_
+AA...AA
+GH....G
+AA...AA
+_AA.AA_
+__A.A__
+__A.A__
+y 3
+_______
+_AAAAA_
+_A...A_
+_A...A_
+_A...A_
+_AAAAA_
+__AAA__
+__AAA__
+y 4
+_______
+___A___
+__AAA__
+_AAAAA_
+__AAA__
+___A___
+_______
+_______

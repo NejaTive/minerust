@@ -1,0 +1,84 @@
+size 7 7 9
+legend
+. air
+_ keep
+A log
+B spruce_planks
+C oak_fence
+D crafting_table
+E cauldron
+F flower_pot data=11
+G spruce_stairs front=+z
+H spruce_stairs front=+x
+I spruce_stairs front=-x
+J spruce_stairs front=-z
+y 0
+_______
+_______
+_A___A_
+_______
+_______
+_______
+_______
+_A___A_
+_______
+y 1
+__BBB__
+_BBBBB_
+_ABBBA_
+_BBBBB_
+_BBBBB_
+_BBBBB_
+_BBBBB_
+_ABBBA_
+_______
+y 2
+_______
+_C___C_
+_ABB_A_
+_B___B_
+_B___B_
+_B___B_
+_B_DEB_
+_ABBBA_
+_______
+y 3
+_______
+_______
+_ACB_A_
+_B___B_
+_.___._
+_F___._
+_B___B_
+_ABCBA_
+_______
+y 4
+_______
+GGGGGGG
+HBBBBBI
+HBBBBBI
+HBBBBBI
+HBBBBBI
+HBBBBBI
+HBBBBBI
+JJJJJJJ
+y 5
+_______
+_______
+_______
+_______
+_______
+_______
+_______
+_______
+_______
+y 6
+_______
+_______
+_______
+_______
+_______
+_______
+_______
+_______
+_______

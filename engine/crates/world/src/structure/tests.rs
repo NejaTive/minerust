@@ -1,9 +1,15 @@
+use super::cell::{AIR, Cell, NEG_X, NEG_Z, X, Z};
+use super::piece::bx;
 use super::*;
 use crate::biome::Biome;
 use crate::block::Block;
 use crate::column::WORLD_HEIGHT;
 use crate::terrain::{WATER_LEVEL, WorldType};
 use crate::trees::tree_at;
+
+mod api;
+mod dump;
+mod snapshots;
 
 const PROBE_WIDTH: i32 = 23;
 const PROBE_HEIGHT: i32 = 6;
@@ -30,18 +36,18 @@ pub(super) fn layout(
         bounds,
         facing,
         kind: PieceKind::Probe,
+        salt: 0,
     }]
 }
 
 pub(super) fn draw_probe(w: &mut PieceWriter) {
     let (width, depth) = (PROBE_WIDTH, PROBE_DEPTH);
-    w.fill_hollow(
-        IVec3::ZERO,
-        IVec3::new(width - 1, PROBE_HEIGHT - 2, depth - 1),
+    w.hollow(
+        bx(0, 0, 0, width - 1, PROBE_HEIGHT - 2, depth - 1),
         Block::Cobblestone,
-        Block::Air,
+        AIR,
     );
-    w.set(width / 2, PROBE_HEIGHT - 1, depth / 2, Block::Glowstone);
+    w.put(width / 2, PROBE_HEIGHT - 1, depth / 2, Block::Glowstone);
     for (x, z) in [
         (0, 0),
         (width - 1, 0),
@@ -113,6 +119,7 @@ fn local_corners_land_on_distinct_corners_of_the_box() {
             bounds,
             facing,
             kind: PieceKind::Probe,
+            salt: 0,
         };
         let mut column = Column::new();
         let writer = PieceWriter::new(&mut column, ColumnPos::ZERO, &piece);
@@ -149,6 +156,7 @@ fn north_piece_grows_toward_negative_z() {
         bounds,
         facing: Facing::North,
         kind: PieceKind::Probe,
+        salt: 0,
     };
     let mut column = Column::new();
     let writer = PieceWriter::new(&mut column, ColumnPos::ZERO, &piece);
@@ -163,10 +171,11 @@ fn writer_drops_everything_outside_its_column() {
         bounds,
         facing: Facing::South,
         kind: PieceKind::Probe,
+        salt: 0,
     };
     let mut column = Column::new();
     let mut writer = PieceWriter::new(&mut column, ColumnPos::ZERO, &piece);
-    writer.fill(IVec3::ZERO, IVec3::new(32, 10, 12), Block::Stone);
+    writer.fill(bx(0, 0, 0, 32, 10, 12), Block::Stone);
     assert_eq!(writer.get(40, 0, 0), Block::Air);
     let stone = |x, y, z| column.get(IVec3::new(x, y, z)) == Block::Stone;
     assert!(stone(8, 60, 8) && stone(15, 70, 15));
@@ -185,6 +194,7 @@ fn fill_down_passes_air_and_water_and_clear_up_stops_at_air() {
         bounds,
         facing: Facing::South,
         kind: PieceKind::Probe,
+        salt: 0,
     };
     let mut column = Column::new();
     for y in 0..=45 {
@@ -652,6 +662,7 @@ fn writer_piece(facing: Facing) -> Piece {
         bounds: BlockBox::new(IVec3::new(0, 20, 0), IVec3::new(7, 25, 7)),
         facing,
         kind: PieceKind::Probe,
+        salt: 0,
     }
 }
 
@@ -664,12 +675,22 @@ fn writer_places_empty_chests_furnaces_cauldrons_and_pots() {
         let front = IVec3::new(0, 0, -1);
         let (want, cells) = {
             let mut w = PieceWriter::new(&mut column, ColumnPos::ZERO, &piece);
-            w.chest(1, 1, 1, front);
-            w.double_chest(3, 1, 1, front);
-            w.furnace(5, 1, 1, front, true);
-            w.cauldron(6, 1, 1, 9);
-            w.flower_pot(6, 1, 3, Some(Block::Fern));
-            w.flower_pot(6, 1, 4, Some(Block::Stone));
+            w.put(1, 1, 1, Cell::chest(front));
+            w.put(3, 1, 1, Cell::chest_half(front, HALF_LEFT));
+            let right = [X, NEG_X, Z, NEG_Z]
+                .into_iter()
+                .find(|&dir| w.world_dir(dir) == chest::right_of(w.world_dir(front)))
+                .unwrap();
+            w.put(
+                3 + right.x,
+                1,
+                1 + right.z,
+                Cell::chest_half(front, HALF_RIGHT),
+            );
+            w.put(5, 1, 1, Block::LitFurnace.front(front));
+            w.put(6, 1, 1, Cell::cauldron(9));
+            w.put(6, 1, 3, Cell::flower_pot(Some(Block::Fern)));
+            w.put(6, 1, 4, Cell::flower_pot(Some(Block::Stone)));
             let at = |x, z| w.world(x, 1, z);
             (
                 w.world_dir(front),
@@ -988,7 +1009,7 @@ fn about_half_of_igloos_get_a_basement_of_four_to_eleven_segments() {
         let pieces = igloo::layout(&terrain, (0, 0), &mut Stream::new(seed));
         if let Some(piece) = pieces.get(1) {
             with += 1;
-            let PieceKind::IglooBasement(segments, _) = piece.kind else {
+            let PieceKind::IglooBasement(segments) = piece.kind else {
                 panic!("{:?}", piece.kind);
             };
             assert!((4..=11).contains(&segments), "{segments}");
@@ -1026,6 +1047,7 @@ fn local_boxes_invert_the_writer_mapping() {
             bounds,
             facing,
             kind: PieceKind::Probe,
+            salt: 0,
         };
         let mut column = Column::new();
         let writer = PieceWriter::new(&mut column, ColumnPos::ZERO, &piece);
@@ -1068,7 +1090,7 @@ fn igloo_columns_agree_in_any_order_and_hold_the_dome() {
 fn an_igloo_basement_is_seamless_and_complete() {
     let terrain = Terrain::new(HUT_SEED);
     let start = igloo_start(&terrain, true);
-    let PieceKind::IglooBasement(segments, _) = start.pieces[1].kind else {
+    let PieceKind::IglooBasement(segments) = start.pieces[1].kind else {
         panic!();
     };
     let keys = start_columns(&start);
@@ -1120,7 +1142,7 @@ fn the_ladder_runs_unbroken_from_the_room_to_the_hatch() {
     let basement = start.pieces[1];
     let mut scratch = Column::new();
     let writer = PieceWriter::new(&mut scratch, ColumnPos::ZERO, &basement);
-    let PieceKind::IglooBasement(segments, _) = basement.kind else {
+    let PieceKind::IglooBasement(segments) = basement.kind else {
         panic!();
     };
     let top = 3 * i32::from(segments) + 6;
