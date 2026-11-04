@@ -41,7 +41,7 @@ fn front_name(dir: IVec3) -> &'static str {
     }
 }
 
-fn place_all(piece: &Piece) -> HashMap<ColumnPos, Column> {
+fn place_all(piece: &Piece, below: i32) -> HashMap<ColumnPos, Column> {
     let b = piece.bounds;
     let (low, high) = (ColumnPos::of_block(b.min), ColumnPos::of_block(b.max));
     let mut columns = HashMap::new();
@@ -49,7 +49,7 @@ fn place_all(piece: &Piece) -> HashMap<ColumnPos, Column> {
         for x in low.x()..=high.x() {
             let key = ColumnPos::new(x, z);
             let mut column = Column::new();
-            for y in b.min.y..=b.max.y {
+            for y in b.min.y - below..=b.max.y {
                 for bz in b.min.z.max(key.origin().z)..=b.max.z.min(key.origin().z + 15) {
                     for bx in b.min.x.max(key.origin().x)..=b.max.x.min(key.origin().x + 15) {
                         column.set(IVec3::new(bx, y, bz) - key.origin(), SENTINEL);
@@ -66,13 +66,18 @@ fn place_all(piece: &Piece) -> HashMap<ColumnPos, Column> {
 
 /// Часть в формате шаблона: оси локальные, повёрнутые блоки приведены к `front` части.
 pub(super) fn dump(piece: &Piece) -> String {
-    let columns = place_all(piece);
+    dump_below(piece, 0)
+}
+
+/// Дамп с `below` слоями ниже локального нуля (слои с отрицательным `y`).
+pub(super) fn dump_below(piece: &Piece, below: i32) -> String {
+    let columns = place_all(piece, below);
     let mut scratch = Column::new();
     let probe = PieceWriter::new(&mut scratch, ColumnPos::ZERO, piece);
-    let size = local_size(piece);
+    let size = local_size(piece) + IVec3::new(0, below, 0);
     let mut symbols: Vec<(String, char)> = Vec::new();
     let mut layers = String::new();
-    for y in 0..size.y {
+    for y in -below..size.y - below {
         writeln!(layers, "y {y}").unwrap();
         for z in 0..size.z {
             for x in 0..size.x {

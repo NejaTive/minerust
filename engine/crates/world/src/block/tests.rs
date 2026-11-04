@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard(), 0)
 }
 
-const ALL: [Block; 179] = Block::ALL;
+const ALL: [Block; 182] = Block::ALL;
 
 fn is_connected_family(block: Block) -> bool {
     block as usize >= Block::OakFence as usize
@@ -51,7 +51,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(179), Err(179));
+    assert_eq!(Block::try_from(182), Err(182));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -337,6 +337,7 @@ fn only_log_torch_and_water_use_data() {
             Block::Water | Block::Lava => DataKind::Fluid,
             Block::Wool | Block::Carpet => DataKind::Color,
             Block::MonsterEgg => DataKind::Egg,
+            Block::StonePressurePlate => DataKind::Plate,
             block if block.is_slab() => DataKind::Slab,
             block if block.is_stairs() => DataKind::Stairs,
             _ => DataKind::None,
@@ -566,6 +567,7 @@ fn states_cover_every_data_kind() {
             DataKind::Bed => 128,
             DataKind::Trapdoor => 16,
             DataKind::Egg => 6,
+            DataKind::Plate => 2,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -1468,4 +1470,43 @@ fn monster_eggs_look_like_their_variant_and_each_has_an_item() {
         }),
         Some(4)
     );
+}
+
+#[test]
+fn tnt_has_its_own_top_side_and_bottom() {
+    assert!(Block::Tnt.is_solid() && Block::Tnt.is_opaque());
+    assert_eq!(Block::Tnt.tile(Facing::Top), Some(Tile::TntTop));
+    assert_eq!(Block::Tnt.tile(Facing::Side), Some(Tile::TntSide));
+    assert_eq!(Block::Tnt.tile(Facing::Bottom), Some(Tile::TntBottom));
+}
+
+#[test]
+fn blue_terracotta_joins_the_terracottas() {
+    assert!(Block::BlueTerracotta.is_terracotta() && Block::BlueTerracotta.is_solid());
+    assert_eq!(
+        Block::from_name("blue_terracotta"),
+        Some(Block::BlueTerracotta)
+    );
+    assert_eq!(
+        Block::BlueTerracotta.tile(Facing::Side),
+        Some(Tile::TerracottaBlue)
+    );
+}
+
+#[test]
+fn stone_pressure_plate_is_a_flat_box_without_collision() {
+    let plate = Block::StonePressurePlate;
+    assert!(!plate.is_solid() && plate.needs_support());
+    assert_eq!(plate.data_kind(), DataKind::Plate);
+    assert_eq!(plate.states().collect::<Vec<_>>(), [0, PLATE_POWERED]);
+    for data in [0, PLATE_POWERED] {
+        let around = |_| (Block::Air, 0);
+        let boxes = plate.boxes(data, around);
+        assert_eq!(
+            boxes.as_slice(),
+            [VoxelBox::new([1, 0, 1], [15, 1, 15])].as_slice()
+        );
+        assert!(plate.collision_boxes(data, around).is_empty());
+    }
+    assert_eq!(plate.support_dir(0), Some(IVec3::NEG_Y));
 }

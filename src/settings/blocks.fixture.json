@@ -227,5 +227,8 @@
   { "name": "black_bed", "label": "чёрная кровать", "placeable": true },
   { "name": "oak_trapdoor", "label": "люк из дуба", "placeable": true },
   { "name": "redstone_torch", "label": "факел красного камня", "placeable": true },
-  { "name": "brewing_stand", "label": "варочная стойка", "placeable": true }
+  { "name": "brewing_stand", "label": "варочная стойка", "placeable": true },
+  { "name": "tnt", "label": "динамит", "placeable": true },
+  { "name": "stone_pressure_plate", "label": "каменная нажимная плита", "placeable": true },
+  { "name": "blue_terracotta", "label": "синяя терракота", "placeable": true }
 ]

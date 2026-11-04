@@ -145,6 +145,7 @@ impl BlockBox {
 pub enum PieceKind {
     SwampHut,
     Igloo,
+    DesertTemple,
     /// Шахта и комната под иглу: число сегментов шахты.
     IglooBasement(u8),
     #[cfg(test)]
@@ -165,6 +166,7 @@ impl Piece {
         match self.kind {
             PieceKind::SwampHut => super::swamp_hut::place(writer),
             PieceKind::Igloo => super::igloo::place_top(writer),
+            PieceKind::DesertTemple => super::desert_temple::place(writer),
             PieceKind::IglooBasement(segments) => super::igloo::place_basement(writer, segments),
             #[cfg(test)]
             PieceKind::Probe => super::tests::draw_probe(writer),

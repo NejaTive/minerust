@@ -191,6 +191,9 @@ pub enum Block {
     OakTrapdoor,
     RedstoneTorch,
     BrewingStand,
+    Tnt,
+    StonePressurePlate,
+    BlueTerracotta,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -257,6 +260,7 @@ pub enum BoxKind {
     Bed,
     Trapdoor,
     BrewingStand,
+    Plate,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -284,7 +288,11 @@ pub enum DataKind {
     Bed,
     Trapdoor,
     Egg,
+    Plate,
 }
+
+pub const PLATE_POWERED: u8 = 1;
+const PLATE_INSET: u8 = 1;
 
 pub const SPAWNER_PIG: u8 = 0;
 pub const SPAWNER_SKELETON: u8 = 1;
@@ -765,7 +773,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 179] = [
+pub const BLOCKS: [BlockDef; 182] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -1614,6 +1622,23 @@ pub const BLOCKS: [BlockDef; 179] = [
             Tile::BrewingStand,
         )
     },
+    BlockDef {
+        top: Some(Tile::TntTop),
+        bottom: Some(Tile::TntBottom),
+        ..BlockDef::uniform("tnt", "динамит", Tile::TntSide)
+    },
+    BlockDef {
+        solid: false,
+        needs_support: true,
+        ..BlockDef::open_boxed(
+            "stone_pressure_plate",
+            "каменная нажимная плита",
+            BoxKind::Plate,
+            DataKind::Plate,
+            Tile::Stone,
+        )
+    },
+    BlockDef::uniform("blue_terracotta", "синяя терракота", Tile::TerracottaBlue),
 ];
 
 mod shapes;
@@ -1621,7 +1646,7 @@ mod shapes;
 pub use shapes::{CAULDRON_LEVELS, POT_PLANTS};
 
 impl Block {
-    pub const ALL: [Block; 179] = [
+    pub const ALL: [Block; 182] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -1801,6 +1826,9 @@ impl Block {
         Block::OakTrapdoor,
         Block::RedstoneTorch,
         Block::BrewingStand,
+        Block::Tnt,
+        Block::StonePressurePlate,
+        Block::BlueTerracotta,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -1961,6 +1989,10 @@ impl Block {
             BoxKind::Bed => Self::bed_boxes(data),
             BoxKind::Trapdoor => Self::trapdoor_boxes(data),
             BoxKind::BrewingStand => Self::brewing_stand_boxes(),
+            BoxKind::Plate => unit(
+                [PLATE_INSET, 0, PLATE_INSET],
+                [16 - PLATE_INSET, 1, 16 - PLATE_INSET],
+            ),
             BoxKind::Carpet => unit([0, 0, 0], [16, CARPET_UNITS, 16]),
             BoxKind::Slab => match data {
                 SLAB_DOUBLE => BoxList::of(&[VoxelBox::FULL]),
@@ -2127,6 +2159,7 @@ impl Block {
             | DataKind::Bed
             | DataKind::Trapdoor
             | DataKind::Egg
+            | DataKind::Plate
             | DataKind::Rail => Some(0),
             DataKind::Ladder => match normal {
                 IVec3::X | IVec3::NEG_X | IVec3::Z | IVec3::NEG_Z => Some(facing_code(normal)),
@@ -2200,6 +2233,7 @@ impl Block {
             ],
             DataKind::Bed => &BED_STATES,
             DataKind::Egg => &[0, 1, 2, 3, 4, 5],
+            DataKind::Plate => &[0, PLATE_POWERED],
             DataKind::Trapdoor => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
@@ -2252,6 +2286,7 @@ impl Block {
                 | Block::BrownTerracotta
                 | Block::RedTerracotta
                 | Block::SilverTerracotta
+                | Block::BlueTerracotta
         )
     }
 
