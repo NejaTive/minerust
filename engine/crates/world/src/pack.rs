@@ -46,6 +46,14 @@ const ENTITY_RABBIT: [&str; 6] = [
     "assets/minecraft/textures/entity/rabbit/gold.png",
     "assets/minecraft/textures/entity/rabbit/salt.png",
 ];
+const ENTITY_PARROT: [&str; 5] = [
+    "assets/minecraft/textures/entity/parrot/parrot_red_blue.png",
+    "assets/minecraft/textures/entity/parrot/parrot_blue.png",
+    "assets/minecraft/textures/entity/parrot/parrot_green.png",
+    "assets/minecraft/textures/entity/parrot/parrot_yellow_blue.png",
+    "assets/minecraft/textures/entity/parrot/parrot_grey.png",
+];
+const ENTITY_SQUID: &str = "assets/minecraft/textures/entity/squid.png";
 const ENTITY_OCELOT: &str = "assets/minecraft/textures/entity/cat/ocelot.png";
 const ENTITY_SHEEP: &str = "assets/minecraft/textures/entity/sheep/sheep.png";
 const ENTITY_SHEEP_FUR: &str = "assets/minecraft/textures/entity/sheep/sheep_fur.png";
@@ -108,6 +116,9 @@ pub struct EntityImages {
     /// Листы кролика в порядке окрасов: бурый, белый, чёрный, белый пятнистый, золотой, соль с перцем.
     pub rabbit: [DecodedImage; 6],
     pub ocelot: DecodedImage,
+    /// Листы попугая в порядке окрасов: красно-синий, синий, зелёный, жёлто-синий, серый; лист квадратный (32×32 в сетке модели).
+    pub parrot: [DecodedImage; 5],
+    pub squid: DecodedImage,
     /// Квадратная блочная текстура гриба для скрещённых плоскостей на спине грибной коровы.
     pub mushroom_red: DecodedImage,
     pub spawn_egg: DecodedImage,
@@ -322,6 +333,8 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
     let llama = ENTITY_LLAMA.map(|path| image(path, |i| i.width >= 128 && i.width == 2 * i.height));
     let rabbit = ENTITY_RABBIT.map(|path| image(path, sheet));
     let ocelot = image(ENTITY_OCELOT, sheet);
+    let parrot = ENTITY_PARROT.map(|path| image(path, |i| i.width >= 64 && i.width == i.height));
+    let squid = image(ENTITY_SQUID, sheet);
     let mushroom_red = image(BLOCK_MUSHROOM_RED, |i| {
         i.width >= MIN_TILE_SIZE && i.width == i.height
     });
@@ -346,6 +359,8 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
         llama,
         rabbit,
         ocelot,
+        parrot,
+        squid,
         mushroom_red,
         spawn_egg,
         spawn_egg_overlay,
@@ -731,6 +746,48 @@ const BUILTIN_ENTITIES: &[(&str, &[u8])] = &[
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/assets/textures/entity/cat/ocelot.png"
+        )),
+    ),
+    (
+        ENTITY_PARROT[0],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/parrot/parrot_red_blue.png"
+        )),
+    ),
+    (
+        ENTITY_PARROT[1],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/parrot/parrot_blue.png"
+        )),
+    ),
+    (
+        ENTITY_PARROT[2],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/parrot/parrot_green.png"
+        )),
+    ),
+    (
+        ENTITY_PARROT[3],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/parrot/parrot_yellow_blue.png"
+        )),
+    ),
+    (
+        ENTITY_PARROT[4],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/parrot/parrot_grey.png"
+        )),
+    ),
+    (
+        ENTITY_SQUID,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/squid.png"
         )),
     ),
     (

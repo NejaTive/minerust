@@ -1,7 +1,7 @@
 use super::*;
 use world::mob::{
-    RABBIT_BLACK, RABBIT_BROWN, RABBIT_GOLD, RABBIT_SALT, RABBIT_SPLOTCHED, RABBIT_WHITE,
-    horse_colour, horse_markings,
+    PARROT_COLOURS, RABBIT_BLACK, RABBIT_BROWN, RABBIT_GOLD, RABBIT_SALT, RABBIT_SPLOTCHED,
+    RABBIT_WHITE, horse_colour, horse_markings,
 };
 
 fn kinds(biome: Biome) -> Vec<(MobKind, u32, u32, u32)> {
@@ -216,7 +216,7 @@ fn flower_forest_has_rabbits_but_no_wolves() {
 }
 
 #[test]
-fn jungles_add_extra_chickens_and_ocelots() {
+fn jungles_add_extra_chickens_ocelots_and_parrots() {
     for biome in [
         Biome::Jungle,
         Biome::JungleHills,
@@ -226,7 +226,11 @@ fn jungles_add_extra_chickens_and_ocelots() {
     ] {
         assert_eq!(
             kinds(biome),
-            with(&[(MobKind::Chicken, 10, 4, 4), (MobKind::Ocelot, 2, 1, 1)]),
+            with(&[
+                (MobKind::Chicken, 10, 4, 4),
+                (MobKind::Ocelot, 2, 1, 1),
+                (MobKind::Parrot, 40, 1, 2)
+            ]),
             "{biome:?}"
         );
     }
@@ -267,4 +271,52 @@ fn rabbit_group_keeps_one_colour() {
         let colour = group_colour(&mut rng, MobKind::Rabbit, Biome::Forest);
         assert!((0..6).all(|_| variant_in_group(&mut rng, MobKind::Rabbit, colour) == colour));
     }
+}
+
+#[test]
+fn every_biome_has_squid_as_its_only_water_creature() {
+    for biome in [
+        Biome::Ocean,
+        Biome::DeepOcean,
+        Biome::River,
+        Biome::Plains,
+        Biome::Desert,
+        Biome::Jungle,
+        Biome::IcePlains,
+    ] {
+        let list: Vec<_> = water_creatures(biome)
+            .iter()
+            .map(|e| (e.kind, e.weight, e.min, e.max))
+            .collect();
+        assert_eq!(list, [(MobKind::Squid, 10, 4, 4)], "{biome:?}");
+    }
+}
+
+#[test]
+fn water_creatures_have_their_own_category_and_cap() {
+    assert_eq!(category(MobKind::Squid), Category::Water);
+    for kind in MobKind::ALL
+        .into_iter()
+        .filter(|&kind| kind != MobKind::Squid)
+    {
+        assert_eq!(category(kind), Category::Creature, "{kind:?}");
+    }
+    assert_eq!(cap(CAP_COLUMNS), 10);
+    assert_eq!(water_cap(CAP_COLUMNS), 5);
+    assert_eq!(water_cap(CAP_COLUMNS - 1), 4);
+}
+
+#[test]
+fn each_parrot_has_its_own_plumage() {
+    let mut rng = Rng::new(3);
+    let colour = group_colour(&mut rng, MobKind::Parrot, Biome::Jungle);
+    let seen: std::collections::HashSet<u8> = (0..200)
+        .map(|_| variant_in_group(&mut rng, MobKind::Parrot, colour))
+        .collect();
+    assert_eq!(seen, (0..PARROT_COLOURS).collect());
+    let eggs: std::collections::HashSet<u8> = (0..200)
+        .map(|_| random_variant(&mut rng, MobKind::Parrot, Biome::Plains))
+        .collect();
+    assert_eq!(eggs.len(), usize::from(PARROT_COLOURS));
+    assert_eq!(random_variant(&mut rng, MobKind::Squid, Biome::Ocean), 0);
 }

@@ -488,3 +488,12 @@ fn builtin_rabbit_and_ocelot_sheets_are_two_to_one() {
         assert!(sheet.width >= 128 && sheet.width == 2 * sheet.height);
     }
 }
+
+#[test]
+fn builtin_parrot_and_squid_sheets_have_the_model_shape() {
+    let entities = builtin_entities();
+    for sheet in &entities.parrot {
+        assert!(sheet.width >= 64 && sheet.width == sheet.height);
+    }
+    assert!(entities.squid.width >= 128 && entities.squid.width == 2 * entities.squid.height);
+}

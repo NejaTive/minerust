@@ -14,6 +14,9 @@ fn instance() -> MobInstance {
         flap_phase: 0.0,
         flap_amount: 0.0,
         hop: 0.0,
+        pitch: 0.0,
+        tentacle: 0.0,
+        spin: 0.0,
         sky_level: 15.0,
         block_level: 0.0,
         shadow_radius: 0.7,
@@ -27,7 +30,7 @@ fn instance() -> MobInstance {
 }
 
 fn sheets(instance: &MobInstance) -> MobVertices {
-    let mut out = MobVertices::default();
+    let mut out = empty_vertices();
     push_mob(instance, &mut out);
     out
 }
@@ -194,6 +197,8 @@ fn models_have_the_minecraft_box_counts() {
     assert_eq!(count(ModelKind::Llama), 9);
     assert_eq!(count(ModelKind::Rabbit), 12);
     assert_eq!(count(ModelKind::Ocelot), 11);
+    assert_eq!(count(ModelKind::Parrot), 11);
+    assert_eq!(count(ModelKind::Squid), 9);
 }
 
 #[test]
@@ -212,6 +217,8 @@ fn each_model_draws_from_its_own_sheets() {
         (ModelKind::Llama, EntityTexture::LlamaCreamy, 9),
         (ModelKind::Rabbit, EntityTexture::RabbitBrown, 12),
         (ModelKind::Ocelot, EntityTexture::Ocelot, 11),
+        (ModelKind::Parrot, EntityTexture::ParrotRedBlue, 11),
+        (ModelKind::Squid, EntityTexture::Squid, 9),
     ] {
         let model = of_kind(kind);
         assert_eq!(boxes_on(&model, sheet), boxes, "{kind:?} {sheet:?}");
@@ -672,4 +679,90 @@ fn ocelot_walk_moves_legs_and_it_stands_on_the_ground() {
     let (lo, hi) = bounds(&still);
     assert!((lo.y - 64.0).abs() < 0.05);
     assert!(hi.y - lo.y < 1.0);
+}
+
+#[test]
+fn parrot_variant_picks_the_sheet() {
+    for variant in 0..5u8 {
+        let parrot = MobInstance {
+            variant,
+            ..of_kind(ModelKind::Parrot)
+        };
+        let sheet =
+            EntityTexture::ALL[EntityTexture::ParrotRedBlue as usize + usize::from(variant)];
+        assert_eq!(boxes_on(&parrot, sheet), 11);
+    }
+}
+
+#[test]
+fn parrot_and_squid_sheets_use_the_vanilla_grid() {
+    assert_eq!(EntityTexture::ParrotGrey.units(), Vec2::new(32.0, 32.0));
+    assert_eq!(EntityTexture::Squid.units(), Vec2::new(64.0, 32.0));
+}
+
+#[test]
+fn parrot_and_squid_stay_on_their_sheets() {
+    for kind in [ModelKind::Parrot, ModelKind::Squid] {
+        for v in vertices(&of_kind(kind)) {
+            assert!(
+                (0.0..=1.0).contains(&v[3]) && (0.0..=1.0).contains(&v[4]),
+                "{kind:?} {v:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn parrot_stands_on_its_feet_within_its_hitbox() {
+    let parrot = of_kind(ModelKind::Parrot);
+    let (lo, hi) = bounds(&parrot);
+    assert!((lo.y - parrot.feet.y).abs() < 0.05, "{lo}");
+    assert!(hi.y - lo.y > 0.6 && hi.y - lo.y < 1.0, "{hi}");
+    assert!(hi.x - lo.x < 0.8 && hi.z - lo.z < 0.8);
+}
+
+#[test]
+fn parrot_flaps_wings_and_tucks_legs_in_the_air() {
+    let flying = |phase: f32| MobInstance {
+        flap_amount: 1.0,
+        flap_phase: phase,
+        ..of_kind(ModelKind::Parrot)
+    };
+    let standing = of_kind(ModelKind::Parrot);
+    assert_ne!(vertices(&standing), vertices(&flying(0.0)));
+    assert_ne!(vertices(&flying(0.0)), vertices(&flying(FRAC_PI_2)));
+    let width = |instance: &MobInstance| {
+        let (lo, hi) = bounds(instance);
+        hi.z - lo.z
+    };
+    assert!(width(&flying(FRAC_PI_2)) > width(&standing));
+}
+
+#[test]
+fn squid_tentacles_hang_below_the_body_and_trail_when_swimming() {
+    let still = of_kind(ModelKind::Squid);
+    let (lo, hi) = bounds(&still);
+    assert!(lo.y < still.feet.y - 1.0 && hi.y > still.feet.y);
+    assert!(hi.x - lo.x < 1.0 && hi.z - lo.z < 1.0);
+    let swimming = MobInstance {
+        pitch: FRAC_PI_2,
+        ..of_kind(ModelKind::Squid)
+    };
+    let (lo, hi) = bounds(&swimming);
+    assert!(hi.y - lo.y < 1.2, "{lo} {hi}");
+    assert!(lo.x < swimming.feet.x - 0.9 && hi.x < swimming.feet.x + 0.6);
+}
+
+#[test]
+fn squid_tentacles_spread_and_squeeze_with_the_swing() {
+    let at = |tentacle: f32| MobInstance {
+        tentacle,
+        ..of_kind(ModelKind::Squid)
+    };
+    assert_ne!(vertices(&at(0.0)), vertices(&at(0.7)));
+    let reach = |instance: &MobInstance| {
+        let (lo, hi) = bounds(instance);
+        hi.x - lo.x
+    };
+    assert!(reach(&at(0.7)) > reach(&at(0.0)));
 }

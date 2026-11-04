@@ -1,5 +1,5 @@
 use super::*;
-use crate::mob::{RABBIT_COLOURS, horse_variant};
+use crate::mob::{PARROT_COLOURS, RABBIT_COLOURS, horse_variant};
 use crate::pos::ColumnPos;
 use crate::terrain::Terrain;
 
@@ -366,4 +366,25 @@ fn rabbit_variant_survives_the_save() {
     let variants: Vec<u8> = decoded.mobs.iter().map(|mob| mob.variant).collect();
     assert_eq!(variants, (0..RABBIT_COLOURS).collect::<Vec<_>>());
     assert!(decoded.mobs.iter().all(|mob| mob.kind == MobKind::Rabbit));
+}
+
+#[test]
+fn parrot_plumage_and_squid_survive_the_save() {
+    let mut column = Column::new();
+    column.mobs = (0..PARROT_COLOURS)
+        .map(|variant| MobRecord {
+            kind: MobKind::Parrot,
+            pos: glam::Vec3::new(1.5, 70.0, 2.5),
+            yaw: 0.5,
+            variant,
+        })
+        .chain([MobRecord {
+            kind: MobKind::Squid,
+            pos: glam::Vec3::new(3.5, 50.0, 4.5),
+            yaw: 1.0,
+            variant: 0,
+        }])
+        .collect();
+    let decoded = decode_column(&encode_column(&column)).expect("decodes");
+    assert_eq!(decoded.mobs, column.mobs);
 }

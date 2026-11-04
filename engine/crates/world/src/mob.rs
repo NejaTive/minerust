@@ -15,10 +15,12 @@ pub enum MobKind {
     Llama,
     Rabbit,
     Ocelot,
+    Parrot,
+    Squid,
 }
 
 impl MobKind {
-    pub const ALL: [MobKind; 12] = [
+    pub const ALL: [MobKind; 14] = [
         MobKind::Pig,
         MobKind::Chicken,
         MobKind::Cow,
@@ -31,6 +33,8 @@ impl MobKind {
         MobKind::Llama,
         MobKind::Rabbit,
         MobKind::Ocelot,
+        MobKind::Parrot,
+        MobKind::Squid,
     ];
 }
 
@@ -56,6 +60,8 @@ pub struct MobRecord {
 pub const HORSE_COLOURS: u8 = 7;
 pub const HORSE_MARKINGS: u8 = 5;
 pub const LLAMA_COLOURS: u8 = 4;
+
+pub const PARROT_COLOURS: u8 = 5;
 
 pub const RABBIT_BROWN: u8 = 0;
 pub const RABBIT_WHITE: u8 = 1;
