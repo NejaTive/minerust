@@ -23,6 +23,8 @@ const MUSHROOM_TALL_ONE_IN: u32 = 12;
 const JUNGLE_BIG_OAK_FOOTPRINT: i32 = 3;
 const MEGA_TAIGA_PERCENT: u32 = 33;
 const MEGA_SPRUCE_ONE_IN: u32 = 13;
+const PINE_ONE_IN: u32 = 3;
+const HILLS_SPRUCE_OF: u32 = 3;
 const PODZOL_SPOTS: [(i32, i32); 4] = [(-1, -1), (2, -1), (-1, 2), (2, 2)];
 const PODZOL_RING: i32 = 8;
 const PODZOL_EXTRA_SPOTS: u32 = 5;
@@ -35,6 +37,7 @@ pub enum TreeKind {
     Oak,
     Birch,
     Spruce,
+    Pine,
     BigOak,
     JungleTree,
     MegaJungle,
@@ -54,7 +57,9 @@ impl TreeKind {
         match self {
             TreeKind::Oak | TreeKind::BigOak | TreeKind::SwampOak => Block::Log,
             TreeKind::Birch | TreeKind::TallBirch => Block::BirchLog,
-            TreeKind::Spruce | TreeKind::MegaPine | TreeKind::MegaSpruce => Block::SpruceLog,
+            TreeKind::Spruce | TreeKind::Pine | TreeKind::MegaPine | TreeKind::MegaSpruce => {
+                Block::SpruceLog
+            }
             TreeKind::JungleTree | TreeKind::MegaJungle | TreeKind::Shrub => Block::JungleLog,
             TreeKind::Acacia => Block::AcaciaLog,
             TreeKind::DarkOak => Block::DarkOakLog,
@@ -68,7 +73,9 @@ impl TreeKind {
                 Block::Leaves
             }
             TreeKind::Birch | TreeKind::TallBirch => Block::BirchLeaves,
-            TreeKind::Spruce | TreeKind::MegaPine | TreeKind::MegaSpruce => Block::SpruceLeaves,
+            TreeKind::Spruce | TreeKind::Pine | TreeKind::MegaPine | TreeKind::MegaSpruce => {
+                Block::SpruceLeaves
+            }
             TreeKind::JungleTree | TreeKind::MegaJungle => Block::JungleLeaves,
             TreeKind::Acacia => Block::AcaciaLeaves,
             TreeKind::DarkOak => Block::DarkOakLeaves,
@@ -90,7 +97,8 @@ impl TreeKind {
             TreeKind::Birch => (5, 7),
             TreeKind::TallBirch => (5, 13),
             TreeKind::MegaPine | TreeKind::MegaSpruce => (13, 29),
-            TreeKind::Spruce => (7, 10),
+            TreeKind::Spruce => (6, 9),
+            TreeKind::Pine => (7, 11),
             TreeKind::BigOak => (6, 9),
             TreeKind::JungleTree => (4, 10),
             TreeKind::MegaJungle => (10, 31),
@@ -176,6 +184,8 @@ impl Tree {
             TreeKind::BrownMushroom => shapes::mushroom(self.base, self.height, false),
             TreeKind::RedMushroom => shapes::mushroom(self.base, self.height, true),
             TreeKind::SwampOak => shapes::swamp_oak(self.base, self.height, self.shape),
+            TreeKind::Spruce => shapes::taiga_spruce(self.base, self.height, self.shape),
+            TreeKind::Pine => shapes::taiga_pine(self.base, self.height, self.shape),
             TreeKind::MegaPine => shapes::mega_pine(self.base, self.height, self.shape, false),
             TreeKind::MegaSpruce => shapes::mega_pine(self.base, self.height, self.shape, true),
             _ => return None,
@@ -227,7 +237,6 @@ impl Tree {
         }
         match self.kind {
             TreeKind::Oak | TreeKind::Birch | TreeKind::TallBirch => self.round_crown(),
-            TreeKind::Spruce => self.cone_crown(),
             _ => self.big_crown(),
         }
     }
@@ -317,29 +326,6 @@ impl Tree {
                 }
             }
         }
-        leaves
-    }
-
-    fn spruce_layers(&self) -> impl Iterator<Item = (i32, i32)> {
-        let (top, floor) = (self.top(), self.base.y + 2);
-        (0..)
-            .map(move |i| (top - 2 * i, (1 + (i + 1) / 2).min(3)))
-            .take_while(move |&(y, _)| y >= floor)
-    }
-
-    fn cone_crown(&self) -> Vec<IVec3> {
-        let mut leaves = Vec::new();
-        for (y, r) in self.spruce_layers() {
-            for dz in -r..=r {
-                for dx in -r..=r {
-                    if dx.abs() + dz.abs() <= r + r / 2 {
-                        leaves.push(IVec3::new(self.base.x + dx, y, self.base.z + dz));
-                    }
-                }
-            }
-        }
-        let caps = 1 + (self.shape & 1) as i32;
-        leaves.extend((1..=caps).map(|dy| IVec3::new(self.base.x, self.top() + dy, self.base.z)));
         leaves
     }
 
@@ -592,8 +578,21 @@ fn pick_kind(biome: Biome, bits: u32) -> TreeKind {
             TreeKind::MegaSpruce
         }
         Taiga | TaigaHills | TaigaM | ColdTaiga | ColdTaigaHills | ColdTaigaM | MegaTaiga
-        | MegaTaigaHills | MegaSpruceTaiga | MegaSpruceTaigaHills | ExtremeHillsPlus
-        | ExtremeHillsPlusM | IcePlains | IceMountains | IceSpikes => TreeKind::Spruce,
+        | MegaTaigaHills | MegaSpruceTaiga | MegaSpruceTaigaHills => {
+            if (bits >> 2).is_multiple_of(PINE_ONE_IN) {
+                TreeKind::Pine
+            } else {
+                TreeKind::Spruce
+            }
+        }
+        ExtremeHillsPlus | ExtremeHillsPlusM => {
+            if (bits >> 2) % HILLS_SPRUCE_OF == HILLS_SPRUCE_OF - 1 {
+                TreeKind::Oak
+            } else {
+                TreeKind::Spruce
+            }
+        }
+        IcePlains | IceMountains | IceSpikes => TreeKind::Spruce,
         Swampland | SwamplandM => TreeKind::SwampOak,
         MushroomIsland => {
             if bits & 1 == 0 {

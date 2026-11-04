@@ -62,6 +62,7 @@ fn every_kind_grows() {
         TreeKind::Oak,
         TreeKind::Birch,
         TreeKind::Spruce,
+        TreeKind::Pine,
         TreeKind::BigOak,
     ] {
         assert!(of_kind(kind).count() > 50, "{kind:?}");
@@ -80,8 +81,15 @@ fn trees_stand_on_the_surface_with_a_vertical_trunk() {
         if tree.kind.wide_trunk() || matches!(tree.kind, TreeKind::MegaJungle | TreeKind::Acacia) {
             continue;
         }
-        let trunk: Vec<_> = tree.logs().into_iter().take(tree.height as usize).collect();
-        assert_eq!(trunk.len(), tree.height as usize);
+        let all = tree.logs();
+        let tapered = matches!(tree.kind, TreeKind::Spruce | TreeKind::Pine);
+        let len = if tapered {
+            all.len()
+        } else {
+            tree.height as usize
+        };
+        assert!(all.len() >= len && len + 2 >= tree.height as usize);
+        let trunk: Vec<_> = all.into_iter().take(len).collect();
         for (dy, (pos, axis)) in trunk.into_iter().enumerate() {
             assert_eq!((pos, axis), (tree.base + IVec3::Y * dy as i32, AXIS_Y));
         }
@@ -124,36 +132,73 @@ fn birch_is_taller_with_a_narrower_crown() {
     assert_eq!(heights, HashSet::from([5, 6, 7]));
 }
 
-#[test]
-fn spruce_is_a_cone_of_layers_with_gaps() {
-    for tree in of_kind(TreeKind::Spruce) {
-        assert!((7..=10).contains(&tree.height));
-        assert!(tree.branches().is_empty());
-        let leaves = tree.leaves();
-        let radius_at = |y: i32| {
+fn radii_by_layer(tree: &Tree) -> Vec<(i32, i32)> {
+    let leaves = tree.leaves();
+    (tree.base.y..=tree.base.y + tree.height)
+        .filter_map(|y| {
             leaves
                 .iter()
                 .filter(|l| l.y == y)
                 .map(|l| (l.x - tree.base.x).abs().max((l.z - tree.base.z).abs()))
                 .max()
-        };
-        let top = tree.top();
-        let caps = leaves.iter().filter(|l| l.y > top).count();
-        assert!((1..=2).contains(&caps), "{caps} cap blocks");
-        assert!(leaves.contains(&IVec3::new(tree.base.x, top + 1, tree.base.z)));
-        let layers: Vec<i32> = (tree.base.y..=top)
-            .filter(|&y| radius_at(y).is_some())
-            .collect();
-        assert_eq!(layers.last(), Some(&top));
-        assert!(layers.windows(2).all(|w| w[1] - w[0] >= 2), "{layers:?}");
-        assert!(layers.iter().all(|&y| y >= tree.base.y + 2));
-        let radii: Vec<i32> = layers.iter().map(|&y| radius_at(y).unwrap()).collect();
-        assert!(radii.windows(2).all(|w| w[0] >= w[1]), "{radii:?}");
-        assert_eq!(radii.last(), Some(&1));
-        assert!((2..=3).contains(&radii[0]), "{radii:?}");
+                .map(|r| (y, r))
+        })
+        .collect()
+}
+
+#[test]
+fn taiga_spruce_is_stacked_cone_tiers_down_to_a_short_bare_trunk() {
+    let mut widest = HashSet::new();
+    for tree in of_kind(TreeKind::Spruce) {
+        assert!((6..=9).contains(&tree.height));
+        assert!(tree.branches().is_empty());
+        let layers = radii_by_layer(tree);
+        let top = tree.base.y + tree.height;
+        assert_eq!(
+            layers.first().map(|l| l.0),
+            Some(top - (layers.len() as i32 - 1))
+        );
+        assert_eq!(layers.last().map(|l| l.0), Some(top));
+        assert!(layers.len() as i32 >= tree.height - 1, "{layers:?}");
+        assert!(layers[0].0 <= tree.base.y + 2, "{layers:?}");
+        assert!(layers.last().is_some_and(|l| l.1 <= 1));
+        assert!(layers.iter().all(|l| l.1 <= 3));
+        assert!(tree.logs().len() as i32 >= tree.height - 2);
+        widest.insert(layers.iter().map(|l| l.1).max().unwrap());
     }
-    let bottoms: HashSet<i32> = of_kind(TreeKind::Spruce).map(spread).collect();
-    assert_eq!(bottoms, HashSet::from([2, 3]));
+    assert_eq!(widest, HashSet::from([2, 3]));
+}
+
+#[test]
+fn taiga_pine_is_a_tall_bare_trunk_with_a_narrow_top() {
+    let mut widest = HashSet::new();
+    for tree in of_kind(TreeKind::Pine) {
+        assert!((7..=11).contains(&tree.height));
+        assert_eq!(tree.logs().len() as i32, tree.height - 1);
+        let layers = radii_by_layer(tree);
+        let top = tree.base.y + tree.height;
+        assert_eq!(layers.last(), Some(&(top, 0)));
+        let bare = tree.base.y + tree.height - 5;
+        assert!(layers.iter().all(|l| l.0 >= bare), "{layers:?}");
+        assert!(layers.len() as i32 >= 4);
+        widest.insert(layers.iter().map(|l| l.1).max().unwrap());
+    }
+    assert!(widest.iter().all(|r| (1..=5).contains(r)), "{widest:?}");
+    assert!(widest.len() >= 3, "{widest:?}");
+}
+
+#[test]
+fn taiga_tree_corners_are_cut_only_at_nonzero_radius() {
+    for tree in of_kind(TreeKind::Pine)
+        .chain(of_kind(TreeKind::Spruce))
+        .take(200)
+    {
+        let leaves: HashSet<IVec3> = tree.leaves().into_iter().collect();
+        for (y, r) in radii_by_layer(tree) {
+            let corner = IVec3::new(tree.base.x + r, y, tree.base.z + r);
+            assert_eq!(leaves.contains(&corner), r == 0, "layer {y} radius {r}");
+        }
+    }
 }
 
 #[test]
@@ -295,7 +340,28 @@ fn spruce_grows_only_in_taiga_like_biomes() {
 fn taiga_grows_only_spruce() {
     let taiga = trees_in(Biome::Taiga);
     assert!(taiga.len() > 100, "{} taiga trees", taiga.len());
-    assert!(taiga.iter().all(|t| t.kind == TreeKind::Spruce));
+    assert!(
+        taiga
+            .iter()
+            .all(|t| matches!(t.kind, TreeKind::Spruce | TreeKind::Pine))
+    );
+    let pines =
+        taiga.iter().filter(|t| t.kind == TreeKind::Pine).count() as f32 / taiga.len() as f32;
+    assert!((0.28..0.39).contains(&pines), "pine share {pines}");
+}
+
+#[test]
+fn extreme_hills_plus_mixes_two_thirds_spruce_with_oak() {
+    let hills = trees_in(Biome::ExtremeHillsPlus);
+    assert!(hills.len() > 40, "{} trees", hills.len());
+    assert!(
+        hills
+            .iter()
+            .all(|t| matches!(t.kind, TreeKind::Spruce | TreeKind::Oak))
+    );
+    let spruce =
+        hills.iter().filter(|t| t.kind == TreeKind::Spruce).count() as f32 / hills.len() as f32;
+    assert!((0.6..0.73).contains(&spruce), "spruce share {spruce}");
 }
 
 #[test]
@@ -1035,7 +1101,7 @@ fn mega_taiga_mixes_mega_pines_with_ordinary_spruces() {
     let trees = trees_of_biome(Biome::MegaTaiga, 80);
     let pines = share_of(&trees, TreeKind::MegaPine);
     let spruces = share_of(&trees, TreeKind::MegaSpruce);
-    let ordinary = share_of(&trees, TreeKind::Spruce);
+    let ordinary = share_of(&trees, TreeKind::Spruce) + share_of(&trees, TreeKind::Pine);
     assert!(
         pines > 5 && ordinary > pines,
         "{pines} pines, {ordinary} spruces"

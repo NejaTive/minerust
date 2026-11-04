@@ -1,22 +1,27 @@
+use glam::IVec3;
+
 use crate::block::Block;
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
+use crate::stream::Stream;
 use crate::terrain::{Biome, Terrain, WATER_LEVEL, WorldType};
 use crate::trees::hash;
 
-const GRASS_DENSITY: f32 = 0.12;
-const FLOWER_DENSITY: f32 = 0.01;
-const MAX_GRASS_SCALE: f32 = 2.0;
-const MAX_FLOWER_SCALE: f32 = 12.0;
-const FLOWER_FOREST_SCALE: f32 = 12.0;
+const SALT_PLANTS: u64 = 11;
+const SKY_REACH: u32 = 32;
+const FLOWER_TRIES: u32 = 64;
+const GRASS_TRIES: u32 = 128;
+const SPREAD: u32 = 8;
+const VERTICAL_SPREAD: u32 = 4;
+const CENTER: i32 = 8;
 const TULIP_NOISE_SCALE: f32 = 200.0;
 const TULIP_BELOW: f32 = -0.55;
 const FLOWER_FOREST_NOISE_SCALE: f32 = 48.0;
-const SWAMP_FLOWER_SCALE: f32 = 1.0;
-const FERN_ONE_IN_JUNGLE: u32 = 4;
 const FERN_IN_TAIGA: u32 = 4;
-const FERN_OUT_OF_TAIGA: u32 = 5;
+const FERN_OF_TAIGA: u32 = 5;
+const FERN_ONE_IN_JUNGLE: u32 = 4;
+const DANDELION_ONE_IN_THREE: u32 = 3;
 const FLOWER_FOREST_PICKS: [Block; 10] = [
     Block::Dandelion,
     Block::Poppy,
@@ -37,58 +42,48 @@ const PLAINS_TULIPS: [Block; 4] = [
 ];
 const PLAINS_DAISIES: [Block; 3] = [Block::Poppy, Block::Houstonia, Block::OxeyeDaisy];
 
-const SALT_PLANT: u64 = 11;
-const SALT_KIND: u64 = 12;
-const SALT_FERN: u64 = 13;
-
-fn plant_at(terrain: &Terrain, x: i32, z: i32) -> Option<Block> {
-    if terrain.world_type() != WorldType::Standard {
-        return None;
-    }
-    let roll = (hash(terrain.seed(), x, z, SALT_PLANT) >> 8) as f32 / (1 << 24) as f32;
-    if roll >= GRASS_DENSITY * MAX_GRASS_SCALE + FLOWER_DENSITY * MAX_FLOWER_SCALE {
-        return None;
-    }
-    let biome = terrain.biome_at(x, z);
-    let flowers = FLOWER_DENSITY * flower_scale(biome);
-    if roll < flowers {
-        return Some(flower_at(terrain, biome, x, z));
-    }
-    (roll - flowers < GRASS_DENSITY * grass_scale(biome)).then(|| grass_at(biome, x, z, terrain))
+pub(crate) struct Attempts {
+    pub flowers: u32,
+    pub grass: u32,
 }
 
-fn grass_at(biome: Biome, x: i32, z: i32, terrain: &Terrain) -> Block {
-    let pick = hash(terrain.seed(), x, z, SALT_FERN);
-    let fern = if biome.is_taiga() {
-        pick % FERN_OUT_OF_TAIGA < FERN_IN_TAIGA
-    } else if biome.is_jungle() {
-        pick.is_multiple_of(FERN_ONE_IN_JUNGLE)
-    } else {
-        false
+/// `flowersPerChunk` и `grassPerChunk` из `BiomeDecorator` и биомов 1.12.
+pub(crate) fn attempts(biome: Biome) -> Attempts {
+    use Biome::*;
+    let (flowers, grass) = match biome {
+        _ if biome.is_mushroom_island() || biome.is_desert() => (0, 0),
+        _ if biome.is_mesa() => (0, 1),
+        FlowerForest => (100, 2),
+        _ if biome.is_forest() => (2, 2),
+        Plains | SunflowerPlains => (4, 10),
+        Savanna | SavannaM | SavannaPlateau | SavannaPlateauM => (4, 20),
+        _ if biome.is_swamp() => (1, 5),
+        _ if biome.is_jungle() => (4, 25),
+        _ if biome.is_mega_taiga() => (2, 7),
+        _ => (2, 1),
     };
-    if fern { Block::Fern } else { Block::TallGrass }
+    Attempts { flowers, grass }
 }
 
-fn flower_at(terrain: &Terrain, biome: Biome, x: i32, z: i32) -> Block {
-    let pick = hash(terrain.seed(), x, z, SALT_KIND);
+fn pick_flower(terrain: &Terrain, biome: Biome, rng: &mut Stream, x: i32, z: i32) -> Block {
     match biome {
         Biome::FlowerForest => {
             let noise = terrain.color_noise(x, z, FLOWER_FOREST_NOISE_SCALE);
             let at = ((1.0 + noise) / 2.0).clamp(0.0, 0.9999);
             FLOWER_FOREST_PICKS[(at * FLOWER_FOREST_PICKS.len() as f32) as usize]
         }
-        Biome::Swampland | Biome::SwamplandM => Block::BlueOrchid,
+        _ if biome.is_swamp() => Block::BlueOrchid,
         Biome::Plains | Biome::SunflowerPlains => {
             if terrain.color_noise(x, z, TULIP_NOISE_SCALE) < TULIP_BELOW {
-                PLAINS_TULIPS[(pick >> 4) as usize % PLAINS_TULIPS.len()]
-            } else if !pick.is_multiple_of(3) {
-                PLAINS_DAISIES[(pick >> 4) as usize % PLAINS_DAISIES.len()]
+                PLAINS_TULIPS[rng.below(PLAINS_TULIPS.len() as u32) as usize]
+            } else if rng.below(DANDELION_ONE_IN_THREE) != 0 {
+                PLAINS_DAISIES[rng.below(PLAINS_DAISIES.len() as u32) as usize]
             } else {
                 Block::Dandelion
             }
         }
         _ => {
-            if !pick.is_multiple_of(3) {
+            if rng.below(DANDELION_ONE_IN_THREE) != 0 {
                 Block::Dandelion
             } else {
                 Block::Poppy
@@ -97,56 +92,84 @@ fn flower_at(terrain: &Terrain, biome: Biome, x: i32, z: i32) -> Block {
     }
 }
 
-fn grass_scale(biome: Biome) -> f32 {
-    use Biome::*;
-    match biome {
-        Jungle | JungleHills | JungleM | JungleEdge | JungleEdgeM => MAX_GRASS_SCALE,
-        Plains | SunflowerPlains | Swampland | SwamplandM | Savanna | SavannaM | SavannaPlateau
-        | SavannaPlateauM => 1.0,
-        Forest | ForestHills | FlowerForest | BirchForest | BirchForestHills | BirchForestM
-        | BirchForestHillsM | RoofedForest | RoofedForestM => 0.5,
-        Taiga | TaigaHills | TaigaM | ColdTaiga | ColdTaigaHills | ColdTaigaM | MegaTaiga
-        | MegaTaigaHills | MegaSpruceTaiga | MegaSpruceTaigaHills => 0.4,
-        ExtremeHills | ExtremeHillsPlus | ExtremeHillsM | ExtremeHillsPlusM => 0.3,
-        _ => 0.0,
-    }
+fn pick_grass(biome: Biome, rng: &mut Stream) -> Block {
+    let fern = if biome.is_taiga() {
+        rng.below(FERN_OF_TAIGA) < FERN_IN_TAIGA
+    } else if biome.is_jungle() {
+        rng.below(FERN_ONE_IN_JUNGLE) == 0
+    } else {
+        false
+    };
+    if fern { Block::Fern } else { Block::TallGrass }
 }
 
-fn flower_scale(biome: Biome) -> f32 {
-    use Biome::*;
-    match biome {
-        Plains | SunflowerPlains | Forest | ForestHills => 1.0,
-        FlowerForest => FLOWER_FOREST_SCALE,
-        Swampland | SwamplandM => SWAMP_FLOWER_SCALE,
-        _ => 0.0,
+fn highest(column: &Column, x: i32, z: i32) -> Option<i32> {
+    (0..WORLD_HEIGHT)
+        .rev()
+        .find(|&y| column.get([x, y, z].into()) != Block::Air)
+}
+
+fn start(rng: &mut Stream, column: &Column) -> Option<IVec3> {
+    let x = rng.below(SECTION_SIZE as u32) as i32;
+    let z = rng.below(SECTION_SIZE as u32) as i32;
+    let top = highest(column, x, z)?;
+    let y = rng.below((top + 1) as u32 + SKY_REACH) as i32;
+    Some(IVec3::new(x, y, z))
+}
+
+fn grow_cluster(rng: &mut Stream, column: &mut Column, center: IVec3, block: Block, tries: u32) {
+    for _ in 0..tries {
+        let at = center
+            + IVec3::new(
+                rng.spread(SPREAD),
+                rng.spread(VERTICAL_SPREAD),
+                rng.spread(SPREAD),
+            );
+        if at.y - 1 > WATER_LEVEL
+            && Column::contains(at)
+            && column.get(at) == Block::Air
+            && matches!(
+                column.get(at - IVec3::Y),
+                Block::Grass | Block::Podzol | Block::CoarseDirt
+            )
+        {
+            column.set(at, block);
+        }
     }
 }
 
 pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
+    if terrain.world_type() != WorldType::Standard {
+        return;
+    }
     let origin = key.origin();
-    for lz in 0..SECTION_SIZE {
-        for lx in 0..SECTION_SIZE {
-            let Some(top) = (0..WORLD_HEIGHT)
-                .rev()
-                .find(|&y| column.get([lx, y, lz].into()) != Block::Air)
-            else {
-                continue;
-            };
-            let ground = glam::IVec3::new(lx, top, lz);
-            let above = ground + glam::IVec3::Y;
-            if !matches!(
-                column.get(ground),
-                Block::Grass | Block::Podzol | Block::CoarseDirt
-            ) || top + 1 >= WORLD_HEIGHT
-                || top <= WATER_LEVEL
-                || column.get(above) != Block::Air
-            {
-                continue;
-            }
-            if let Some(block) = plant_at(terrain, origin.x + lx, origin.z + lz) {
-                column.set(above, block);
-            }
+    let biome = terrain.biome_at(origin.x + CENTER, origin.z + CENTER);
+    let counts = attempts(biome);
+    let state = u64::from(hash(terrain.seed(), key.x(), key.z(), SALT_PLANTS))
+        | u64::from(hash(terrain.seed(), key.x(), key.z(), SALT_PLANTS + 100)) << 32;
+    let mut rng = Stream::new(state);
+    for _ in 0..counts.flowers {
+        let Some(center) = start(&mut rng, column) else {
+            continue;
+        };
+        let flower = pick_flower(
+            terrain,
+            biome,
+            &mut rng,
+            origin.x + center.x,
+            origin.z + center.z,
+        );
+        grow_cluster(&mut rng, column, center, flower, FLOWER_TRIES);
+    }
+    for _ in 0..counts.grass {
+        let Some(mut center) = start(&mut rng, column) else {
+            continue;
+        };
+        let block = pick_grass(biome, &mut rng);
+        while center.y > 0 && matches!(column.get(center), b if b == Block::Air || b.is_leaves()) {
+            center.y -= 1;
         }
+        grow_cluster(&mut rng, column, center, block, GRASS_TRIES);
     }
 }
 
