@@ -128,6 +128,7 @@ impl BlockBox {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PieceKind {
+    SwampHut,
     #[cfg(test)]
     Probe,
 }
@@ -143,13 +144,16 @@ impl Piece {
     #[cfg(test)]
     pub fn place(&self, writer: &mut PieceWriter) {
         match self.kind {
+            PieceKind::SwampHut => super::swamp_hut::place(writer),
             PieceKind::Probe => super::tests::draw_probe(writer),
         }
     }
 
     #[cfg(not(test))]
-    pub fn place(&self, _: &mut PieceWriter) {
-        match self.kind {}
+    pub fn place(&self, writer: &mut PieceWriter) {
+        match self.kind {
+            PieceKind::SwampHut => super::swamp_hut::place(writer),
+        }
     }
 }
 

@@ -371,11 +371,13 @@ fn strongholds_form_rings_around_the_origin() {
 #[test]
 fn unbuilt_kinds_generate_nothing() {
     let terrain = Terrain::new(5);
-    for kind in StructureKind::ALL {
+    for kind in StructureKind::ALL
+        .into_iter()
+        .filter(|&kind| kind != StructureKind::Temple)
+    {
         assert!(!terrain.structure_built(kind));
         assert!(terrain.starts_near(kind, ColumnPos::ZERO, 50).is_empty());
     }
-    assert!(!terrain.structure_covers(0, 0));
 }
 
 #[test]
@@ -558,7 +560,7 @@ fn showcase_monument_plot_is_an_ocean() {
 #[test]
 fn showcase_has_no_trees_or_decor() {
     let terrain = Terrain::of(1, WorldType::Structures);
-    for plot in plots() {
+    for plot in plots().filter(|plot| plot.variant != Variant::Temple(TempleKind::SwampHut)) {
         let column = terrain.generate(plot.column());
         for i in 0..16 * 16 {
             let (x, z) = (i % 16, i / 16);
@@ -580,7 +582,12 @@ fn showcase_starts_use_the_same_build_as_the_standard_world() {
     let terrain = Terrain::of(1, WorldType::Structures);
     for plot in plots() {
         terrain.set_structure_built(plot.kind, true);
-        let start = build(&terrain, plot.kind, plot.column()).unwrap();
+        let start = build(&terrain, plot.kind, plot.column());
+        if !plot.variant.ready() {
+            assert!(start.is_none(), "{:?}", plot.variant);
+            continue;
+        }
+        let start = start.unwrap();
         assert_eq!(start.variant, plot.variant, "{:?}", plot.biome);
         assert_eq!(start.anchor, (plot.center.x, plot.center.y));
         let listed = terrain.starts_near(plot.kind, plot.column(), 1);
@@ -655,4 +662,198 @@ fn writer_places_empty_chests_furnaces_cauldrons_and_pots() {
         assert_eq!(Block::pot_plant(column.get_data(pot)), Some(Block::Fern));
         assert_eq!(column.get_data(empty_pot), 0);
     }
+}
+
+const HUT_SEED: i32 = 1337;
+
+fn huts(terrain: &Terrain) -> Vec<StartRef> {
+    let mut found = Vec::new();
+    for rz in -12..12 {
+        for rx in -12..12 {
+            let center = ColumnPos::new(rx * 32 + 16, rz * 32 + 16);
+            found.extend(terrain.starts_near(StructureKind::Temple, center, 16));
+        }
+    }
+    found.retain(|start| start.get().is_some());
+    found.sort_by_key(|start| {
+        let origin = start.get().unwrap().origin;
+        (origin.x(), origin.z())
+    });
+    found.dedup_by_key(|start| start.get().unwrap().origin);
+    found
+}
+
+fn hut_columns(start: &StructureStart) -> Vec<ColumnPos> {
+    let b = start.pieces[0].bounds;
+    let (low, high) = (ColumnPos::of_block(b.min), ColumnPos::of_block(b.max));
+    (low.z()..=high.z())
+        .flat_map(|z| (low.x()..=high.x()).map(move |x| ColumnPos::new(x, z)))
+        .collect()
+}
+
+fn count_in(columns: &[Column], wanted: Block) -> usize {
+    columns
+        .iter()
+        .flat_map(snapshot)
+        .filter(|&(block, _)| block == wanted)
+        .count()
+}
+
+#[test]
+fn huts_only_stand_in_swamps_and_are_deterministic() {
+    let terrain = Terrain::new(HUT_SEED);
+    let found = huts(&terrain);
+    assert!(found.len() >= 2, "{}", found.len());
+    for start in &found {
+        let start = start.get().unwrap();
+        assert_eq!(start.variant, Variant::Temple(TempleKind::SwampHut));
+        assert_eq!(
+            terrain.biome_at(start.anchor.0, start.anchor.1),
+            Biome::Swampland
+        );
+        assert_eq!(start.pieces.len(), 1);
+        assert_eq!(start.pieces[0].kind, PieceKind::SwampHut);
+    }
+    let again = huts(&Terrain::new(HUT_SEED));
+    let key = |starts: &[StartRef]| -> Vec<_> {
+        starts
+            .iter()
+            .map(|s| {
+                let s = s.get().unwrap();
+                (s.origin, s.pieces[0].bounds, s.pieces[0].facing)
+            })
+            .collect()
+    };
+    assert_eq!(key(&found), key(&again));
+}
+
+#[test]
+fn hut_columns_agree_in_any_order_and_hold_the_hut() {
+    let terrain = Terrain::new(HUT_SEED);
+    let found = huts(&terrain);
+    let start = found
+        .iter()
+        .map(|s| s.get().unwrap())
+        .max_by_key(|s| hut_columns(s).len())
+        .unwrap();
+    let keys = hut_columns(start);
+    let generate = |order: Vec<usize>| {
+        let terrain = Terrain::new(HUT_SEED);
+        let mut out: Vec<Option<Column>> = keys.iter().map(|_| None).collect();
+        for i in order {
+            out[i] = Some(terrain.generate(keys[i]));
+        }
+        out.into_iter().flatten().collect::<Vec<_>>()
+    };
+    let forward = generate((0..keys.len()).collect());
+    let backward = generate((0..keys.len()).rev().collect());
+    for (a, b) in forward.iter().zip(&backward) {
+        assert!(snapshot(a) == snapshot(b));
+    }
+    assert!(count_in(&forward, Block::SprucePlanks) > 40);
+    assert_eq!(count_in(&forward, Block::CraftingTable), 1);
+    assert_eq!(count_in(&forward, Block::Cauldron), 1);
+    assert_eq!(count_in(&forward, Block::FlowerPot), 1);
+    assert_eq!(count_in(&forward, Block::SpruceStairs), 26);
+}
+
+#[test]
+fn hut_posts_reach_solid_ground() {
+    let terrain = Terrain::new(HUT_SEED);
+    for start in huts(&terrain) {
+        let start = start.get().unwrap();
+        let piece = start.pieces[0];
+        for (x, z) in [(1, 2), (5, 2), (1, 7), (5, 7)] {
+            let mut scratch = Column::new();
+            let writer = PieceWriter::new(&mut scratch, ColumnPos::ZERO, &piece);
+            let top = writer.world(x, 0, z);
+            let key = ColumnPos::of_block(top);
+            let column = terrain.generate(key);
+            let mut y = top.y;
+            assert_eq!(
+                column.get(top - key.origin()),
+                Block::Log,
+                "{top} {x} {z} {:?} {:?}",
+                piece.facing,
+                piece.bounds
+            );
+            while column.get(IVec3::new(
+                top.x - key.origin().x,
+                y,
+                top.z - key.origin().z,
+            )) == Block::Log
+            {
+                y -= 1;
+            }
+            let below = column.get(IVec3::new(
+                top.x - key.origin().x,
+                y,
+                top.z - key.origin().z,
+            ));
+            assert!(
+                below != Block::Air && !below.is_water(),
+                "{below:?} at {top}"
+            );
+        }
+    }
+}
+
+#[test]
+fn trees_do_not_root_inside_the_hut_box() {
+    let terrain = Terrain::new(HUT_SEED);
+    for start in huts(&terrain) {
+        let b = start.get().unwrap().pieces[0].bounds;
+        for z in b.min.z..=b.max.z {
+            for x in b.min.x..=b.max.x {
+                assert!(terrain.structure_covers(x, z));
+            }
+        }
+    }
+}
+
+#[test]
+fn locate_finds_only_ready_temple_variants() {
+    let terrain = Terrain::new(HUT_SEED);
+    let nearest = huts(&terrain)
+        .into_iter()
+        .map(|s| s.get().unwrap().anchor)
+        .min_by_key(|a| i64::from(a.0).pow(2) + i64::from(a.1).pow(2))
+        .unwrap();
+    for name in ["Swamp_Hut", "Temple"] {
+        let target = LocateName::find(name).unwrap();
+        assert!(target.ready());
+        let (x, z, _) = terrain.nearest_structure(target, 0, 0, 20_000).unwrap();
+        assert_eq!((x, z), nearest, "{name}");
+    }
+    for name in ["Desert_Pyramid", "Jungle_Pyramid", "Igloo"] {
+        let target = LocateName::find(name).unwrap();
+        assert!(!target.ready());
+        assert_eq!(
+            terrain.nearest_structure(target, 0, 0, 20_000),
+            None,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn showcase_hut_plot_is_not_empty() {
+    let terrain = Terrain::of(HUT_SEED, WorldType::Structures);
+    let plot = plots()
+        .find(|plot| plot.variant == Variant::Temple(TempleKind::SwampHut))
+        .unwrap();
+    let start = terrain
+        .starts_near(plot.kind, plot.column(), 1)
+        .into_iter()
+        .find_map(|s| s.get().map(|s| s.origin))
+        .expect("hut start on its plot");
+    assert_eq!(start, plot.column());
+    let start = build(&terrain, plot.kind, plot.column()).unwrap();
+    let columns: Vec<Column> = hut_columns(&start)
+        .into_iter()
+        .map(|key| terrain.generate(key))
+        .collect();
+    assert!(count_in(&columns, Block::SprucePlanks) > 40);
+    let floor = start.pieces[0].bounds.min.y;
+    assert_eq!(floor, plot.surface() + 1);
 }

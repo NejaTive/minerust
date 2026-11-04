@@ -229,6 +229,14 @@ impl Terrain {
                 footprint[(i * BOX_XZ + j) as usize] = (0..BOX_Y).any(|k| mask[slot(i, j, k)]);
             }
         }
+        let cut_structure = (0..BOX_XZ).any(|i| {
+            (0..BOX_XZ).any(|j| {
+                footprint[(i * BOX_XZ + j) as usize] && self.structure_covers(ox + i, oz + j)
+            })
+        });
+        if cut_structure {
+            return None;
+        }
         Some(Lake {
             kind,
             ox,
