@@ -117,6 +117,8 @@ pub struct Game {
     spawn_ticks: u32,
 }
 
+const PRECIPITATION_RAIN: f32 = 0.2;
+
 impl Game {
     pub fn new(seed: i32, state: Option<&[f32]>) -> Result<Game, BadCameraState> {
         Self::of(seed, WorldType::Standard, state)
@@ -135,12 +137,18 @@ impl Game {
                 (Camera::spawn(player.eye()), player)
             }
             None => {
-                let spawn = terrain.generate(ColumnPos::ZERO);
-                let ground = (0..WORLD_HEIGHT)
-                    .rev()
-                    .find(|&y| spawn.get(IVec3::new(0, y, 0)) != Block::Air)
-                    .unwrap_or(0) as f32;
-                let player = Player::new(Vec3::new(0.5, ground + 1.0, 0.5), Mode::Walking);
+                let spawn = if world_type == WorldType::Standard {
+                    terrain.spawn_point()
+                } else {
+                    let column = terrain.generate(ColumnPos::ZERO);
+                    let ground = (0..WORLD_HEIGHT)
+                        .rev()
+                        .find(|&y| column.get(IVec3::new(0, y, 0)) != Block::Air)
+                        .unwrap_or(0);
+                    IVec3::new(0, ground, 0)
+                };
+                let feet = spawn.as_vec3() + Vec3::new(0.5, 1.0, 0.5);
+                let player = Player::new(feet, Mode::Walking);
                 (Camera::spawn(player.eye()), player)
             }
         };
@@ -839,12 +847,18 @@ impl Game {
 
     fn advance_random_ticks(&mut self, ticks: u32) {
         self.random_tick_acc += ticks;
+        let precipitation = self.weather.rain() > PRECIPITATION_RAIN;
         let center = self.camera_column();
         while self.random_tick_acc >= STEP_TICKS {
             self.random_tick_acc -= STEP_TICKS;
-            let ticked =
-                self.random_ticks
-                    .step(&mut self.world, &self.light, center, self.view_radius);
+            let ticked = self.random_ticks.step(
+                &mut self.world,
+                &self.light,
+                &self.terrain,
+                center,
+                self.view_radius,
+                precipitation,
+            );
             self.apply_pending_with(&ticked.changed, &ticked.light_neutral);
         }
     }
