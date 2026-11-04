@@ -1,0 +1,215 @@
+size 7 20 9
+legend
+. air
+_ keep
+A stone_bricks
+B cracked_stone_bricks
+C monster_egg data=2
+D mossy_stone_bricks
+E monster_egg data=4
+F brewing_stand
+G chest front=-x
+H ladder front=-z
+I iron_bars
+J monster_egg data=3
+K oak_trapdoor front=-z
+y 0
+ABCADAA
+AAAAABD
+DAAADDA
+ADAADEB
+DAADAAB
+ADDAAAA
+BAADDAA
+DABDAAA
+DAAAABB
+y 1
+DDDAABA
+D.....A
+AF...GD
+A.....A
+A..H..A
+DI.B.ID
+A..A..A
+A..A..D
+AADDADD
+y 2
+AADAADA
+A.....A
+A.....A
+A.....D
+D..H..A
+AI.A.IA
+A..A..D
+D..B..A
+DABAAAD
+y 3
+AAABAAA
+D.....A
+A.....D
+A.....A
+A..H..A
+AI.A.IB
+A..A..A
+A..B..A
+CDDCJBB
+y 4
+BBADDAD
+A.....A
+A.....A
+A.....A
+E..H..A
+AI.A.IA
+D..A..D
+A..A..A
+AAABDDA
+y 5
+DAAADBA
+AAADDAD
+AADDAAA
+AAADDAD
+ACAHDAA
+AABAAAC
+BADDAAD
+DAAADDA
+BADBAAA
+y 6
+_______
+_______
+_______
+__AAA__
+__AHA__
+__ABA__
+_______
+_______
+_______
+y 7
+_______
+_______
+_______
+__AAA__
+__AHB__
+__ADD__
+_______
+_______
+_______
+y 8
+_______
+_______
+_______
+__AAD__
+__AHB__
+__AAD__
+_______
+_______
+_______
+y 9
+_______
+_______
+_______
+__AAA__
+__AHD__
+__AAD__
+_______
+_______
+_______
+y 10
+_______
+_______
+_______
+__ADA__
+__AHD__
+__DDA__
+_______
+_______
+_______
+y 11
+_______
+_______
+_______
+__BBD__
+__DHD__
+__BAA__
+_______
+_______
+_______
+y 12
+_______
+_______
+_______
+__ADD__
+__AHA__
+__BAA__
+_______
+_______
+_______
+y 13
+_______
+_______
+_______
+__DBA__
+__DHB__
+__DAA__
+_______
+_______
+_______
+y 14
+_______
+_______
+_______
+__BAA__
+__AHA__
+__AAA__
+_______
+_______
+_______
+y 15
+_______
+_______
+_______
+__AAD__
+__DHA__
+__ABA__
+_______
+_______
+_______
+y 16
+_______
+_______
+_______
+__BAA__
+__DHA__
+__AAD__
+_______
+_______
+_______
+y 17
+_______
+_______
+_______
+__ADD__
+__AHA__
+__AAA__
+_______
+_______
+_______
+y 18
+_______
+_______
+_______
+__BAD__
+__AHA__
+__AAB__
+_______
+_______
+_______
+y 19
+_______
+_______
+_______
+_______
+___K___
+_______
+_______
+_______
+_______

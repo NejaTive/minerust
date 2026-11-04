@@ -10,11 +10,13 @@ use crate::section::SECTION_SIZE;
 use crate::stream::Stream;
 use crate::terrain::Terrain;
 
+mod cell;
 mod igloo;
 mod piece;
 mod placement;
 mod showcase;
 mod swamp_hut;
+mod template;
 
 pub use piece::{BlockBox, Facing, Piece, PieceKind, PieceWriter};
 pub use showcase::{

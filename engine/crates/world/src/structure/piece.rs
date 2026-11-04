@@ -1,8 +1,8 @@
 use glam::IVec3;
 
-use crate::bed;
-use crate::block::{Block, CAULDRON_LEVELS, facing_code};
-use crate::chest;
+use super::cell::{Cell, Selector};
+use super::template::{Entry, Template};
+use crate::block::{Block, facing_code};
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
@@ -145,8 +145,8 @@ impl BlockBox {
 pub enum PieceKind {
     SwampHut,
     Igloo,
-    /// Шахта и комната под иглу: число сегментов шахты и соль выбора кирпичей.
-    IglooBasement(u8, u32),
+    /// Шахта и комната под иглу: число сегментов шахты.
+    IglooBasement(u8),
     #[cfg(test)]
     Probe,
 }
@@ -156,31 +156,38 @@ pub struct Piece {
     pub bounds: BlockBox,
     pub facing: Facing,
     pub kind: PieceKind,
+    /// Соль случайности внутри `place`: из `layout`, чтобы колонки строились в любом порядке.
+    pub salt: u32,
 }
 
 impl Piece {
-    #[cfg(test)]
     pub fn place(&self, writer: &mut PieceWriter) {
         match self.kind {
             PieceKind::SwampHut => super::swamp_hut::place(writer),
             PieceKind::Igloo => super::igloo::place_top(writer),
-            PieceKind::IglooBasement(segments, salt) => {
-                super::igloo::place_basement(writer, segments, salt);
-            }
+            PieceKind::IglooBasement(segments) => super::igloo::place_basement(writer, segments),
+            #[cfg(test)]
             PieceKind::Probe => super::tests::draw_probe(writer),
         }
     }
+}
 
-    #[cfg(not(test))]
-    pub fn place(&self, writer: &mut PieceWriter) {
-        match self.kind {
-            PieceKind::SwampHut => super::swamp_hut::place(writer),
-            PieceKind::Igloo => super::igloo::place_top(writer),
-            PieceKind::IglooBasement(segments, salt) => {
-                super::igloo::place_basement(writer, segments, salt);
-            }
-        }
-    }
+/// Коробка в локальных координатах части, обе границы входят, как в 1.12.
+pub fn bx(x0: i32, y0: i32, z0: i32, x1: i32, y1: i32, z1: i32) -> BlockBox {
+    BlockBox::new(IVec3::new(x0, y0, z0), IVec3::new(x1, y1, z1))
+}
+
+/// Хэш клетки части: не зависит от порядка генерации колонок.
+fn mix(salt: u32, x: i32, y: i32, z: i32) -> u32 {
+    let mut h = salt
+        ^ (x as u32).wrapping_mul(0x9E37_79B1)
+        ^ (y as u32).wrapping_mul(0x85EB_CA77)
+        ^ (z as u32).wrapping_mul(0xC2B2_AE3D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    h = h.wrapping_mul(0x297A_2D39);
+    h ^ h >> 15
 }
 
 /// Запись блоков части в одну колонку: всё вне колонки молча отбрасывается, поэтому колонки не зависят друг от друга.
@@ -190,6 +197,7 @@ pub struct PieceWriter<'a> {
     frame: BlockBox,
     bounds: BlockBox,
     facing: Facing,
+    salt: u32,
 }
 
 impl<'a> PieceWriter<'a> {
@@ -200,6 +208,7 @@ impl<'a> PieceWriter<'a> {
             frame: BlockBox::of_column(key),
             bounds: piece.bounds,
             facing: piece.facing,
+            salt: piece.salt,
         }
     }
 
@@ -231,14 +240,25 @@ impl<'a> PieceWriter<'a> {
         self.frame.contains(at).then(|| at - self.frame.min)
     }
 
-    pub fn set(&mut self, x: i32, y: i32, z: i32, block: Block) {
-        self.set_with_data(x, y, z, block, 0);
+    /// `setBlockState`.
+    pub fn put(&mut self, x: i32, y: i32, z: i32, cell: impl Into<Cell>) {
+        let cell = cell.into();
+        let data = match cell.front {
+            Some(front) => cell.data | facing_code(self.world_dir(front)),
+            None => cell.data,
+        };
+        let at = self.world(x, y, z);
+        self.set_world(at, cell.block, data);
     }
 
-    pub fn set_with_data(&mut self, x: i32, y: i32, z: i32, block: Block, data: u8) {
-        if let Some(local) = self.local(self.world(x, y, z)) {
-            self.column.set_with_data(local, block, data);
-        }
+    /// Бросок «один из `one_in`» по хэшу клетки: не зависит от порядка колонок.
+    pub fn chance(&self, x: i32, y: i32, z: i32, one_in: u32) -> bool {
+        mix(!self.salt, x, y, z).is_multiple_of(one_in)
+    }
+
+    /// Число от 0 до `n` по хэшу клетки.
+    pub fn pick(&self, x: i32, y: i32, z: i32, n: u32) -> u32 {
+        mix(self.salt, x, y, z) % n
     }
 
     /// Направление части (x вдоль ширины, z вдоль глубины) в мировое.
@@ -252,88 +272,88 @@ impl<'a> PieceWriter<'a> {
         }
     }
 
-    /// Пустой одинарный сундук лицом в `front` (направление части); содержимое появится при первом открытии.
-    pub fn chest(&mut self, x: i32, y: i32, z: i32, front: IVec3) {
-        let data = chest::data(self.world_dir(front), chest::HALF_NONE);
-        self.set_with_data(x, y, z, Block::Chest, data);
-    }
-
-    /// Двойной сундук: левая половина в `(x, y, z)`, правая — справа от неё, если смотреть на лицо.
-    pub fn double_chest(&mut self, x: i32, y: i32, z: i32, front: IVec3) {
-        let front = self.world_dir(front);
-        let left = self.world(x, y, z);
-        let right = left + chest::right_of(front);
-        self.set_world(left, Block::Chest, chest::data(front, chest::HALF_LEFT));
-        self.set_world(right, Block::Chest, chest::data(front, chest::HALF_RIGHT));
-    }
-
-    /// Блок с поворотом `front` (направление части): ступени, лестницы, люки.
-    pub fn set_facing(&mut self, x: i32, y: i32, z: i32, block: Block, front: IVec3) {
-        let data = facing_code(self.world_dir(front));
-        self.set_with_data(x, y, z, block, data);
-    }
-
-    /// Кровать: ножная половина в `(x, y, z)`, изголовье на шаг дальше по `toward_head` (направление части).
-    pub fn bed(&mut self, x: i32, y: i32, z: i32, toward_head: IVec3, color: u8) {
-        let dir = self.world_dir(toward_head);
-        let foot = self.world(x, y, z);
-        self.set_world(foot, Block::Bed, bed::data(dir, false, color));
-        self.set_world(foot + dir, Block::Bed, bed::data(dir, true, color));
-    }
-
-    /// Закрытый люк в нижней половине клетки; `front` — направление части, в которую смотрит люк.
-    pub fn trapdoor(&mut self, x: i32, y: i32, z: i32, front: IVec3) {
-        self.set_facing(x, y, z, Block::OakTrapdoor, front);
-    }
-
-    pub fn furnace(&mut self, x: i32, y: i32, z: i32, front: IVec3, lit: bool) {
-        let block = if lit {
-            Block::LitFurnace
-        } else {
-            Block::Furnace
-        };
-        let data = facing_code(self.world_dir(front));
-        self.set_with_data(x, y, z, block, data);
-    }
-
-    /// Котёл с водой `level` от 0 до 3.
-    pub fn cauldron(&mut self, x: i32, y: i32, z: i32, level: u8) {
-        self.set_with_data(x, y, z, Block::Cauldron, level.min(CAULDRON_LEVELS));
-    }
-
-    /// Горшок с растением; растение вне списка горшка оставляет горшок пустым.
-    pub fn flower_pot(&mut self, x: i32, y: i32, z: i32, plant: Option<Block>) {
-        let data = plant.and_then(Block::pot_code).unwrap_or(0);
-        self.set_with_data(x, y, z, Block::FlowerPot, data);
-    }
-
     /// Блок под координатой части; вне колонки — воздух, как у `getBlockStateFromPos` вне рамки.
     pub fn get(&self, x: i32, y: i32, z: i32) -> Block {
         self.local(self.world(x, y, z))
             .map_or(Block::Air, |local| self.column.get(local))
     }
 
-    pub fn fill(&mut self, from: IVec3, to: IVec3, block: Block) {
-        for y in from.y..=to.y {
-            for z in from.z..=to.z {
-                for x in from.x..=to.x {
-                    self.set(x, y, z, block);
+    /// `fillWithBlocks` с воздухом внутри: `fill(bx, AIR)` — `fillWithAir`.
+    pub fn fill(&mut self, area: BlockBox, cell: impl Into<Cell>) {
+        let cell = cell.into();
+        self.each(area, |w, x, y, z| w.put(x, y, z, cell));
+    }
+
+    /// Рамка `wall` вокруг `inside`.
+    pub fn hollow(&mut self, area: BlockBox, wall: impl Into<Cell>, inside: impl Into<Cell>) {
+        let (wall, inside) = (wall.into(), inside.into());
+        let (min, max) = (area.min, area.max);
+        self.each(area, |w, x, y, z| {
+            let on_edge =
+                x == min.x || x == max.x || y == min.y || y == max.y || z == min.z || z == max.z;
+            w.put(x, y, z, if on_edge { wall } else { inside });
+        });
+    }
+
+    /// `fillWithBlocks(.., existingOnly)`: только клетки, где уже что-то есть.
+    pub fn fill_existing(&mut self, area: BlockBox, cell: impl Into<Cell>) {
+        let cell = cell.into();
+        self.each(area, |w, x, y, z| {
+            if w.get(x, y, z) != Block::Air {
+                w.put(x, y, z, cell);
+            }
+        });
+    }
+
+    /// `fillWithRandomizedBlocks`.
+    pub fn fill_random(&mut self, area: BlockBox, selector: &Selector) {
+        self.each(area, |w, x, y, z| {
+            let cell = selector.pick(w, x, y, z);
+            w.put(x, y, z, cell);
+        });
+    }
+
+    /// `generateMaybeBox`: каждая клетка с шансом «один из `one_in`».
+    pub fn fill_chance(&mut self, area: BlockBox, one_in: u32, cell: impl Into<Cell>) {
+        let cell = cell.into();
+        self.each(area, |w, x, y, z| w.put_chance(x, y, z, one_in, cell));
+    }
+
+    /// `randomlyPlaceBlock`.
+    pub fn put_chance(&mut self, x: i32, y: i32, z: i32, one_in: u32, cell: impl Into<Cell>) {
+        if self.chance(x, y, z, one_in) {
+            self.put(x, y, z, cell);
+        }
+    }
+
+    /// Ставит шаблон, сдвинув его начало в `(ox, oy, oz)` части.
+    pub fn template(&mut self, template: &Template, offset: IVec3) {
+        let size = template.size();
+        for y in 0..size.y {
+            for z in 0..size.z {
+                for x in 0..size.x {
+                    let (px, py, pz) = (x + offset.x, y + offset.y, z + offset.z);
+                    match template.entry(x, y, z) {
+                        Entry::Keep => {}
+                        Entry::Cell(cell) => self.put(px, py, pz, *cell),
+                        Entry::Random(selector) => {
+                            let cell = selector.pick(self, px, py, pz);
+                            self.put(px, py, pz, cell);
+                        }
+                        Entry::Chance(one_in, cell) => {
+                            self.put_chance(px, py, pz, *one_in, *cell);
+                        }
+                    }
                 }
             }
         }
     }
 
-    pub fn fill_hollow(&mut self, from: IVec3, to: IVec3, wall: Block, inside: Block) {
-        for y in from.y..=to.y {
-            for z in from.z..=to.z {
-                for x in from.x..=to.x {
-                    let on_edge = x == from.x
-                        || x == to.x
-                        || y == from.y
-                        || y == to.y
-                        || z == from.z
-                        || z == to.z;
-                    self.set(x, y, z, if on_edge { wall } else { inside });
+    fn each(&mut self, area: BlockBox, mut visit: impl FnMut(&mut Self, i32, i32, i32)) {
+        for y in area.min.y..=area.max.y {
+            for z in area.min.z..=area.max.z {
+                for x in area.min.x..=area.max.x {
+                    visit(self, x, y, z);
                 }
             }
         }
