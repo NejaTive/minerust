@@ -19,6 +19,7 @@ pub mod random_ticks;
 pub mod save;
 pub mod section;
 mod stream;
+pub mod structure;
 pub mod terrain;
 pub mod textures;
 pub mod tile;

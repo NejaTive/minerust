@@ -1,3 +1,5 @@
+use world::pos::ColumnPos;
+use world::structure::{LOCATE_NAMES, StructureKind};
 use world::terrain::{Biome, WorldType};
 
 use super::super::Game;
@@ -393,5 +395,55 @@ fn every_biome_has_a_locate_name_and_a_label() {
     for &biome in Biome::ALL {
         assert_eq!(super::biome_entry(biome.name()), Some(biome));
         assert!(!super::biome_label(biome).is_empty());
+    }
+}
+
+fn showcase() -> Game {
+    Game::of(SEED, WorldType::Structures, None).unwrap()
+}
+
+#[test]
+fn locate_unbuilt_structures_are_reported_missing() {
+    let mut g = game();
+    for entry in LOCATE_NAMES {
+        let text = err(&mut g, &format!("/locate {}", entry.name.to_lowercase()));
+        assert!(text.contains("пока нет"), "{}: {text}", entry.name);
+    }
+    assert_eq!(g.complete_command("/locate ").options, ["biome"]);
+}
+
+#[test]
+fn locate_names_appear_once_the_structure_is_built() {
+    let g = game();
+    g.terrain.set_structure_built(StructureKind::Village, true);
+    assert_eq!(g.complete_command("/locate vi").options, ["Village"]);
+    assert_eq!(g.complete_command("/locate ").options, ["biome", "Village"]);
+}
+
+#[test]
+fn showcase_locate_returns_the_plot_center() {
+    let mut g = showcase();
+    for kind in StructureKind::ALL {
+        g.terrain.set_structure_built(kind, true);
+    }
+    let out = g.run_command("/locate VILLAGE");
+    assert!(out.ok, "{}", out.text);
+    assert!(out.text.contains("[96, ~, 0] (96 блоков)"), "{}", out.text);
+    assert_eq!(out.suggest.as_deref(), Some("/tp 96 ~ 0"));
+    let igloo = g.run_command("/locate igloo");
+    assert!(igloo.text.contains("[1440, ~, 0]"), "{}", igloo.text);
+    assert!(ok(&mut g, "/locate Stronghold").contains("[2016, ~, 0]"));
+}
+
+#[test]
+fn showcase_world_spawns_at_origin_without_mobs() {
+    let mut g = showcase();
+    let feet = g.player().feet;
+    assert!(feet.x.abs() < 1.0 && feet.z.abs() < 1.0);
+    assert!(feet.y > 63.0 && feet.y < 66.0, "{feet}");
+    for z in -3..3 {
+        for x in -3..3 {
+            assert!(g.populate_column(ColumnPos::new(x, z)).is_empty());
+        }
     }
 }

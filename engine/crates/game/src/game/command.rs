@@ -1,5 +1,6 @@
 use glam::Vec3;
 use world::column::WORLD_HEIGHT;
+use world::structure::LocateName;
 use world::terrain::{Biome, WorldType};
 
 use super::Game;
@@ -58,8 +59,8 @@ const COMMANDS: [Spec; 6] = [
     },
     Spec {
         name: "locate",
-        usage: "/locate biome <биом>",
-        about: "Находит ближайший биом",
+        usage: "/locate biome <биом> | /locate <структура>",
+        about: "Находит ближайший биом или структуру",
     },
     Spec {
         name: "help",
@@ -249,12 +250,34 @@ impl Game {
             (&parts[..parts.len() - 1], parts[parts.len() - 1])
         };
         let start = offset + body.chars().count() - current.chars().count();
-        let options = candidates(done)
+        let options = self
+            .candidates(done)
             .into_iter()
-            .filter(|option| option.starts_with(&current.to_lowercase()))
+            .filter(|option| option.to_lowercase().starts_with(&current.to_lowercase()))
             .map(str::to_owned)
             .collect();
         Completion { start, options }
+    }
+
+    fn candidates(&self, done: &[&str]) -> Vec<&'static str> {
+        match done {
+            [] | ["help"] => COMMANDS.iter().map(|spec| spec.name).collect(),
+            ["time"] => vec!["set", "add", "query"],
+            ["time", "set"] => TIME_NAMES.iter().map(|(name, _)| *name).collect(),
+            ["time", "query"] => vec!["daytime"],
+            ["speed"] => vec!["walk", "fly"],
+            ["tp"] | ["tp", _] | ["tp", _, _] => vec!["~"],
+            ["weather"] => WEATHERS.iter().map(|(name, _)| *name).collect(),
+            ["locate"] => {
+                let built = world::structure::LOCATE_NAMES
+                    .into_iter()
+                    .filter(|entry| self.terrain.structure_built(entry.kind))
+                    .map(|entry| entry.name);
+                std::iter::once("biome").chain(built).collect()
+            }
+            ["locate", "biome"] => Biome::ALL.iter().map(|biome| biome.name()).collect(),
+            _ => Vec::new(),
+        }
     }
 
     fn execute(&mut self, parts: &[&str]) -> Result<Answer, String> {
@@ -421,6 +444,11 @@ impl Game {
 
     fn locate_command(&self, args: &[&str]) -> Result<Answer, String> {
         let spec = spec("locate").unwrap();
+        if let [name] = args
+            && *name != "biome"
+        {
+            return self.locate_structure(spec, name);
+        }
         let ["biome", name] = args else {
             return Err(usage_error(spec, "Неверные аргументы"));
         };
@@ -438,6 +466,35 @@ impl Game {
             }),
             None => Err(format!(
                 "Биом «{label}» не найден в радиусе {LOCATE_RADIUS} блоков"
+            )),
+        }
+    }
+
+    fn locate_structure(&self, spec: &Spec, name: &str) -> Result<Answer, String> {
+        let Some(target) = LocateName::find(name) else {
+            return Err(usage_error(
+                spec,
+                &format!("Неизвестная структура «{name}»"),
+            ));
+        };
+        if !self.terrain.structure_built(target.kind) {
+            return Err(format!("Структуры «{}» в игре пока нет", target.name));
+        }
+        let origin = self.player.eye().floor().as_ivec3();
+        match self
+            .terrain
+            .nearest_structure(target, origin.x, origin.z, LOCATE_RADIUS)
+        {
+            Some((x, z, distance)) => Ok(Answer {
+                text: format!(
+                    "Ближайшая структура «{}» находится на [{x}, ~, {z}] ({distance} блоков)",
+                    target.name
+                ),
+                suggest: Some(format!("/tp {x} ~ {z}")),
+            }),
+            None => Err(format!(
+                "Структура «{}» не найдена в радиусе {LOCATE_RADIUS} блоков",
+                target.name
             )),
         }
     }
@@ -497,21 +554,6 @@ fn help(args: &[&str]) -> Reply {
                 .ok_or_else(|| format!("Неизвестная команда «{name}». /help — список команд"))
         }
         _ => Err(usage_error(spec("help").unwrap(), "Неверные аргументы")),
-    }
-}
-
-fn candidates(done: &[&str]) -> Vec<&'static str> {
-    match done {
-        [] | ["help"] => COMMANDS.iter().map(|spec| spec.name).collect(),
-        ["time"] => vec!["set", "add", "query"],
-        ["time", "set"] => TIME_NAMES.iter().map(|(name, _)| *name).collect(),
-        ["time", "query"] => vec!["daytime"],
-        ["speed"] => vec!["walk", "fly"],
-        ["tp"] | ["tp", _] | ["tp", _, _] => vec!["~"],
-        ["weather"] => WEATHERS.iter().map(|(name, _)| *name).collect(),
-        ["locate"] => vec!["biome"],
-        ["locate", "biome"] => Biome::ALL.iter().map(|biome| biome.name()).collect(),
-        _ => Vec::new(),
     }
 }
 

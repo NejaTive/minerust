@@ -5,19 +5,21 @@ describe('cycle', () => {
   it('единственное значение остаётся собой', () => {
     expect(cycle(GAME_MODES, 'creative')).toBe('creative')
   })
-  it('тип мира переключается Стандартный → Плоский → Отладка', () => {
+  it('тип мира переключается Стандартный → Плоский → Отладка → Структуры', () => {
     expect(cycle(WORLD_TYPES, 'standard')).toBe('flat')
     expect(cycle(WORLD_TYPES, 'flat')).toBe('debug')
-    expect(cycle(WORLD_TYPES, 'debug')).toBe('standard')
+    expect(cycle(WORLD_TYPES, 'debug')).toBe('structures')
+    expect(cycle(WORLD_TYPES, 'structures')).toBe('standard')
     expect(WORLD_TYPE_LABELS).toEqual({
       standard: 'Стандартный',
       flat: 'Плоский',
       debug: 'Отладка',
+      structures: 'Структуры',
     })
   })
-  it('без режима отладки тип debug недоступен для выбора', () => {
+  it('без режима отладки типы debug и structures недоступны для выбора', () => {
     expect(selectableWorldTypes(false)).toEqual(['standard', 'flat'])
-    expect(selectableWorldTypes(true)).toEqual(['standard', 'flat', 'debug'])
+    expect(selectableWorldTypes(true)).toEqual(['standard', 'flat', 'debug', 'structures'])
     expect(cycle(selectableWorldTypes(false), 'flat')).toBe('standard')
   })
   it('несколько значений идут по кругу', () => {
