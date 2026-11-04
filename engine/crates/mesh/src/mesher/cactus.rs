@@ -72,7 +72,7 @@ fn cactus_uses_its_own_tiles_per_face() {
             IVec3::NEG_Y => Tile::CactusBottom,
             _ => Tile::CactusSide,
         };
-        assert!(quad.iter().all(|v| v.layer() == expected.layer() as u8));
+        assert!(quad.iter().all(|v| v.layer() == expected.layer() as u16));
     }
 }
 

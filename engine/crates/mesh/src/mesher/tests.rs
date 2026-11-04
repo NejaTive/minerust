@@ -160,7 +160,7 @@ fn grass_faces_use_their_tiles() {
         } else {
             Tile::GrassSide
         };
-        assert!(quad.iter().all(|v| v.layer() == expected.layer() as u8));
+        assert!(quad.iter().all(|v| v.layer() == expected.layer() as u16));
     }
 }
 
@@ -780,7 +780,7 @@ fn cross_has_both_sides_of_both_planes() {
             assert_eq!(count, 1, "{block:?} normal {n:?}: {normals:?}");
         }
         for v in &vertices(&mesh) {
-            assert_eq!(v.layer(), block.tile(Facing::Side).unwrap().layer() as u8);
+            assert_eq!(v.layer(), block.tile(Facing::Side).unwrap().layer() as u16);
             let [x, y, z] = v.position();
             assert!(
                 (5.0..=6.0).contains(&x) && (5.0..=6.0).contains(&y) && (5.0..=6.0).contains(&z)
@@ -827,7 +827,7 @@ fn torch_is_a_narrow_column_with_five_faces() {
     for v in &vertices(&mesh) {
         min = min.min(v.position().into());
         max = max.max(v.position().into());
-        assert_eq!(v.layer(), Tile::Torch.layer() as u8);
+        assert_eq!(v.layer(), Tile::Torch.layer() as u16);
     }
     let origin = Vec3::new(5.0, 5.0, 5.0);
     assert_eq!(min - origin, Vec3::new(7.0, 0.0, 7.0) / 16.0);
@@ -878,7 +878,7 @@ fn water_block_in_air_has_six_lowered_faces() {
     assert_eq!(face_count(&mesh.water), 6);
     let top = 5.0 + LONE_SOURCE;
     for quad in vertices(&mesh.water).chunks(4) {
-        assert!(quad.iter().all(|v| v.layer() == Tile::Water.layer() as u8));
+        assert!(quad.iter().all(|v| v.layer() == Tile::Water.layer() as u16));
         let shade = face_shade(quad_normal(quad));
         assert!(
             quad.iter().all(|v| v.shade_byte() == quantize_shade(shade)),

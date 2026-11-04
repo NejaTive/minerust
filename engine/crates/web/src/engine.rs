@@ -98,6 +98,11 @@ impl GuiSheets {
     }
 
     #[wasm_bindgen(getter)]
+    pub fn container(&self) -> Vec<u8> {
+        self.0.container.clone()
+    }
+
+    #[wasm_bindgen(getter)]
     pub fn panel(&self) -> Vec<u8> {
         self.0.panel.clone()
     }
@@ -473,6 +478,32 @@ impl Engine {
         } else {
             Err(JsError::new(&format!("unknown block: {name}")))
         }
+    }
+
+    #[wasm_bindgen(js_name = takeContainerOpened)]
+    pub fn take_container_opened(&mut self) -> bool {
+        self.game.take_container_opened()
+    }
+
+    /// Предметы открытого сундука по слотам, пустой слот — пустая строка.
+    #[wasm_bindgen(js_name = containerSlots)]
+    pub fn container_slots(&self) -> Vec<String> {
+        self.game
+            .container_slots()
+            .into_iter()
+            .map(Option::unwrap_or_default)
+            .collect()
+    }
+
+    #[wasm_bindgen(js_name = setContainerSlot)]
+    pub fn set_container_slot(&mut self, index: u32, name: &str) -> bool {
+        let item = (!name.is_empty()).then(|| name.to_owned());
+        self.game.set_container_slot(index as usize, item)
+    }
+
+    #[wasm_bindgen(js_name = closeContainer)]
+    pub fn close_container(&mut self) {
+        self.game.close_container();
     }
 
     pub fn release_all_keys(&mut self) {

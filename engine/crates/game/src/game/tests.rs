@@ -391,3 +391,74 @@ fn a_web_holds_a_falling_player() {
         game.player().feet.y
     );
 }
+
+fn right_click_down_on(game: &mut Game, name: &str) {
+    game.set_camera_state(&[8.5, 14.5, 8.5, 0.0, -std::f32::consts::FRAC_PI_2, 1.0])
+        .unwrap();
+    assert!(game.select_block(name));
+    game.update(0.0);
+    game.mouse_button(2, true);
+    game.interact(0.0);
+    game.mouse_button(2, false);
+}
+
+const SPOT: IVec3 = IVec3::new(8, FLOOR + 1, 8);
+
+#[test]
+fn right_click_on_a_chest_opens_its_window_and_places_nothing() {
+    let mut game = floor_game();
+    game.world.set_block_with_data(SPOT, Block::Chest, 0);
+    right_click_down_on(&mut game, "stone");
+    assert!(game.take_container_opened());
+    assert!(!game.take_container_opened());
+    assert_eq!(game.container_slots(), vec![None; 27]);
+    assert_eq!(game.world.block(SPOT + IVec3::Y), Block::Air);
+    assert!(game.set_container_slot(4, Some("dirt".into())));
+    assert!(!game.set_container_slot(5, Some("no_such_block".into())));
+    assert_eq!(game.container_slots()[4].as_deref(), Some("dirt"));
+    game.close_container();
+    assert!(game.container_slots().is_empty());
+}
+
+#[test]
+fn a_chest_under_a_solid_block_stays_shut() {
+    let mut game = floor_game();
+    game.world.set_block_with_data(SPOT, Block::Chest, 0);
+    game.world.set_block(SPOT + IVec3::Y, Block::Stone);
+    game.set_camera_state(&[8.5, 14.5, 8.5, 0.0, -std::f32::consts::FRAC_PI_2, 1.0])
+        .unwrap();
+    game.update(0.0);
+    assert!(game.world.chest_blocked(SPOT));
+    game.mouse_button(2, true);
+    game.interact(0.0);
+    assert!(!game.take_container_opened());
+}
+
+#[test]
+fn a_flower_in_hand_goes_into_the_pot_once() {
+    let mut game = floor_game();
+    game.world.set_block(SPOT, Block::FlowerPot);
+    right_click_down_on(&mut game, "poppy");
+    assert_eq!(
+        Block::pot_plant(game.world.block_data(SPOT)),
+        Some(Block::Poppy)
+    );
+    right_click_down_on(&mut game, "dandelion");
+    assert_eq!(
+        Block::pot_plant(game.world.block_data(SPOT)),
+        Some(Block::Poppy)
+    );
+    assert_eq!(game.world.block(SPOT + IVec3::Y), Block::Air);
+}
+
+#[test]
+fn a_pot_only_takes_the_click_when_the_hand_holds_a_plant() {
+    let mut game = floor_game();
+    game.world.set_block(SPOT, Block::FlowerPot);
+    assert!(game.select_block("stone"));
+    assert!(!game.pot_accepts(SPOT));
+    assert!(game.select_block("red_mushroom"));
+    assert!(game.pot_accepts(SPOT));
+    game.world.plant_in_pot(SPOT, Block::RedMushroom);
+    assert!(!game.pot_accepts(SPOT));
+}

@@ -110,6 +110,7 @@ describe('интерфейс из пака', () => {
     widgets: bytes(tag, 1),
     icons: bytes(tag, 2),
     inventory: bytes(tag, 3),
+    container: bytes(tag, 5),
     panel: bytes(tag, 4),
     panelSlice: 8,
   })
@@ -138,7 +139,7 @@ describe('интерфейс из пака', () => {
     expect(urls).toHaveLength(0)
     expect(manager.state.gui).toBeUndefined()
     await manager.restore()
-    expect(urls).toHaveLength(4)
+    expect(urls).toHaveLength(5)
     expect(manager.state.gui).toMatchObject({ widgets: 'blob:0-1-0', panelSlice: 8 })
   })
 
@@ -146,16 +147,16 @@ describe('интерфейс из пака', () => {
     const { manager, urls, revoked } = guiSetup()
     await manager.restore()
     await manager.install('pack.zip', bytes(1))
-    expect(manager.state.gui?.widgets).toBe('blob:7-1-4')
-    expect(revoked).toEqual(urls.slice(0, 4))
+    expect(manager.state.gui?.widgets).toBe('blob:7-1-5')
+    expect(revoked).toEqual(urls.slice(0, 5))
     await manager.reset()
     expect(manager.state.gui?.widgets).toMatch(/^blob:0-1-/)
-    expect(revoked).toHaveLength(8)
+    expect(revoked).toHaveLength(10)
   })
 
   it('сохранённый пак виден без движка', async () => {
     const { manager } = guiSetup()
     await manager.install('pack.zip', bytes(1))
-    expect(manager.state.gui?.icons).toBe('blob:7-2-5')
+    expect(manager.state.gui?.icons).toBe('blob:7-2-6')
   })
 })

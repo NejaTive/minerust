@@ -127,6 +127,8 @@ pub struct Game {
     breaking: Repeat,
     placing: Repeat,
     selected: Option<Held>,
+    container: Option<IVec3>,
+    container_opened: bool,
     mobs: Vec<Mob>,
     adopted: HashSet<ColumnPos>,
     mob_rng: Rng,
@@ -207,6 +209,8 @@ impl Game {
             breaking: Repeat::new(REPEAT_S),
             placing: Repeat::new(REPEAT_S),
             selected: Some(Held::Block(DEFAULT_BLOCK, 0)),
+            container: None,
+            container_opened: false,
             mobs: Vec::new(),
             adopted: HashSet::new(),
             mob_rng: Rng::new(seed as u32 ^ 0x9E37_79B9),
@@ -462,6 +466,53 @@ impl Game {
         }
     }
 
+    fn pot_accepts(&self, pos: IVec3) -> bool {
+        self.world.block_data(pos) == 0
+            && matches!(self.selected, Some(Held::Block(plant, _)) if Block::pot_code(plant).is_some())
+    }
+
+    fn use_block(&mut self, pos: IVec3) -> Vec<IVec3> {
+        match self.world.block(pos) {
+            Block::Chest => {
+                if !self.world.chest_blocked(pos) {
+                    self.container = Some(pos);
+                    self.container_opened = true;
+                }
+                Vec::new()
+            }
+            Block::FlowerPot => match self.selected {
+                Some(Held::Block(plant, _)) if self.world.plant_in_pot(pos, plant) => vec![pos],
+                _ => Vec::new(),
+            },
+            _ => self.world.toggle_by_hand(pos, self.look_dir()),
+        }
+    }
+
+    /// Окно контейнера открыли правой кнопкой с прошлого вызова; сбрасывает признак.
+    pub fn take_container_opened(&mut self) -> bool {
+        std::mem::take(&mut self.container_opened)
+    }
+
+    pub fn container_slots(&self) -> Vec<Option<String>> {
+        self.container
+            .map(|pos| self.world.chest_contents(pos))
+            .unwrap_or_default()
+    }
+
+    pub fn set_container_slot(&mut self, index: usize, name: Option<String>) -> bool {
+        let known =
+            |name: &str| Block::stack_from_name(name).is_some() || Item::from_name(name).is_some();
+        if name.as_deref().is_some_and(|name| !known(name)) {
+            return false;
+        }
+        self.container
+            .is_some_and(|pos| self.world.set_chest_slot(pos, index, name))
+    }
+
+    pub fn close_container(&mut self) {
+        self.container = None;
+    }
+
     pub fn release_all_keys(&mut self) {
         self.keys.clear();
         self.player.sprinting = false;
@@ -506,13 +557,16 @@ impl Game {
             self.apply_edit(&changed, &[], &mut dirty, &mut lit);
             target = self.pick();
         }
-        let uses_target = target.is_some_and(|hit| self.world.block(hit.block).opens_by_hand());
+        let uses_target = target.is_some_and(|hit| {
+            let block = self.world.block(hit.block);
+            block.opens_by_hand() && (block != Block::FlowerPot || self.pot_accepts(hit.block))
+        });
         if uses_target {
             if editable
                 && self.placing.fire_once()
                 && let Some(hit) = target
             {
-                let changed = self.world.toggle_by_hand(hit.block, self.look_dir());
+                let changed = self.use_block(hit.block);
                 if !changed.is_empty() {
                     self.apply_edit(&changed, &[], &mut dirty, &mut lit);
                     target = self.pick();
@@ -590,6 +644,9 @@ impl Game {
             variant,
         };
         let mut data = block.placement_state(&placement)?;
+        if block == Block::Chest {
+            data = self.world.chest_placement_data(pos, placement.look)?;
+        }
         if block.is_door() {
             if !self.world.can_place_door(pos, block) || self.bodies_overlap(pos, block, data) {
                 return None;

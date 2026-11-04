@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
+
 use glam::IVec3;
 
 use crate::block::Block;
+use crate::chest::CHEST_SLOTS;
 use crate::mob::MobRecord;
 use crate::section::{SECTION_SIZE, SECTION_VOLUME, Section};
 
@@ -12,6 +15,8 @@ pub struct Column {
     sections: [Section; COLUMN_SECTIONS as usize],
     pub mobs: Vec<MobRecord>,
     pub populated: bool,
+    /// Содержимое сундуков по ключу клетки (`chest_key`); создаётся при первой записи.
+    chests: BTreeMap<u32, Vec<Option<String>>>,
     /// Источники, поставленные генерацией: мир будит по ним жидкости при вставке колонки; не сохраняется.
     pub springs: Vec<IVec3>,
 }
@@ -22,6 +27,7 @@ impl Column {
             sections: std::array::from_fn(|_| Section::new()),
             mobs: Vec::new(),
             populated: false,
+            chests: BTreeMap::new(),
             springs: Vec::new(),
         }
     }
@@ -77,8 +83,32 @@ impl Column {
     }
 
     pub fn set_with_data(&mut self, local: IVec3, block: Block, data: u8) {
+        if block != Block::Chest && !self.chests.is_empty() {
+            self.chests.remove(&chest_key(local));
+        }
         let (sy, in_section) = Self::split(local);
         self.sections[sy].set_with_data(in_section, block, data);
+    }
+
+    pub fn chest(&self, local: IVec3) -> Option<&[Option<String>]> {
+        self.chests.get(&chest_key(local)).map(Vec::as_slice)
+    }
+
+    pub fn chest_or_create(&mut self, local: IVec3) -> &mut Vec<Option<String>> {
+        self.chests
+            .entry(chest_key(local))
+            .or_insert_with(|| vec![None; CHEST_SLOTS])
+    }
+
+    pub fn chests(&self) -> impl Iterator<Item = (IVec3, &[Option<String>])> {
+        self.chests
+            .iter()
+            .map(|(&key, slots)| (chest_local(key), slots.as_slice()))
+    }
+
+    pub fn insert_chest(&mut self, local: IVec3, mut slots: Vec<Option<String>>) {
+        slots.resize(CHEST_SLOTS, None);
+        self.chests.insert(chest_key(local), slots);
     }
 
     /// Блоки без данных столбика `(x, z)` снизу вверх; воздух пропускается.
@@ -102,6 +132,15 @@ impl Column {
             IVec3::new(local.x, local.y - sy * SECTION_SIZE, local.z),
         )
     }
+}
+
+fn chest_key(local: IVec3) -> u32 {
+    (local.x | local.z << 4 | local.y << 8) as u32
+}
+
+fn chest_local(key: u32) -> IVec3 {
+    let key = key as i32;
+    IVec3::new(key & 15, key >> 8, key >> 4 & 15)
 }
 
 impl Default for Column {

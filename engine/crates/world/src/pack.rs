@@ -3,6 +3,7 @@ use std::io::Read;
 use serde_json::Value;
 
 use crate::biome_color::{BiomePalette, BiomeTint, Colormap};
+use crate::chest;
 use crate::textures::{
     DecodedImage, MAX_LAYERS, TextureSet, TileTexture, WHITE, decode_png, scale_nearest,
 };
@@ -64,6 +65,7 @@ const GUI_DIR: &str = "assets/minecraft/textures/gui/";
 const GUI_WIDGETS: &str = "widgets.png";
 const GUI_ICONS: &str = "icons.png";
 const GUI_INVENTORY: &str = "container/inventory.png";
+const GUI_CONTAINER: &str = "container/generic_54.png";
 const GUI_SIZE_UNITS: u32 = 256;
 const PANEL_CORNER_UNITS: u32 = 4;
 const PANEL_WIDTH_UNITS: u32 = 176;
@@ -132,6 +134,7 @@ pub struct GuiImages {
     pub widgets: Vec<u8>,
     pub icons: Vec<u8>,
     pub inventory: Vec<u8>,
+    pub container: Vec<u8>,
     /// Девять квадратов 3×3 из углов, краёв и фона панели инвентаря, для `border-image`.
     pub panel: Vec<u8>,
     pub panel_slice: u32,
@@ -319,6 +322,18 @@ fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
         Tile::DoorAcaciaItem => ("items/door_acacia", WHITE, BiomeTint::None),
         Tile::DoorDarkOakItem => ("items/door_dark_oak", WHITE, BiomeTint::None),
         Tile::DoorIronItem => ("items/door_iron", WHITE, BiomeTint::None),
+        Tile::FurnaceFrontOff => ("furnace_front_off", WHITE, BiomeTint::None),
+        Tile::FurnaceFrontOn => ("furnace_front_on", WHITE, BiomeTint::None),
+        Tile::FurnaceSide => ("furnace_side", WHITE, BiomeTint::None),
+        Tile::FurnaceTop => ("furnace_top", WHITE, BiomeTint::None),
+        Tile::MobSpawner => ("mob_spawner", WHITE, BiomeTint::None),
+        Tile::CauldronInner => ("cauldron_inner", WHITE, BiomeTint::None),
+        Tile::CauldronSide => ("cauldron_side", WHITE, BiomeTint::None),
+        Tile::CauldronTop => ("cauldron_top", WHITE, BiomeTint::None),
+        Tile::CauldronBottom => ("cauldron_bottom", WHITE, BiomeTint::None),
+        Tile::FlowerPot => ("flower_pot", WHITE, BiomeTint::None),
+        tile if chest::is_double_tile(tile) => (chest::ENTITY_DOUBLE, WHITE, BiomeTint::None),
+        _ => (chest::ENTITY_SINGLE, WHITE, BiomeTint::None),
     }
 }
 
@@ -459,11 +474,13 @@ fn gui_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> GuiImages {
     let (widgets, _) = sheet(GUI_WIDGETS);
     let (icons, _) = sheet(GUI_ICONS);
     let (inventory, image) = sheet(GUI_INVENTORY);
+    let (container, _) = sheet(GUI_CONTAINER);
     let (panel, panel_slice) = panel_image(&image);
     GuiImages {
         widgets,
         icons,
         inventory,
+        container,
         panel,
         panel_slice,
     }
@@ -697,6 +714,18 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
     "door_dark_oak_upper.png",
     "door_iron_lower.png",
     "door_iron_upper.png",
+    "furnace_front_off.png",
+    "furnace_front_on.png",
+    "furnace_side.png",
+    "furnace_top.png",
+    "mob_spawner.png",
+    "cauldron_inner.png",
+    "cauldron_side.png",
+    "cauldron_top.png",
+    "cauldron_bottom.png",
+    "flower_pot.png",
+    "entity/chest/normal.png",
+    "entity/chest/normal_double.png",
     "items/door_wood.png",
     "items/door_spruce.png",
     "items/door_birch.png",
@@ -709,7 +738,7 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
 fn builtin_file(path: &str) -> Option<&'static [u8]> {
     let name = path.strip_prefix(BLOCKS_DIR).or_else(|| {
         path.strip_prefix(TEXTURES_DIR)
-            .filter(|n| n.starts_with("items/"))
+            .filter(|n| n.starts_with("items/") || n.starts_with("entity/chest/"))
     })?;
     BUILTIN
         .iter()
@@ -721,6 +750,7 @@ const BUILTIN_GUI: &[(&str, &[u8])] = builtin_files![
     "gui/widgets.png",
     "gui/icons.png",
     "gui/container/inventory.png",
+    "gui/container/generic_54.png",
 ];
 
 fn builtin_gui_file(name: &str) -> Option<&'static [u8]> {
@@ -1027,6 +1057,22 @@ fn build(
     let mut found: Vec<Option<Found>> = Vec::new();
     for &tile in &Tile::ALL {
         let stem = source(tile).0;
+        if chest::is_chest_tile(tile) {
+            let entity = read(&format!("{TEXTURES_DIR}{stem}"))
+                .and_then(|b| decode_png(&b).ok())
+                .filter(|image| image.width >= 64 && image.height * 2 >= image.width);
+            let (face, half) = chest::part(tile);
+            let tile_found = entity.map(|entity| Found {
+                image: chest::compose(face, half, &entity),
+                frames: 1,
+                animation: None,
+            });
+            if tile_found.is_none() && fallback.is_none() {
+                return Err(format!("missing texture {stem}"));
+            }
+            found.push(tile_found);
+            continue;
+        }
         let dir = if stem.starts_with("items/") {
             TEXTURES_DIR
         } else {

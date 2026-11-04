@@ -187,10 +187,36 @@ pub enum Tile {
     DoorAcaciaItem,
     DoorDarkOakItem,
     DoorIronItem,
+    FurnaceFrontOff,
+    FurnaceFrontOn,
+    FurnaceSide,
+    FurnaceTop,
+    MobSpawner,
+    CauldronInner,
+    CauldronSide,
+    CauldronTop,
+    CauldronBottom,
+    FlowerPot,
+    ChestFront,
+    ChestBack,
+    ChestLeft,
+    ChestRight,
+    ChestTop,
+    ChestBottom,
+    ChestDoubleFrontL,
+    ChestDoubleFrontR,
+    ChestDoubleBackL,
+    ChestDoubleBackR,
+    ChestDoubleTopL,
+    ChestDoubleTopR,
+    ChestDoubleBottomL,
+    ChestDoubleBottomR,
+    ChestDoubleEndL,
+    ChestDoubleEndR,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 180] = [
+    pub const ALL: [Tile; 206] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -371,6 +397,32 @@ impl Tile {
         Tile::DoorAcaciaItem,
         Tile::DoorDarkOakItem,
         Tile::DoorIronItem,
+        Tile::FurnaceFrontOff,
+        Tile::FurnaceFrontOn,
+        Tile::FurnaceSide,
+        Tile::FurnaceTop,
+        Tile::MobSpawner,
+        Tile::CauldronInner,
+        Tile::CauldronSide,
+        Tile::CauldronTop,
+        Tile::CauldronBottom,
+        Tile::FlowerPot,
+        Tile::ChestFront,
+        Tile::ChestBack,
+        Tile::ChestLeft,
+        Tile::ChestRight,
+        Tile::ChestTop,
+        Tile::ChestBottom,
+        Tile::ChestDoubleFrontL,
+        Tile::ChestDoubleFrontR,
+        Tile::ChestDoubleBackL,
+        Tile::ChestDoubleBackR,
+        Tile::ChestDoubleTopL,
+        Tile::ChestDoubleTopR,
+        Tile::ChestDoubleBottomL,
+        Tile::ChestDoubleBottomR,
+        Tile::ChestDoubleEndL,
+        Tile::ChestDoubleEndR,
     ];
 
     pub fn sway(self) -> f32 {
@@ -420,73 +472,78 @@ impl Tile {
     }
 
     pub fn is_cutout(self) -> bool {
-        matches!(
-            self,
-            Tile::Leaves
-                | Tile::BirchLeaves
-                | Tile::SpruceLeaves
-                | Tile::JungleLeaves
-                | Tile::AcaciaLeaves
-                | Tile::DarkOakLeaves
-                | Tile::Vine
-                | Tile::TallGrass
-                | Tile::Poppy
-                | Tile::Dandelion
-                | Tile::Torch
-                | Tile::CactusTop
-                | Tile::CactusSide
-                | Tile::CactusBottom
-                | Tile::DeadBush
-                | Tile::Reeds
-                | Tile::Waterlily
-                | Tile::BrownMushroom
-                | Tile::RedMushroom
-                | Tile::Fern
-                | Tile::DoubleGrassBottom
-                | Tile::DoubleGrassTop
-                | Tile::DoubleFernBottom
-                | Tile::DoubleFernTop
-                | Tile::SunflowerBottom
-                | Tile::SunflowerTop
-                | Tile::SyringaBottom
-                | Tile::SyringaTop
-                | Tile::RoseBushBottom
-                | Tile::RoseBushTop
-                | Tile::PeonyBottom
-                | Tile::PeonyTop
-                | Tile::Allium
-                | Tile::BlueOrchid
-                | Tile::Houstonia
-                | Tile::OxeyeDaisy
-                | Tile::TulipRed
-                | Tile::TulipOrange
-                | Tile::TulipWhite
-                | Tile::TulipPink
-                | Tile::SunflowerFront
-                | Tile::SunflowerBack
-                | Tile::CocoaStage0
-                | Tile::CocoaStage1
-                | Tile::CocoaStage2
-                | Tile::Glass
-                | Tile::GlassPaneTop
-                | Tile::IronBars
-                | Tile::Ladder
-                | Tile::Web
-                | Tile::RailNormal
-                | Tile::RailTurned
-                | Tile::DoorOakUpper
-                | Tile::DoorJungleUpper
-                | Tile::DoorAcaciaLower
-                | Tile::DoorAcaciaUpper
-                | Tile::DoorIronUpper
-                | Tile::DoorOakItem
-                | Tile::DoorSpruceItem
-                | Tile::DoorBirchItem
-                | Tile::DoorJungleItem
-                | Tile::DoorAcaciaItem
-                | Tile::DoorDarkOakItem
-                | Tile::DoorIronItem
-        )
+        crate::chest::is_chest_tile(self)
+            || matches!(
+                self,
+                Tile::Leaves
+                    | Tile::BirchLeaves
+                    | Tile::SpruceLeaves
+                    | Tile::JungleLeaves
+                    | Tile::AcaciaLeaves
+                    | Tile::DarkOakLeaves
+                    | Tile::Vine
+                    | Tile::TallGrass
+                    | Tile::Poppy
+                    | Tile::Dandelion
+                    | Tile::Torch
+                    | Tile::CactusTop
+                    | Tile::CactusSide
+                    | Tile::CactusBottom
+                    | Tile::DeadBush
+                    | Tile::Reeds
+                    | Tile::Waterlily
+                    | Tile::BrownMushroom
+                    | Tile::RedMushroom
+                    | Tile::Fern
+                    | Tile::DoubleGrassBottom
+                    | Tile::DoubleGrassTop
+                    | Tile::DoubleFernBottom
+                    | Tile::DoubleFernTop
+                    | Tile::SunflowerBottom
+                    | Tile::SunflowerTop
+                    | Tile::SyringaBottom
+                    | Tile::SyringaTop
+                    | Tile::RoseBushBottom
+                    | Tile::RoseBushTop
+                    | Tile::PeonyBottom
+                    | Tile::PeonyTop
+                    | Tile::Allium
+                    | Tile::BlueOrchid
+                    | Tile::Houstonia
+                    | Tile::OxeyeDaisy
+                    | Tile::TulipRed
+                    | Tile::TulipOrange
+                    | Tile::TulipWhite
+                    | Tile::TulipPink
+                    | Tile::SunflowerFront
+                    | Tile::SunflowerBack
+                    | Tile::CocoaStage0
+                    | Tile::CocoaStage1
+                    | Tile::CocoaStage2
+                    | Tile::Glass
+                    | Tile::GlassPaneTop
+                    | Tile::IronBars
+                    | Tile::Ladder
+                    | Tile::Web
+                    | Tile::RailNormal
+                    | Tile::RailTurned
+                    | Tile::DoorOakUpper
+                    | Tile::DoorJungleUpper
+                    | Tile::DoorAcaciaLower
+                    | Tile::DoorAcaciaUpper
+                    | Tile::DoorIronUpper
+                    | Tile::DoorOakItem
+                    | Tile::DoorSpruceItem
+                    | Tile::DoorBirchItem
+                    | Tile::DoorJungleItem
+                    | Tile::DoorAcaciaItem
+                    | Tile::DoorDarkOakItem
+                    | Tile::DoorIronItem
+                    | Tile::MobSpawner
+                    | Tile::FlowerPot
+                    | Tile::CauldronTop
+                    | Tile::CauldronBottom
+            )
     }
 }
 

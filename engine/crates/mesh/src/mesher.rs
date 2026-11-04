@@ -337,7 +337,7 @@ pub(crate) fn mesh_cached(
                             false,
                             kind.block()
                                 .tile(Facing::Side)
-                                .map_or(0, |t| t.layer() as u8),
+                                .map_or(0, |t| t.layer() as u16),
                             [3; 4],
                             [light[0]; 4],
                             [light[1]; 4],
@@ -417,7 +417,7 @@ pub(crate) fn mesh_cached(
                     });
                     let days =
                         corner_data.map(|(shade, [sun, block], _)| day_shade(shade, sun, block));
-                    let layer = tile.layer() as u8;
+                    let layer = tile.layer() as u16;
                     let target = if block.render_layer() == RenderLayer::Cutout {
                         &mut meshes.cutout
                     } else {
@@ -519,7 +519,7 @@ fn push_layer(
 ) {
     let (sky, block_light) = lights.at(index, 0);
     let light = [sky, block_light].map(|l| half_average(l, 1));
-    let layer = Tile::Snow.layer() as u8;
+    let layer = Tile::Snow.layer() as u16;
     for (face_index, (_, normal, _)) in faces.iter().enumerate() {
         let neighbor = blocks.at(index, *normal);
         if neighbor.is_opaque() || (face_index > 1 && neighbor.shape() == Shape::Layer) {
@@ -563,7 +563,7 @@ fn push_cactus(
             cell,
             CACTUS + face_index as u8,
             false,
-            tile.layer() as u8,
+            tile.layer() as u16,
             [3; 4],
             [light[0]; 4],
             [light[1]; 4],
@@ -579,7 +579,7 @@ fn push_ice(
     cell: [u8; 3],
     faces: &FaceStrides,
 ) {
-    let layer = Tile::Ice.layer() as u8;
+    let layer = Tile::Ice.layer() as u16;
     for (face_index, (_, normal, _)) in faces.iter().enumerate() {
         let neighbor = blocks.at(index, *normal);
         if neighbor.is_opaque() || neighbor == Block::Ice {
@@ -600,7 +600,7 @@ fn push_ice(
 }
 
 fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light: [u8; 2]) {
-    let quad = |template: u8, layer: u8| {
+    let quad = |template: u8, layer: u16| {
         Quad::new(
             cell,
             template,
@@ -620,10 +620,10 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
                 Tile::RailNormal
             };
             mesh.quads
-                .push(quad(RAIL + data.min(RAIL_SHAPES - 1), layer.layer() as u8));
+                .push(quad(RAIL + data.min(RAIL_SHAPES - 1), layer.layer() as u16));
         }
         Shape::Vine => {
-            let layer = Tile::Vine.layer() as u8;
+            let layer = Tile::Vine.layer() as u16;
             for (side, &(bit, _)) in VINE_SIDES.iter().enumerate() {
                 if data & bit != 0 {
                     let first = VINE + 2 * side as u8;
@@ -633,37 +633,37 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
             }
         }
         Shape::Lily => {
-            let layer = Tile::Waterlily.layer() as u8;
+            let layer = Tile::Waterlily.layer() as u16;
             mesh.quads.push(quad(LILY, layer));
             mesh.quads.push(quad(LILY + 1, layer));
         }
         Shape::Cocoa => {
             let stage = usize::from(data >> COCOA_STAGE_SHIFT).min(COCOA_STAGES as usize - 1);
             let layer =
-                [Tile::CocoaStage0, Tile::CocoaStage1, Tile::CocoaStage2][stage].layer() as u8;
+                [Tile::CocoaStage0, Tile::CocoaStage1, Tile::CocoaStage2][stage].layer() as u16;
             let first = COCOA + data * COCOA_PARTS;
             for t in first..first + COCOA_PARTS {
                 mesh.quads.push(quad(t, layer));
             }
         }
         Shape::Sunflower => {
-            let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
+            let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u16);
             for t in CROSS..CROSS + 4 {
                 mesh.quads.push(quad(t, layer));
             }
             mesh.quads
-                .push(quad(SUNFLOWER_HEAD, Tile::SunflowerFront.layer() as u8));
+                .push(quad(SUNFLOWER_HEAD, Tile::SunflowerFront.layer() as u16));
             mesh.quads
-                .push(quad(SUNFLOWER_HEAD + 1, Tile::SunflowerBack.layer() as u8));
+                .push(quad(SUNFLOWER_HEAD + 1, Tile::SunflowerBack.layer() as u16));
         }
         Shape::Cross => {
-            let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u8);
+            let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u16);
             for t in CROSS..CROSS + 4 {
                 mesh.quads.push(quad(t, layer));
             }
         }
         Shape::Torch => {
-            let layer = Tile::Torch.layer() as u8;
+            let layer = Tile::Torch.layer() as u16;
             if (ATTACH_POS_X..=ATTACH_NEG_Z).contains(&data) {
                 let first = TORCH_WALL + TORCH_WALL_PARTS * (data - ATTACH_POS_X);
                 for t in first..first + TORCH_WALL_PARTS {
@@ -769,6 +769,8 @@ mod cocoa;
 mod connected;
 #[cfg(test)]
 mod expand;
+#[cfg(test)]
+mod functional;
 #[cfg(test)]
 mod lily;
 #[cfg(test)]

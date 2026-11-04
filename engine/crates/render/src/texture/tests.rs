@@ -3,7 +3,7 @@ use world::textures::{TextureSet, TileTexture};
 
 const TILE_SIZE: u32 = 32;
 const MIP_LEVELS: u32 = 6;
-const LAYER_COUNT: u32 = 249;
+const LAYER_COUNT: u32 = 275;
 
 fn standard() -> TextureSet {
     TextureSet::standard()
@@ -248,14 +248,22 @@ fn every_frame_of_animated_tiles_gets_its_own_layer() {
     }
 }
 
+fn fnv(bytes: &[u8]) -> String {
+    let hash = bytes.iter().fold(0xcbf29ce484222325_u64, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+    });
+    format!("{hash:016x}")
+}
+
+/// Плитки 5c дописаны в конец: слои до них совпадают с атласом этапа 5b байт в байт.
+const STAGE_5B_BYTES: usize = 1359540;
+
 #[test]
 fn builtin_set_output_matches_golden() {
     let data = generate_standard();
-    let hash = data.iter().fold(0xcbf29ce484222325_u64, |h, &b| {
-        (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
-    });
-    assert_eq!(data.len(), 1359540);
-    assert_eq!(format!("{hash:016x}"), "814be0ac03d710b7");
+    assert_eq!(data.len(), 1501500);
+    assert_eq!(fnv(&data[..STAGE_5B_BYTES]), "814be0ac03d710b7");
+    assert_eq!(fnv(&data), "3b2695ba1985dff9");
 }
 
 #[test]
@@ -277,4 +285,58 @@ fn generates_all_mips_for_32px_tiles() {
     assert_eq!(layer_bytes, 1365 * 4);
     assert_eq!(data.len(), Tile::ALL.len() * layer_bytes);
     assert_eq!(&data[layer_bytes - 4..layer_bytes], [10, 20, 30, 255]);
+}
+
+fn marked_set(frames: u32) -> TextureSet {
+    let size = 16u32;
+    let frame_bytes = (size * size * 4) as usize;
+    let tiles = Tile::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let mut texture = TileTexture::still(Vec::new());
+            texture.frames = frames;
+            texture.layers = (0..frames)
+                .flat_map(|f| {
+                    let mark = [(i % 251) as u8, f as u8, 7, 255];
+                    mark.repeat(frame_bytes / 4)
+                })
+                .collect();
+            texture
+        })
+        .collect();
+    TextureSet::from_tiles(size, tiles, standard().palette().clone())
+}
+
+#[test]
+fn an_atlas_over_256_layers_splits_into_two_arrays() {
+    let set = marked_set(2);
+    assert!(set.layer_count() > 2 * 200);
+    let [(low, low_data), (high, high_data)] = split_layers(&set);
+    assert_eq!(low as usize, world::textures::LAYERS_PER_ARRAY);
+    assert_eq!(high, set.layer_count() - low);
+    let layer_bytes = super::layer_bytes(set.size());
+    assert_eq!(low_data.len(), low as usize * layer_bytes);
+    assert_eq!(high_data.len(), high as usize * layer_bytes);
+    for (i, tile) in Tile::ALL.iter().enumerate() {
+        for frame in 0..2 {
+            let layer = set.first_layer(*tile) as usize + frame;
+            let (data, at) = if layer < low as usize {
+                (&low_data, layer)
+            } else {
+                (&high_data, layer - low as usize)
+            };
+            let texel = &data[at * layer_bytes..][..4];
+            assert_eq!(texel, [(i % 251) as u8, frame as u8, 7, 255], "{tile:?}");
+        }
+    }
+}
+
+#[test]
+fn the_standard_atlas_overflows_into_the_second_array() {
+    let set = standard();
+    let [(low, _), (high, data)] = split_layers(&set);
+    assert_eq!(low, 256);
+    assert_eq!(high, LAYER_COUNT - 256);
+    assert_eq!(data.len(), high as usize * layer_bytes());
 }

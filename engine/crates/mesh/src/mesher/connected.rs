@@ -101,8 +101,8 @@ fn a_climbing_rail_rises_a_block_on_one_side() {
 fn curved_rails_use_the_turned_texture() {
     let straight = vertices(&mesh_with(&[(AT, Block::Rail, RAIL_NORTH_SOUTH)]).cutout);
     let curve = vertices(&mesh_with(&[(AT, Block::Rail, RAIL_SOUTH_EAST)]).cutout);
-    assert_eq!(straight[0].layer(), Tile::RailNormal.layer() as u8);
-    assert_eq!(curve[0].layer(), Tile::RailTurned.layer() as u8);
+    assert_eq!(straight[0].layer(), Tile::RailNormal.layer() as u16);
+    assert_eq!(curve[0].layer(), Tile::RailTurned.layer() as u16);
 }
 
 #[test]

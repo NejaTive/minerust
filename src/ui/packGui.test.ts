@@ -11,6 +11,7 @@ describe('переменные интерфейса из пака', () => {
         widgets: 'blob:w1',
         icons: 'blob:i',
         inventory: 'blob:n',
+        container: 'blob:c',
         panel: 'blob:p',
         panelSlice: 8,
       },
@@ -18,6 +19,7 @@ describe('переменные интерфейса из пака', () => {
     bindPackGui(state, root)
     expect(vars['--gui-widgets']).toBe('url("blob:w1")')
     expect(vars['--gui-panel-slice']).toBe('8')
+    expect(vars['--gui-container']).toBe('url("blob:c")')
     state.gui = { ...state.gui, widgets: 'blob:w2' }
     expect(vars['--gui-widgets']).toBe('url("blob:w2")')
   })

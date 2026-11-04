@@ -5,6 +5,7 @@ import Hotbar from './components/Hotbar.vue'
 import Hud from './components/Hud.vue'
 import CommandConsole from './components/CommandConsole.vue'
 import CommandLog from './components/CommandLog.vue'
+import Container from './components/Container.vue'
 import Inventory from './components/Inventory.vue'
 import MenuOverlay from './components/MenuOverlay.vue'
 import type { MenuScreen } from './components/menu/screens'
@@ -122,6 +123,7 @@ async function exitToMenu() {
     <CommandLog v-if="state.ready" />
     <Inventory v-if="state.inventoryOpen && state.ready" />
     <CommandConsole v-if="state.consoleOpen && state.ready" />
+    <Container v-if="state.containerOpen && state.ready && game?.engine" :engine="game.engine" />
   </template>
   <MenuOverlay
     v-if="
@@ -130,6 +132,7 @@ async function exitToMenu() {
       !state.locked &&
       !state.inventoryOpen &&
       !state.consoleOpen &&
+      !state.containerOpen &&
       !state.lockLost
     "
     v-model:screen="screen"

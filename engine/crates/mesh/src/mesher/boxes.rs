@@ -1,13 +1,14 @@
 use glam::IVec3;
-use world::block::{Block, RenderLayer, Shape};
+use world::block::{Block, Facing, RenderLayer, Shape};
 use world::boxes::{FaceMask, face_axes};
 use world::section::SECTION_SIZE;
+use world::tile::Tile;
 
 use super::{
     CornerStrides, Datas, Lights, MeshData, Neighborhood, PADDED, half_average, vertex_ao,
 };
 use crate::mesh::Quad;
-use crate::templates::{FACES, Face};
+use crate::templates::{FACES, Face, POT_CROSS, POT_CROSS_PARTS};
 
 const SPECIAL_NEIGHBOR: [bool; 256] = {
     let mut table = [false; 256];
@@ -185,7 +186,7 @@ pub(super) fn push_boxes(
             if mask.is_empty() {
                 continue;
             }
-            let Some(tile) = block.face_tile(face.facing, face.normal, data) else {
+            let Some(tile) = block.box_tile(box_index, face.facing, face.normal, data) else {
                 continue;
             };
             let (sky, lamp) = lights.at(index, Neighborhood::stride(face.normal));
@@ -220,11 +221,49 @@ pub(super) fn push_boxes(
                     face_index as u8,
                     rect,
                     plane,
-                    tile.layer() as u8,
+                    tile.layer() as u16,
                     light,
                     ao,
                 ));
             }
+        }
+    }
+    push_contents(target, block, data, cell, light_of(lights, index));
+}
+
+fn light_of(lights: &Lights, index: usize) -> [u8; 2] {
+    let (sky, lamp) = lights.at(index, 0);
+    [sky, lamp].map(|l| half_average(l, 1))
+}
+
+fn push_contents(target: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light: [u8; 2]) {
+    if block == Block::Cauldron
+        && let Some(plane) = Block::cauldron_water_units(data)
+    {
+        target.quads.push(Quad::boxed(
+            cell,
+            0,
+            (2, 14, 2, 14),
+            plane,
+            Tile::Water.layer() as u16,
+            light,
+            [3; 4],
+        ));
+    }
+    if block == Block::FlowerPot
+        && let Some(plant) = Block::pot_plant(data)
+        && let Some(tile) = plant.tile(Facing::Side)
+    {
+        for template in POT_CROSS..POT_CROSS + POT_CROSS_PARTS {
+            target.quads.push(Quad::new(
+                cell,
+                template,
+                false,
+                tile.layer() as u16,
+                [3; 4],
+                [light[0]; 4],
+                [light[1]; 4],
+            ));
         }
     }
 }

@@ -32,6 +32,6 @@ fn lily_is_a_flat_cutout_slab_a_sixteenth_above_the_cell_floor() {
     assert!(
         verts
             .iter()
-            .all(|v| v.layer() == Tile::Waterlily.layer() as u8)
+            .all(|v| v.layer() == Tile::Waterlily.layer() as u16)
     );
 }

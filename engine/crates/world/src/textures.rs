@@ -1,7 +1,8 @@
 use crate::biome_color::{BiomePalette, BiomeTint};
 use crate::tile::{EMISSIVE_FLAG, Tile};
 
-pub const MAX_LAYERS: usize = 256;
+pub const MAX_LAYERS: usize = 512;
+pub const LAYERS_PER_ARRAY: usize = 256;
 pub const WHITE: [f32; 3] = [1.0; 3];
 
 pub struct TileTexture {

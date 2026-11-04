@@ -106,7 +106,11 @@ pub const SUNFLOWER_HEAD: u8 = 81;
 pub const COCOA: u8 = 83;
 pub const COCOA_PARTS: u8 = 11;
 pub const RAIL: u8 = COCOA + COCOA_STAGES * 4 * COCOA_PARTS;
-pub const TEMPLATE_COUNT: usize = RAIL as usize + RAIL_SHAPES as usize;
+pub const POT_CROSS: u8 = RAIL + RAIL_SHAPES;
+pub const POT_CROSS_PARTS: u8 = 4;
+pub const TEMPLATE_COUNT: usize = POT_CROSS as usize + POT_CROSS_PARTS as usize;
+const POT_PLANT_SPAN: (u8, u8) = (2, 14);
+const POT_PLANT_BOTTOM: u8 = 4;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -460,6 +464,27 @@ fn build() -> [Template; TEMPLATE_COUNT] {
         }
     }
     out.extend((0..RAIL_SHAPES).map(rail));
+    let (lo, hi) = POT_PLANT_SPAN;
+    for (a, b) in [([lo, lo], [hi, hi]), ([hi, lo], [lo, hi])] {
+        let corner = |p: [u8; 2], y: u8, uv: [u8; 2]| Corner {
+            pos: [p[0], y, p[1]],
+            uv,
+        };
+        let front = [
+            corner(a, POT_PLANT_BOTTOM, [0, u]),
+            corner(b, POT_PLANT_BOTTOM, [u, u]),
+            corner(b, u, [u, 0]),
+            corner(a, u, [0, 0]),
+        ];
+        let mut back = front;
+        back.reverse();
+        for corners in [front, back] {
+            out.push(Template {
+                corners,
+                shade: CROSS_SHADE,
+            });
+        }
+    }
     out.try_into().expect("template count")
 }
 

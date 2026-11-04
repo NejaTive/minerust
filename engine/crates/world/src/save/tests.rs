@@ -3,7 +3,7 @@ use crate::mob::{PARROT_COLOURS, RABBIT_COLOURS, horse_variant};
 use crate::pos::ColumnPos;
 use crate::terrain::Terrain;
 
-const HEADER: usize = 9;
+const HEADER: usize = 11;
 
 const BLOCKS: [Block; 13] = [
     Block::Air,
@@ -320,7 +320,7 @@ fn unknown_mob_kind_is_rejected() {
         variant: 0,
     });
     let mut bytes = encode_column(&column);
-    bytes[HEADER] = 99;
+    bytes[HEADER - 2] = 99;
     assert_eq!(decode_column(&bytes).err(), Some(SaveError::UnknownMob(99)));
 }
 

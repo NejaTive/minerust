@@ -4,6 +4,7 @@ import { BENCH, BENCH_POINTS, BENCH_SEED, BENCH_TIME, BENCH_WORKERS } from '../b
 import { FrameRecorder } from '../bench/recorder'
 import type { WorldType } from '../world/kinds'
 import { runBench } from '../bench/run'
+import { runContainerClose } from '../ui/container'
 import { beginInventory, bindInput, endInventory } from '../input/bind'
 import { inventoryFlags, type InventoryMode } from '../input/inventory-mode'
 import { INVENTORY_LOCK_GRACE_MS } from '../input/lock-policy'
@@ -47,6 +48,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
   let mode: InventoryMode = 'idle'
   let graceTimer = 0
   let consoleScreen = false
+  let containerScreen = false
   const modeIs = (value: InventoryMode) => mode === value
 
   function setMode(next: InventoryMode) {
@@ -59,10 +61,14 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
       )
     }
     const flags = inventoryFlags(next)
-    if (!flags.inventoryOpen) consoleScreen = false
+    if (!flags.inventoryOpen) {
+      consoleScreen = false
+      containerScreen = false
+    }
     Object.assign(state, flags, {
-      inventoryOpen: flags.inventoryOpen && !consoleScreen,
+      inventoryOpen: flags.inventoryOpen && !consoleScreen && !containerScreen,
       consoleOpen: flags.inventoryOpen && consoleScreen,
+      containerOpen: flags.inventoryOpen && containerScreen,
     })
   }
 
@@ -101,7 +107,7 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
       void save()
     },
     inventoryGrace: () => mode === 'grace',
-    inventoryOpen: () => state.inventoryOpen || state.consoleOpen,
+    inventoryOpen: () => state.inventoryOpen || state.consoleOpen || state.containerOpen,
     consoleOpen: () => state.consoleOpen,
     openInventory() {
       if (!engine.value || switching || mode === 'lock-lost') return
@@ -120,9 +126,21 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
     },
   })
 
+  function openContainer() {
+    if (!engine.value || switching || !(modeIs('idle') || modeIs('grace'))) return
+    containerScreen = true
+    setMode('inventory')
+    beginInventory(engine.value)
+  }
+
   async function closeInventory() {
     if (mode !== 'inventory') return
+    const closedContainer = state.containerOpen
     setMode('closing')
+    if (closedContainer) {
+      runContainerClose()
+      engine.value?.closeContainer()
+    }
     engine.value?.release_all_keys()
     const ok = await endInventory(canvas.value)
     if (!modeIs('closing')) return
@@ -179,7 +197,10 @@ export function useEngine(canvas: Ref<HTMLCanvasElement | undefined>, worldId: s
       time: (v) => (state.time = v),
       player: (v) => (state.player = v),
       rendered: BENCH ? (now, ms) => benchFrames.push(now, ms) : undefined,
-      afterRender: () => pool?.pump(),
+      afterRender: () => {
+        pool?.pump()
+        if (created.takeContainerOpened()) openContainer()
+      },
     })
     loop.start()
   }

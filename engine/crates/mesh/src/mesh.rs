@@ -41,7 +41,7 @@ impl Quad {
         cell: [u8; 3],
         template: u8,
         flip: bool,
-        layer: u8,
+        layer: u16,
         corner_ao: [u8; 4],
         sun: [u8; 4],
         block: [u8; 4],
@@ -62,8 +62,9 @@ impl Quad {
                 | z << 8
                 | u32::from(template & 0x1F) << 12
                 | u32::from(flip) << 17
-                | u32::from(layer) << 18
-                | u32::from(template >> 5) << 26,
+                | u32::from(layer & 0xFF) << 18
+                | u32::from(template >> 5) << 26
+                | u32::from(layer >> 8) << 30,
             pack(corner_ao, 2) | pack(sun, 5) << 8,
             pack(block, 5),
         ])
@@ -78,7 +79,7 @@ impl Quad {
         face: u8,
         rect: (u8, u8, u8, u8),
         plane: u8,
-        layer: u8,
+        layer: u16,
         light: [u8; 2],
         ao: [u8; 4],
     ) -> Self {
@@ -168,8 +169,8 @@ impl Quad {
         self.0[0] >> 17 & 1 != 0
     }
 
-    pub fn layer(self) -> u8 {
-        (self.0[0] >> 18) as u8
+    pub fn layer(self) -> u16 {
+        ((self.0[0] >> 18 & 0xFF) | (self.0[0] >> 30) << 8) as u16
     }
 
     pub fn ao(self) -> [u8; 4] {
