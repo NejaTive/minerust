@@ -337,6 +337,10 @@ impl Terrain {
         self.relief.temperature(biome, x, y, z)
     }
 
+    pub fn freezes_at(&self, x: i32, y: i32, z: i32) -> bool {
+        self.temperature(self.biome_at(x, z), x, y, z) < FREEZE_BELOW
+    }
+
     /// Порт `Biome.generateBiomeTerrain`: слои сверху вниз, после каждого воздушного промежутка заново.
     fn paint_column(
         &self,
@@ -579,6 +583,7 @@ pub fn lake_key(terrain: &Terrain) -> ColumnPos {
 
 mod decor;
 mod relief;
+mod spawn;
 
 #[cfg(test)]
 mod bench;

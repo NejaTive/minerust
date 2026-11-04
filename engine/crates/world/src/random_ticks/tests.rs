@@ -1,5 +1,6 @@
 use super::*;
 use crate::column::Column;
+use crate::terrain::Biome;
 
 const GROUND: i32 = 10;
 const CAP: usize = 400_000;
@@ -41,7 +42,7 @@ fn run(
     until: impl Fn(&World) -> bool,
 ) -> usize {
     for step in 0..steps {
-        ticks.step(world, light, ColumnPos::ZERO, 8);
+        ticks.step(world, light, &terrain(), ColumnPos::ZERO, 8, false);
         if until(world) {
             return step + 1;
         }
@@ -137,7 +138,7 @@ fn view_radius_limits_simulation() {
     world.set_block(key.origin() + at(8, 8) + IVec3::Y, Block::Stone);
     let mut ticks = RandomTicks::new(1);
     for _ in 0..20_000 {
-        ticks.step(&mut world, &light, ColumnPos::ZERO, 4);
+        ticks.step(&mut world, &light, &terrain(), ColumnPos::ZERO, 4, false);
     }
     assert_eq!(world.block(key.origin() + at(8, 8)), Block::Grass);
 }
@@ -151,7 +152,11 @@ fn same_seed_gives_same_result() {
         }
         let mut ticks = RandomTicks::new(seed);
         (0..200)
-            .map(|_| ticks.step(&mut world, &light, ColumnPos::ZERO, 8).changed)
+            .map(|_| {
+                ticks
+                    .step(&mut world, &light, &terrain(), ColumnPos::ZERO, 8, false)
+                    .changed
+            })
             .collect::<Vec<_>>()
     };
     assert_eq!(play(7), play(7));
@@ -199,7 +204,7 @@ fn snow_next_to_a_light_source_melts() {
         w.block(at(8, 8) + IVec3::Y) == Block::Air
     });
     assert_eq!(world.block(at(8, 8) + IVec3::Y), Block::Air);
-    assert_eq!(world.block(at(8, 8)), Block::SnowyGrass);
+    assert_eq!(world.block(at(8, 8)), Block::Grass);
 }
 
 #[test]
@@ -243,15 +248,15 @@ fn snowy_grass_under_snow_stays() {
 }
 
 #[test]
-fn dirt_next_to_snowy_grass_becomes_snowy_grass() {
+fn dirt_next_to_snowy_grass_becomes_grass() {
     let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::Dirt);
     world.set_block(at(8, 8), Block::SnowyGrass);
+    world.set_block(at(8, 8) + IVec3::Y, Block::Snow);
     let mut ticks = RandomTicks::new(1);
     run(&mut ticks, &mut world, &light, CAP, |w| {
         w.block(at(9, 8)) != Block::Dirt
     });
-    assert_eq!(world.block(at(9, 8)), Block::SnowyGrass);
-    assert_eq!(count(&world, Block::Grass), 0);
+    assert_eq!(world.block(at(9, 8)), Block::Grass);
 }
 
 #[test]
@@ -345,4 +350,140 @@ fn mycelium_dies_under_a_block_and_spreads_to_lit_dirt() {
         w.block(at(9, 8)) == Block::Mycelium
     });
     assert_eq!(world.block(at(9, 8)), Block::Mycelium);
+}
+
+const SNOW_SEED: i32 = 7;
+const WEATHER_STEPS: usize = 600;
+
+fn terrain() -> Terrain {
+    Terrain::new(SNOW_SEED)
+}
+
+fn uniform_key(terrain: &Terrain, wanted: impl Fn(Biome) -> bool) -> ColumnPos {
+    (-300..300)
+        .step_by(2)
+        .flat_map(|z| (-300..300).step_by(2).map(move |x| ColumnPos::new(x, z)))
+        .find(|key| {
+            let origin = key.origin();
+            wanted(terrain.sample_biome(origin.x + 8, origin.z + 8))
+                && (0..SECTION_SIZE).all(|z| {
+                    (0..SECTION_SIZE).all(|x| wanted(terrain.biome_at(origin.x + x, origin.z + z)))
+                })
+        })
+        .expect("no uniform column")
+}
+
+fn cold_key(terrain: &Terrain) -> ColumnPos {
+    uniform_key(terrain, |biome| biome == Biome::IcePlains)
+}
+
+fn warm_key(terrain: &Terrain) -> ColumnPos {
+    uniform_key(terrain, |biome| biome == Biome::Plains)
+}
+
+fn weather_world(key: ColumnPos, ground: Block, torches: bool) -> (World, LightMap) {
+    let mut world = World::new();
+    let mut base = column(ground);
+    if torches {
+        for z in (1..SECTION_SIZE).step_by(3) {
+            for x in (1..SECTION_SIZE).step_by(3) {
+                base.set(IVec3::new(x, GROUND + 1, z), Block::Torch);
+            }
+        }
+    }
+    world.insert(key, base);
+    let mut light = LightMap::new();
+    light.add_column(&world, key);
+    (world, light)
+}
+
+fn weather_run(key: ColumnPos, world: &mut World, light: &LightMap, precipitation: bool) {
+    let terrain = terrain();
+    let mut ticks = RandomTicks::new(5);
+    for _ in 0..WEATHER_STEPS {
+        ticks.step(world, light, &terrain, key, 1, precipitation);
+    }
+}
+
+fn count_at(world: &World, key: ColumnPos, y: i32, block: Block) -> usize {
+    (0..SECTION_SIZE)
+        .flat_map(|z| (0..SECTION_SIZE).map(move |x| IVec3::new(x, y, z)))
+        .filter(|&local| world.block(key.origin() + local) == block)
+        .count()
+}
+
+#[test]
+fn open_water_freezes_in_cold_biome_regardless_of_weather() {
+    let key = cold_key(&terrain());
+    let (mut world, light) = weather_world(key, Block::Water, false);
+    weather_run(key, &mut world, &light, false);
+    assert!(count_at(&world, key, GROUND, Block::Ice) > 20);
+}
+
+#[test]
+fn water_does_not_freeze_in_warm_biome_or_near_light() {
+    let terrain = terrain();
+    let warm = warm_key(&terrain);
+    let (mut world, light) = weather_world(warm, Block::Water, false);
+    weather_run(warm, &mut world, &light, true);
+    assert_eq!(count_at(&world, warm, GROUND, Block::Ice), 0);
+
+    let cold = cold_key(&terrain);
+    let (mut world, light) = weather_world(cold, Block::Water, true);
+    weather_run(cold, &mut world, &light, true);
+    assert_eq!(count_at(&world, cold, GROUND, Block::Ice), 0);
+}
+
+#[test]
+fn snow_falls_only_during_precipitation_in_cold_biome() {
+    let terrain = terrain();
+    let cold = cold_key(&terrain);
+    let (mut world, light) = weather_world(cold, Block::Grass, false);
+    weather_run(cold, &mut world, &light, false);
+    assert_eq!(count_at(&world, cold, GROUND + 1, Block::Snow), 0);
+    weather_run(cold, &mut world, &light, true);
+    let snow = count_at(&world, cold, GROUND + 1, Block::Snow);
+    assert!(snow > 20);
+    assert_eq!(count_at(&world, cold, GROUND, Block::SnowyGrass), snow);
+
+    let warm = warm_key(&terrain);
+    let (mut world, light) = weather_world(warm, Block::Grass, false);
+    weather_run(warm, &mut world, &light, true);
+    assert_eq!(count_at(&world, warm, GROUND + 1, Block::Snow), 0);
+}
+
+#[test]
+fn snow_does_not_settle_on_ice() {
+    let cold = cold_key(&terrain());
+    let (mut world, light) = weather_world(cold, Block::Ice, false);
+    weather_run(cold, &mut world, &light, true);
+    assert_eq!(count_at(&world, cold, GROUND + 1, Block::Snow), 0);
+    assert_eq!(count_at(&world, cold, GROUND, Block::Ice), 256);
+}
+
+#[test]
+fn ice_melts_near_a_torch_only() {
+    let cold = cold_key(&terrain());
+    let (mut world, light) = weather_world(cold, Block::Ice, true);
+    weather_run(cold, &mut world, &light, false);
+    assert!(count_at(&world, cold, GROUND, Block::Water) > 20);
+}
+
+#[test]
+fn snowy_grass_without_snow_turns_back_to_grass() {
+    let (mut world, light) = world_of(&[ColumnPos::ZERO], Block::SnowyGrass);
+    let mut ticks = RandomTicks::new(2);
+    run(&mut ticks, &mut world, &light, CAP, |w| {
+        count(w, Block::SnowyGrass) == 0
+    });
+    assert_eq!(count(&world, Block::SnowyGrass), 0);
+    assert_eq!(count(&world, Block::Grass), 256);
+}
+
+#[test]
+fn snow_settles_on_leaves_during_precipitation() {
+    let cold = cold_key(&terrain());
+    let (mut world, light) = weather_world(cold, Block::Leaves, false);
+    weather_run(cold, &mut world, &light, true);
+    assert!(count_at(&world, cold, GROUND + 1, Block::Snow) > 20);
 }

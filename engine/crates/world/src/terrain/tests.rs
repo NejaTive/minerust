@@ -863,3 +863,40 @@ fn warm_mountain_peaks_are_snow_capped_only_high_up() {
     assert!(capped > 0, "no snow on the peaks");
     assert_eq!(low_snow, 0);
 }
+
+const SPAWN_SEEDS: [i32; 6] = [0, 1, 7, 42, 1337, 987_654];
+
+#[test]
+fn spawn_is_an_allowed_biome_on_grass() {
+    for seed in SPAWN_SEEDS {
+        let terrain = Terrain::new(seed);
+        let spawn = terrain.spawn_point();
+        let biome = terrain.biome_at(spawn.x, spawn.z);
+        assert!(
+            super::spawn::SPAWN_BIOMES.contains(&biome),
+            "{seed}: {biome:?}"
+        );
+        let column = terrain.generate(ColumnPos::of_block(spawn));
+        let local = IVec3::new(spawn.x & 15, spawn.y, spawn.z & 15);
+        assert!(
+            column.get(local).is_grass(),
+            "{seed}: {:?}",
+            column.get(local)
+        );
+    }
+}
+
+#[test]
+fn spawn_is_deterministic_per_seed() {
+    for seed in SPAWN_SEEDS {
+        assert_eq!(
+            Terrain::new(seed).spawn_point(),
+            Terrain::new(seed).spawn_point()
+        );
+    }
+    let spawns: std::collections::HashSet<_> = SPAWN_SEEDS
+        .iter()
+        .map(|&s| Terrain::new(s).spawn_point())
+        .collect();
+    assert!(spawns.len() > 1);
+}

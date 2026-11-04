@@ -449,6 +449,7 @@ pub const BLOCKS: [BlockDef; 95] = [
     BlockDef {
         opaque: false,
         slippery: true,
+        random_ticks: true,
         layer: RenderLayer::Translucent,
         ..BlockDef::uniform("ice", "лёд", Tile::Ice)
     },
@@ -1140,6 +1141,10 @@ impl Block {
             }
             Block::Waterlily => support == Block::Water,
             Block::Cocoa => support == Block::JungleLog,
+            Block::Snow => {
+                support.is_leaves()
+                    || (support.is_solid() && !matches!(support, Block::Ice | Block::IcePacked))
+            }
             _ if self.double_lower().is_some() => self.double_lower() == Some(support),
             _ => support.is_solid(),
         }

@@ -440,19 +440,15 @@ fn placement_data_by_face() {
 fn snow_lies_on_solid_tops_and_leaves_only() {
     let mut world = floor_world();
     let pos = IVec3::new(3, 11, 3);
-    for support in [
-        Block::Grass,
-        Block::SnowyGrass,
-        Block::Leaves,
-        Block::Ice,
-        Block::Stone,
-    ] {
+    for support in [Block::Grass, Block::SnowyGrass, Block::Leaves, Block::Stone] {
         world.set_block(pos - IVec3::Y, support);
         assert!(world.can_place(pos, Block::Snow), "{support:?}");
     }
     for support in [
         Block::Air,
         Block::Water,
+        Block::Ice,
+        Block::IcePacked,
         Block::Snow,
         Block::TallGrass,
         Block::Torch,

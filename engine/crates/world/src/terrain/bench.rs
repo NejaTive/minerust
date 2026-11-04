@@ -124,3 +124,25 @@ fn climate_timing() {
         start.elapsed() / keys.len() as u32
     );
 }
+
+#[test]
+#[ignore]
+fn spawn_timing() {
+    let seeds = [0, 1, 7, 42, 1337, 987_654];
+    let start = std::time::Instant::now();
+    for seed in seeds {
+        std::hint::black_box(Terrain::new(seed).spawn_point());
+    }
+    println!(
+        "spawn: {:?} per world",
+        start.elapsed() / seeds.len() as u32
+    );
+    let start = std::time::Instant::now();
+    for seed in seeds {
+        std::hint::black_box(Terrain::new(seed).generate(ColumnPos::ZERO));
+    }
+    println!(
+        "old spawn column: {:?} per world",
+        start.elapsed() / seeds.len() as u32
+    );
+}

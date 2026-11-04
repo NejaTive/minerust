@@ -1,10 +1,11 @@
 use glam::IVec3;
 
-use crate::block::{Block, VINE_TOP};
-use crate::column::COLUMN_SECTIONS;
+use crate::block::{Block, FLUID_SOURCE, VINE_TOP};
+use crate::column::{COLUMN_SECTIONS, WORLD_HEIGHT};
 use crate::light::LightMap;
 use crate::pos::ColumnPos;
 use crate::section::{SECTION_SIZE, SECTION_VOLUME};
+use crate::terrain::Terrain;
 use crate::world::World;
 
 pub const SIMULATION_RADIUS: i32 = 8;
@@ -13,6 +14,9 @@ pub const STEP_TICKS: u32 = 3;
 pub const SPREAD_LIGHT: u8 = 9;
 pub const SPREAD_ATTEMPTS: usize = 4;
 pub const SNOW_MELT_LIGHT: u8 = 12;
+pub const ICE_MELT_LIGHT: u8 = 9;
+pub const FREEZE_LIGHT: u8 = 10;
+pub const WEATHER_CHANCE: usize = 16;
 pub const STACK_MAX_HEIGHT: i32 = 3;
 pub const STACK_GROWTH_PERIOD: usize = 16;
 pub const VINE_GROWTH_PERIOD: usize = 4;
@@ -42,14 +46,32 @@ impl RandomTicks {
         &mut self,
         world: &mut World,
         light: &LightMap,
+        terrain: &Terrain,
         center: ColumnPos,
         view_radius: i32,
+        precipitation: bool,
     ) -> Ticked {
         let radius = SIMULATION_RADIUS.min(view_radius);
         let mut ticked = Ticked::default();
         for z in center.z() - radius..=center.z() + radius {
             for x in center.x() - radius..=center.x() + radius {
                 let key = ColumnPos::new(x, z);
+                if world.column(key).is_some() {
+                    for _ in 0..STEP_TICKS {
+                        if self.below(WEATHER_CHANCE) == 0 {
+                            let (dx, dz) = (self.below(16) as i32, self.below(16) as i32);
+                            let column = key.origin() + IVec3::new(dx, 0, dz);
+                            self.weather_tick(
+                                world,
+                                light,
+                                terrain,
+                                column,
+                                precipitation,
+                                &mut ticked,
+                            );
+                        }
+                    }
+                }
                 for sy in 0..COLUMN_SECTIONS {
                     let Some(column) = world.column(key) else {
                         break;
@@ -83,11 +105,68 @@ impl RandomTicks {
                 Some(grass) => grass,
                 None => return,
             },
-            Block::Snow if light.block(pos) >= SNOW_MELT_LIGHT => Block::Air,
+            Block::SnowyGrass if !snow_above(world.block(above)) => Block::Grass,
+            Block::Ice if light.block(pos) >= ICE_MELT_LIGHT => Block::Water,
+            Block::Snow if light.block(pos) >= SNOW_MELT_LIGHT => {
+                self.unsnow(world, pos - IVec3::Y, ticked);
+                Block::Air
+            }
             Block::Cactus | Block::Reeds => return self.grow_stack(world, pos, old, ticked),
             Block::Vine => return self.grow_vine(world, pos, ticked),
             _ => return,
         };
+        let changed = world.set_block_supported(pos, new);
+        if old.lights_like(new) {
+            ticked.light_neutral.push(pos);
+        }
+        ticked.changed.extend(changed);
+    }
+
+    fn weather_tick(
+        &mut self,
+        world: &mut World,
+        light: &LightMap,
+        terrain: &Terrain,
+        column: IVec3,
+        precipitation: bool,
+        ticked: &mut Ticked,
+    ) {
+        let Some(top) = (0..WORLD_HEIGHT).rev().find(|&y| {
+            let block = world.block(IVec3::new(column.x, y, column.z));
+            block.is_solid() || block.fluid().is_some()
+        }) else {
+            return;
+        };
+        let pos = IVec3::new(column.x, top + 1, column.z);
+        let below = pos - IVec3::Y;
+        if light.block(pos) >= FREEZE_LIGHT {
+            return;
+        }
+        if world.block(below) == Block::Water
+            && world.block_data(below) == FLUID_SOURCE
+            && terrain.freezes_at(below.x, below.y, below.z)
+        {
+            self.replace(world, below, Block::Ice, ticked);
+        } else if precipitation
+            && world.block(pos) == Block::Air
+            && terrain.freezes_at(pos.x, pos.y, pos.z)
+            && world.can_place(pos, Block::Snow)
+        {
+            if world.block(below) == Block::Grass {
+                self.replace(world, below, Block::SnowyGrass, ticked);
+            }
+            self.replace(world, pos, Block::Snow, ticked);
+        }
+    }
+
+    fn unsnow(&mut self, world: &mut World, pos: IVec3, ticked: &mut Ticked) {
+        if world.block(pos) == Block::SnowyGrass {
+            self.replace(world, pos, Block::Grass, ticked);
+        }
+    }
+
+    fn replace(&mut self, world: &mut World, pos: IVec3, new: Block, ticked: &mut Ticked) {
+        let old = world.block(pos);
         let changed = world.set_block_supported(pos, new);
         if old.lights_like(new) {
             ticked.light_neutral.push(pos);
@@ -137,7 +216,11 @@ impl RandomTicks {
             let block = world.block(source);
             ((block.is_grass() || block == Block::Mycelium)
                 && !covers(world.block(source + IVec3::Y)))
-            .then_some(block)
+            .then_some(if block.is_grass() {
+                Block::Grass
+            } else {
+                block
+            })
         })
     }
 
@@ -157,6 +240,10 @@ impl RandomTicks {
         self.state ^= self.state << 17;
         (self.state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as usize % bound
     }
+}
+
+fn snow_above(block: Block) -> bool {
+    matches!(block, Block::Snow | Block::SnowBlock)
 }
 
 fn covers(block: Block) -> bool {
