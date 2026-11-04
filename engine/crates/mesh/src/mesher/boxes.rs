@@ -102,7 +102,7 @@ fn neighbor_mask(
     if block.is_opaque() {
         return FaceMask::FULL;
     }
-    if block.shape() != Shape::Boxes {
+    if block.shape() != Shape::Boxes || block.render_layer() != RenderLayer::Opaque {
         return FaceMask::EMPTY;
     }
     let (axis, positive) = face_axis(face_index);
@@ -216,7 +216,7 @@ pub(super) fn push_boxes(
                 } else {
                     [3; 4]
                 };
-                target.quads.push(Quad::boxed(
+                let quad = Quad::boxed(
                     cell,
                     face_index as u8,
                     rect,
@@ -224,7 +224,13 @@ pub(super) fn push_boxes(
                     tile.layer() as u16,
                     light,
                     ao,
-                ));
+                );
+                let turned = block == Block::Bed && face.facing == Facing::Top;
+                target.quads.push(if turned {
+                    quad.with_turn(data & 3)
+                } else {
+                    quad
+                });
             }
         }
     }

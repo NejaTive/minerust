@@ -15,6 +15,14 @@ pub const NOON: f32 = 0.25;
 
 pub const MORNING: f32 = 0.02;
 
+/// Как `World.isDaytime` в 1.12: спать можно с тика 12541 до 23458 из 24000.
+const SLEEP_START: f32 = 12_541.0 / MC_TICKS_PER_DAY as f32;
+const SLEEP_END: f32 = 23_458.0 / MC_TICKS_PER_DAY as f32;
+
+pub fn can_sleep(time: f32) -> bool {
+    (SLEEP_START..SLEEP_END).contains(&time.rem_euclid(1.0))
+}
+
 pub const NIGHT_DARKNESS: f32 = 11.0;
 
 const NIGHT_UNDERWATER: f32 = 0.12;

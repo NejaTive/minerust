@@ -124,3 +124,20 @@ fn hand_toggles_gates_and_wooden_doors_but_not_iron() {
     assert!(world.toggle_by_hand(iron, IVec3::Z).is_empty());
     assert_eq!(world.block_data(iron), FACING_POS_Z);
 }
+
+#[test]
+fn a_trapdoor_opens_and_closes_by_hand() {
+    use crate::block::{TRAPDOOR_OPEN, TRAPDOOR_TOP};
+    let mut world = world();
+    let pos = at(3, 3);
+    world.set_block_with_data(pos, Block::OakTrapdoor, TRAPDOOR_TOP | FACING_POS_X);
+    assert!(Block::OakTrapdoor.opens_by_hand());
+    assert_eq!(world.toggle_by_hand(pos, IVec3::X), vec![pos]);
+    assert_eq!(
+        world.block_data(pos),
+        TRAPDOOR_TOP | FACING_POS_X | TRAPDOOR_OPEN
+    );
+    assert!(Block::OakTrapdoor.is_open(world.block_data(pos)));
+    world.toggle_by_hand(pos, IVec3::X);
+    assert_eq!(world.block_data(pos), TRAPDOOR_TOP | FACING_POS_X);
+}

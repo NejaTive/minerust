@@ -4,6 +4,7 @@ use glam::{IVec2, IVec3};
 
 use crate::pos::{ColumnPos, SectionPos};
 
+use crate::bed;
 use crate::block::{Block, FLUID_SOURCE, FluidKind, VINE_SIDES, VINE_TOP, fluid_height};
 use crate::boxes::BoxList;
 use crate::chest::{HALF_NONE, half_of};
@@ -152,6 +153,11 @@ impl World {
         {
             return false;
         }
+        if block == Block::Bed {
+            let other = pos + bed::partner_offset(data);
+            return self.block(other) == Block::Bed
+                && bed::is_head(self.block_data(other)) != bed::is_head(data);
+        }
         let Some(dir) = block.support_dir(data) else {
             return true;
         };
@@ -231,7 +237,8 @@ impl World {
                 }
                 let depends = neighbor.support_dir(data) == Some(-dir)
                     || (neighbor.checks_sides() && dir.y == 0)
-                    || (neighbor.double_upper().is_some() && dir == IVec3::NEG_Y);
+                    || (neighbor.double_upper().is_some() && dir == IVec3::NEG_Y)
+                    || (neighbor == Block::Bed && bed::partner_offset(data) == -dir);
                 if depends
                     && !self.is_supported(around, neighbor, data)
                     && self.set_block(around, Block::Air)

@@ -2,6 +2,7 @@ use std::io::Read;
 
 use serde_json::Value;
 
+use crate::bed;
 use crate::biome_color::{BiomePalette, BiomeTint, Colormap};
 use crate::chest;
 use crate::textures::{
@@ -332,9 +333,37 @@ fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
         Tile::CauldronTop => ("cauldron_top", WHITE, BiomeTint::None),
         Tile::CauldronBottom => ("cauldron_bottom", WHITE, BiomeTint::None),
         Tile::FlowerPot => ("flower_pot", WHITE, BiomeTint::None),
+        Tile::RedstoneTorchOn => ("redstone_torch_on", WHITE, BiomeTint::None),
+        Tile::BrewingStand => ("brewing_stand", WHITE, BiomeTint::None),
+        Tile::BrewingStandBase => ("brewing_stand_base", WHITE, BiomeTint::None),
+        Tile::TrapdoorOak => ("trapdoor", WHITE, BiomeTint::None),
+        tile if tile.bed_part().is_some() => (BED_SHEETS[bed_color(tile)], WHITE, BiomeTint::None),
         tile if chest::is_double_tile(tile) => (chest::ENTITY_DOUBLE, WHITE, BiomeTint::None),
         _ => (chest::ENTITY_SINGLE, WHITE, BiomeTint::None),
     }
+}
+
+const BED_SHEETS: [&str; 16] = [
+    "entity/bed/white.png",
+    "entity/bed/orange.png",
+    "entity/bed/magenta.png",
+    "entity/bed/light_blue.png",
+    "entity/bed/yellow.png",
+    "entity/bed/lime.png",
+    "entity/bed/pink.png",
+    "entity/bed/gray.png",
+    "entity/bed/silver.png",
+    "entity/bed/cyan.png",
+    "entity/bed/purple.png",
+    "entity/bed/blue.png",
+    "entity/bed/brown.png",
+    "entity/bed/green.png",
+    "entity/bed/red.png",
+    "entity/bed/black.png",
+];
+
+fn bed_color(tile: Tile) -> usize {
+    tile.bed_part().map_or(0, |(color, ..)| usize::from(color))
 }
 
 struct Animation {
@@ -724,8 +753,28 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
     "cauldron_top.png",
     "cauldron_bottom.png",
     "flower_pot.png",
+    "redstone_torch_on.png",
+    "brewing_stand.png",
+    "brewing_stand_base.png",
+    "trapdoor.png",
     "entity/chest/normal.png",
     "entity/chest/normal_double.png",
+    "entity/bed/white.png",
+    "entity/bed/orange.png",
+    "entity/bed/magenta.png",
+    "entity/bed/light_blue.png",
+    "entity/bed/yellow.png",
+    "entity/bed/lime.png",
+    "entity/bed/pink.png",
+    "entity/bed/gray.png",
+    "entity/bed/silver.png",
+    "entity/bed/cyan.png",
+    "entity/bed/purple.png",
+    "entity/bed/blue.png",
+    "entity/bed/brown.png",
+    "entity/bed/green.png",
+    "entity/bed/red.png",
+    "entity/bed/black.png",
     "items/door_wood.png",
     "items/door_spruce.png",
     "items/door_birch.png",
@@ -737,8 +786,11 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
 
 fn builtin_file(path: &str) -> Option<&'static [u8]> {
     let name = path.strip_prefix(BLOCKS_DIR).or_else(|| {
-        path.strip_prefix(TEXTURES_DIR)
-            .filter(|n| n.starts_with("items/") || n.starts_with("entity/chest/"))
+        path.strip_prefix(TEXTURES_DIR).filter(|n| {
+            n.starts_with("items/")
+                || n.starts_with("entity/chest/")
+                || n.starts_with("entity/bed/")
+        })
     })?;
     BUILTIN
         .iter()
@@ -1071,6 +1123,24 @@ fn build(
                 return Err(format!("missing texture {stem}"));
             }
             found.push(tile_found);
+            continue;
+        }
+        if let Some((_, head, top)) = tile.bed_part() {
+            let sheet = read(&format!("{TEXTURES_DIR}{stem}"))
+                .and_then(|b| decode_png(&b).ok())
+                .filter(|image| image.width >= 64 && image.height == image.width);
+            if sheet.is_none() && fallback.is_none() {
+                return Err(format!("missing texture {stem}"));
+            }
+            found.push(sheet.map(|sheet| Found {
+                image: if top {
+                    bed::compose_top(head, &sheet)
+                } else {
+                    bed::compose_side(head, &sheet)
+                },
+                frames: 1,
+                animation: None,
+            }));
             continue;
         }
         let dir = if stem.starts_with("items/") {

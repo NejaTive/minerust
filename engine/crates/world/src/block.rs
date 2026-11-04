@@ -2,6 +2,7 @@ use std::sync::LazyLock;
 
 use glam::{IVec3, Vec3};
 
+use crate::bed;
 use crate::boxes::{BoxList, VoxelBox};
 use crate::chest;
 use crate::textures::TextureSet;
@@ -186,6 +187,10 @@ pub enum Block {
     MobSpawner,
     Cauldron,
     FlowerPot,
+    Bed,
+    OakTrapdoor,
+    RedstoneTorch,
+    BrewingStand,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -249,6 +254,9 @@ pub enum BoxKind {
     Chest,
     Cauldron,
     Pot,
+    Bed,
+    Trapdoor,
+    BrewingStand,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -273,6 +281,9 @@ pub enum DataKind {
     Cauldron,
     Pot,
     Spawner,
+    Bed,
+    Trapdoor,
+    Egg,
 }
 
 pub const SPAWNER_PIG: u8 = 0;
@@ -406,6 +417,71 @@ pub const WOOL_TILES: [Tile; COLOR_COUNT as usize] = [
     Tile::WoolRed,
     Tile::WoolBlack,
 ];
+
+pub const BED_LABELS: [&str; COLOR_COUNT as usize] = [
+    "белая кровать",
+    "оранжевая кровать",
+    "пурпурная кровать",
+    "голубая кровать",
+    "жёлтая кровать",
+    "лаймовая кровать",
+    "розовая кровать",
+    "серая кровать",
+    "светло-серая кровать",
+    "бирюзовая кровать",
+    "фиолетовая кровать",
+    "синяя кровать",
+    "коричневая кровать",
+    "зелёная кровать",
+    "красная кровать",
+    "чёрная кровать",
+];
+
+pub const EGG_VARIANTS: [(&str, &str, Tile); 6] = [
+    ("monster_egg", "яйцо чешуйницы (камень)", Tile::Stone),
+    (
+        "cobblestone_monster_egg",
+        "яйцо чешуйницы (булыжник)",
+        Tile::Cobblestone,
+    ),
+    (
+        "stonebrick_monster_egg",
+        "яйцо чешуйницы (кирпич)",
+        Tile::StoneBrick,
+    ),
+    (
+        "mossy_monster_egg",
+        "яйцо чешуйницы (замшелый)",
+        Tile::StoneBrickMossy,
+    ),
+    (
+        "cracked_monster_egg",
+        "яйцо чешуйницы (треснутый)",
+        Tile::StoneBrickCracked,
+    ),
+    (
+        "chiseled_monster_egg",
+        "яйцо чешуйницы (резной)",
+        Tile::StoneBrickCarved,
+    ),
+];
+
+pub const BED_UNITS: u8 = 9;
+pub const BED_LEG_UNITS: u8 = 3;
+pub const TRAPDOOR_FACING_MASK: u8 = 3;
+pub const TRAPDOOR_OPEN: u8 = 4;
+pub const TRAPDOOR_TOP: u8 = 8;
+pub const TRAPDOOR_UNITS: u8 = 3;
+
+const BED_STATES: [u8; 128] = {
+    let mut states = [0; 128];
+    let mut i = 0;
+    while i < 128 {
+        states[i] = i as u8;
+        i += 1;
+    }
+    states
+};
 
 pub const COCOA_STAGES: u8 = 3;
 pub const COCOA_DIRECTION_MASK: u8 = 3;
@@ -689,7 +765,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 175] = [
+pub const BLOCKS: [BlockDef; 179] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -1057,7 +1133,10 @@ pub const BLOCKS: [BlockDef; 175] = [
         ..BlockDef::uniform("cocoa", "какао-бобы", Tile::CocoaStage2)
     },
     BlockDef::uniform("snow_block", "снежный блок", Tile::Snow),
-    BlockDef::uniform("monster_egg", "яйцо чешуйницы", Tile::Stone),
+    BlockDef {
+        data: DataKind::Egg,
+        ..BlockDef::uniform("monster_egg", "яйцо чешуйницы", Tile::Stone)
+    },
     BlockDef::log(
         "bone_block",
         "костяной блок",
@@ -1494,6 +1573,47 @@ pub const BLOCKS: [BlockDef; 175] = [
             Tile::FlowerPot,
         )
     },
+    BlockDef {
+        top: Some(Tile::BedHeadTopRed),
+        bottom: Some(Tile::PlanksOak),
+        ..BlockDef::open_boxed(
+            "bed",
+            "кровать",
+            BoxKind::Bed,
+            DataKind::Bed,
+            Tile::BedHeadSideRed,
+        )
+    },
+    BlockDef {
+        layer: RenderLayer::Cutout,
+        ..BlockDef::open_boxed(
+            "oak_trapdoor",
+            "люк из дуба",
+            BoxKind::Trapdoor,
+            DataKind::Trapdoor,
+            Tile::TrapdoorOak,
+        )
+    },
+    BlockDef {
+        shape: Shape::Torch,
+        data: DataKind::Attachment,
+        emission: 7,
+        ..BlockDef::plant(
+            "redstone_torch",
+            "факел красного камня",
+            Tile::RedstoneTorchOn,
+        )
+    },
+    BlockDef {
+        layer: RenderLayer::Cutout,
+        ..BlockDef::open_boxed(
+            "brewing_stand",
+            "варочная стойка",
+            BoxKind::BrewingStand,
+            DataKind::None,
+            Tile::BrewingStand,
+        )
+    },
 ];
 
 mod shapes;
@@ -1501,7 +1621,7 @@ mod shapes;
 pub use shapes::{CAULDRON_LEVELS, POT_PLANTS};
 
 impl Block {
-    pub const ALL: [Block; 175] = [
+    pub const ALL: [Block; 179] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -1677,6 +1797,10 @@ impl Block {
         Block::MobSpawner,
         Block::Cauldron,
         Block::FlowerPot,
+        Block::Bed,
+        Block::OakTrapdoor,
+        Block::RedstoneTorch,
+        Block::BrewingStand,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -1834,6 +1958,9 @@ impl Block {
             BoxKind::Chest => Self::chest_boxes(data),
             BoxKind::Cauldron => Self::cauldron_boxes(),
             BoxKind::Pot => unit([5, 0, 5], [11, 6, 11]),
+            BoxKind::Bed => Self::bed_boxes(data),
+            BoxKind::Trapdoor => Self::trapdoor_boxes(data),
+            BoxKind::BrewingStand => Self::brewing_stand_boxes(),
             BoxKind::Carpet => unit([0, 0, 0], [16, CARPET_UNITS, 16]),
             BoxKind::Slab => match data {
                 SLAB_DOUBLE => BoxList::of(&[VoxelBox::FULL]),
@@ -1961,6 +2088,23 @@ impl Block {
             }
             DataKind::Gate | DataKind::Door => Some(facing_code(placement.look)),
             DataKind::Chest | DataKind::Furnace => Some(facing_code(-placement.look)),
+            DataKind::Bed => Some(bed::data(placement.look, false, placement.variant)),
+            DataKind::Egg => Some(placement.variant % EGG_VARIANTS.len() as u8),
+            DataKind::Trapdoor => Some(if placement.normal.y == 0 {
+                facing_code(placement.normal)
+                    | if placement.hit_y > 0.5 {
+                        TRAPDOOR_TOP
+                    } else {
+                        0
+                    }
+            } else {
+                facing_code(placement.look)
+                    | if placement.normal == IVec3::NEG_Y {
+                        TRAPDOOR_TOP
+                    } else {
+                        0
+                    }
+            }),
             _ => self.placement_data(placement.normal),
         }
     }
@@ -1980,6 +2124,9 @@ impl Block {
             | DataKind::Cauldron
             | DataKind::Pot
             | DataKind::Spawner
+            | DataKind::Bed
+            | DataKind::Trapdoor
+            | DataKind::Egg
             | DataKind::Rail => Some(0),
             DataKind::Ladder => match normal {
                 IVec3::X | IVec3::NEG_X | IVec3::Z | IVec3::NEG_Z => Some(facing_code(normal)),
@@ -2051,6 +2198,9 @@ impl Block {
                 SPAWNER_ZOMBIE,
                 SPAWNER_SPIDER,
             ],
+            DataKind::Bed => &BED_STATES,
+            DataKind::Egg => &[0, 1, 2, 3, 4, 5],
+            DataKind::Trapdoor => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
                 FLUID_SOURCE,
@@ -2261,6 +2411,12 @@ impl Block {
         if self.data_kind() == DataKind::Color {
             return Some(WOOL_TILES[usize::from(data % COLOR_COUNT)]);
         }
+        if self.data_kind() == DataKind::Egg {
+            return Some(EGG_VARIANTS[usize::from(data) % EGG_VARIANTS.len()].2);
+        }
+        if self.data_kind() == DataKind::Bed {
+            return Some(Tile::bed(data % COLOR_COUNT, true, true));
+        }
         self.tile(facing)
     }
 
@@ -2294,6 +2450,30 @@ impl Block {
             let mut out = Vec::new();
             for block in Block::ALL {
                 let def = block.def();
+                if def.data == DataKind::Egg {
+                    for (variant, &(name, label, _)) in EGG_VARIANTS.iter().enumerate() {
+                        out.push(Stack {
+                            name: name.to_owned(),
+                            label: label.to_owned(),
+                            block,
+                            data: variant as u8,
+                            placeable: def.selectable,
+                        });
+                    }
+                    continue;
+                }
+                if def.data == DataKind::Bed {
+                    for color in 0..COLOR_COUNT {
+                        out.push(Stack {
+                            name: format!("{}_bed", COLOR_NAMES[usize::from(color)]),
+                            label: BED_LABELS[usize::from(color)].to_owned(),
+                            block,
+                            data: color,
+                            placeable: def.selectable,
+                        });
+                    }
+                    continue;
+                }
                 if def.data != DataKind::Color {
                     out.push(Stack {
                         name: def.name.to_owned(),

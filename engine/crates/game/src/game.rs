@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use glam::{IVec3, Vec2, Vec3};
+use world::bed;
 use world::block::{
-    Block, BoxKind, DOOR_PLACED_RIGHT, FLUID_SOURCE, FluidKind, Placement, SLAB_BOTTOM,
-    SLAB_DOUBLE, SLAB_TOP, Shape, facing_code,
+    Block, BoxKind, DOOR_PLACED_RIGHT, FLUID_SOURCE, FluidKind, GATE_FACING_MASK, Placement,
+    SLAB_BOTTOM, SLAB_DOUBLE, SLAB_TOP, Shape, TRAPDOOR_FACING_MASK, TRAPDOOR_OPEN, facing_code,
 };
 use world::boxes::BoxList;
 use world::clouds::cloud_drift;
@@ -129,6 +130,7 @@ pub struct Game {
     selected: Option<Held>,
     container: Option<IVec3>,
     container_opened: bool,
+    message: Option<String>,
     mobs: Vec<Mob>,
     adopted: HashSet<ColumnPos>,
     mob_rng: Rng,
@@ -211,6 +213,7 @@ impl Game {
             selected: Some(Held::Block(DEFAULT_BLOCK, 0)),
             container: None,
             container_opened: false,
+            message: None,
             mobs: Vec::new(),
             adopted: HashSet::new(),
             mob_rng: Rng::new(seed as u32 ^ 0x9E37_79B9),
@@ -480,12 +483,29 @@ impl Game {
                 }
                 Vec::new()
             }
+            Block::Bed => {
+                self.sleep();
+                Vec::new()
+            }
             Block::FlowerPot => match self.selected {
                 Some(Held::Block(plant, _)) if self.world.plant_in_pot(pos, plant) => vec![pos],
                 _ => Vec::new(),
             },
             _ => self.world.toggle_by_hand(pos, self.look_dir()),
         }
+    }
+
+    fn sleep(&mut self) {
+        if daytime::can_sleep(self.day.fraction()) {
+            self.day = DayTime::from_fraction(daytime::MORNING);
+        } else {
+            self.message = Some("Спать можно только ночью".to_owned());
+        }
+    }
+
+    /// Сообщение игроку для журнала команд; сбрасывает его.
+    pub fn take_message(&mut self) -> Option<String> {
+        self.message.take()
     }
 
     /// Окно контейнера открыли правой кнопкой с прошлого вызова; сбрасывает признак.
@@ -585,6 +605,9 @@ impl Game {
         {
             let mut changed = if block.is_door() {
                 self.world.place_door(pos, block, data)
+            } else if block == Block::Bed {
+                self.world
+                    .place_bed(pos, bed::toward_head(data), bed::color_of(data))
             } else {
                 self.world.set_block_supported_with_data(pos, block, data)
             };
@@ -610,6 +633,22 @@ impl Game {
             };
             (hit.block, bounds)
         })
+    }
+
+    /// Лестница или открытый люк над лестницей, смотрящей туда же, как `ForgeHooks.isLivingOnLadder`.
+    fn climbable(&self, pos: IVec3) -> bool {
+        let block = self.world.block(pos);
+        if block.is_ladder() {
+            return true;
+        }
+        if !block.is_trapdoor() {
+            return false;
+        }
+        let data = self.world.block_data(pos);
+        let below = pos + IVec3::NEG_Y;
+        data & TRAPDOOR_OPEN != 0
+            && self.world.block(below).is_ladder()
+            && self.world.block_data(below) & GATE_FACING_MASK == data & TRAPDOOR_FACING_MASK
     }
 
     fn look_dir(&self) -> IVec3 {
@@ -644,6 +683,14 @@ impl Game {
             variant,
         };
         let mut data = block.placement_state(&placement)?;
+        if block == Block::Bed {
+            let head = pos + placement.look;
+            let head_data = data | bed::HEAD;
+            return (self.world.can_place_bed(pos, placement.look)
+                && !self.bodies_overlap(pos, block, data)
+                && !self.bodies_overlap(head, block, head_data))
+            .then_some((pos, data));
+        }
         if block == Block::Chest {
             data = self.world.chest_placement_data(pos, placement.look)?;
         }
@@ -939,7 +986,7 @@ impl Game {
             }
             self.sync_prev();
             let feet_cell = self.player.feet.floor().as_ivec3();
-            self.player.on_ladder = self.world.block(feet_cell).is_ladder();
+            self.player.on_ladder = self.climbable(feet_cell);
             self.player.in_web = self
                 .player
                 .touches(|pos| self.world.block(pos) == Block::Web);

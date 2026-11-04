@@ -3,7 +3,7 @@ use world::textures::{TextureSet, TileTexture};
 
 const TILE_SIZE: u32 = 32;
 const MIP_LEVELS: u32 = 6;
-const LAYER_COUNT: u32 = 275;
+const LAYER_COUNT: u32 = 343;
 
 fn standard() -> TextureSet {
     TextureSet::standard()
@@ -258,12 +258,16 @@ fn fnv(bytes: &[u8]) -> String {
 /// Плитки 5c дописаны в конец: слои до них совпадают с атласом этапа 5b байт в байт.
 const STAGE_5B_BYTES: usize = 1359540;
 
+/// Плитки 7b (кровати, люк, факел красного камня, варочная стойка) тоже дописаны в конец.
+const STAGE_5C_BYTES: usize = 1501500;
+
 #[test]
 fn builtin_set_output_matches_golden() {
     let data = generate_standard();
-    assert_eq!(data.len(), 1501500);
+    assert_eq!(data.len(), 1872780);
     assert_eq!(fnv(&data[..STAGE_5B_BYTES]), "814be0ac03d710b7");
-    assert_eq!(fnv(&data), "3b2695ba1985dff9");
+    assert_eq!(fnv(&data[..STAGE_5C_BYTES]), "3b2695ba1985dff9");
+    assert_eq!(fnv(&data), "85a6b2192cdf78bb");
 }
 
 #[test]

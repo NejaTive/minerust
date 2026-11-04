@@ -20,7 +20,7 @@ use world::section::{SECTION_SIZE, Section};
 use world::tile::{TILE_COUNT, Tile};
 use world::world::World;
 
-const _: () = assert!(TILE_COUNT <= 256);
+const _: () = assert!(TILE_COUNT <= 1024);
 
 pub struct MeshData {
     pub quads: Vec<Quad>,
@@ -663,7 +663,7 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
             }
         }
         Shape::Torch => {
-            let layer = Tile::Torch.layer() as u16;
+            let layer = block.tile(Facing::Side).map_or(0, |t| t.layer() as u16);
             if (ATTACH_POS_X..=ATTACH_NEG_Z).contains(&data) {
                 let first = TORCH_WALL + TORCH_WALL_PARTS * (data - ATTACH_POS_X);
                 for t in first..first + TORCH_WALL_PARTS {

@@ -31,7 +31,13 @@ pub(super) fn layout(terrain: &Terrain, anchor: (i32, i32), rng: &mut Stream) ->
 }
 
 /// `offsetToAverageGroundLevel`: среднее по рамке из верха твёрдого блока или воды, не ниже уровня моря.
-fn average_ground(terrain: &Terrain, min_x: i32, min_z: i32, size_x: i32, size_z: i32) -> i32 {
+pub(super) fn average_ground(
+    terrain: &Terrain,
+    min_x: i32,
+    min_z: i32,
+    size_x: i32,
+    size_z: i32,
+) -> i32 {
     let mut total = 0;
     for z in min_z..min_z + size_z {
         for x in min_x..min_x + size_x {

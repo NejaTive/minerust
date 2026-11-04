@@ -462,3 +462,83 @@ fn a_pot_only_takes_the_click_when_the_hand_holds_a_plant() {
     game.world.plant_in_pot(SPOT, Block::RedMushroom);
     assert!(!game.pot_accepts(SPOT));
 }
+
+fn bed_count(game: &Game) -> usize {
+    (-2..=2)
+        .flat_map(|x| (-2..=2).map(move |z| SPOT + IVec3::new(x, 0, z)))
+        .filter(|&pos| game.world.block(pos) == Block::Bed)
+        .count()
+}
+
+#[test]
+fn a_bed_item_places_both_halves_with_its_colour() {
+    let mut game = floor_game();
+    right_click_down_on(&mut game, "red_bed");
+    assert_eq!(bed_count(&game), 2);
+    let foot = game.world.block_data(SPOT);
+    assert!(!bed::is_head(foot));
+    assert_eq!(bed::color_of(foot), 14);
+    let head = SPOT + bed::toward_head(foot);
+    assert!(bed::is_head(game.world.block_data(head)));
+}
+
+#[test]
+fn every_colour_has_its_own_bed_item() {
+    for color in ["white", "light_blue", "black"] {
+        assert!(Block::stack_from_name(&format!("{color}_bed")).is_some());
+    }
+}
+
+#[test]
+fn sleeping_at_night_skips_to_morning() {
+    let mut game = floor_game();
+    game.world.place_bed(SPOT, IVec3::X, 0);
+    game.set_time_of_day(0.7);
+    right_click_down_on(&mut game, "stone");
+    assert_eq!(game.time_of_day(), daytime::MORNING);
+    assert_eq!(game.take_message(), None);
+    assert_eq!(bed_count(&game), 2);
+}
+
+#[test]
+fn sleeping_by_day_only_leaves_a_message() {
+    let mut game = floor_game();
+    game.world.place_bed(SPOT, IVec3::X, 0);
+    game.set_time_of_day(0.25);
+    right_click_down_on(&mut game, "stone");
+    assert_eq!(game.time_of_day(), 0.25);
+    assert_eq!(
+        game.take_message().as_deref(),
+        Some("Спать можно только ночью")
+    );
+    assert_eq!(game.take_message(), None);
+}
+
+#[test]
+fn only_nights_from_tick_12541_allow_sleep() {
+    assert!(!daytime::can_sleep(0.0));
+    assert!(!daytime::can_sleep(0.5));
+    assert!(daytime::can_sleep(0.53));
+    assert!(daytime::can_sleep(0.75));
+    assert!(!daytime::can_sleep(0.99));
+}
+
+#[test]
+fn an_open_trapdoor_over_a_ladder_is_climbable_only_when_facing_the_same_way() {
+    use world::block::{FACING_NEG_Z, FACING_POS_X, TRAPDOOR_OPEN};
+    let mut game = floor_game();
+    let ladder = SPOT;
+    let trapdoor = SPOT + IVec3::Y;
+    game.world
+        .set_block_with_data(ladder, Block::Ladder, FACING_POS_X);
+    game.world
+        .set_block_with_data(trapdoor, Block::OakTrapdoor, FACING_POS_X);
+    assert!(game.climbable(ladder));
+    assert!(!game.climbable(trapdoor));
+    game.world
+        .set_block_with_data(trapdoor, Block::OakTrapdoor, FACING_POS_X | TRAPDOOR_OPEN);
+    assert!(game.climbable(trapdoor));
+    game.world
+        .set_block_with_data(trapdoor, Block::OakTrapdoor, FACING_NEG_Z | TRAPDOOR_OPEN);
+    assert!(!game.climbable(trapdoor));
+}
