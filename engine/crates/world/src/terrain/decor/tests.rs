@@ -340,7 +340,7 @@ fn swamp_puddles_replace_the_sea_level_top_with_water() {
                         column.get(at - IVec3::Y),
                         Block::Dirt | Block::Clay | Block::Sand | Block::Gravel
                     ));
-                } else if dry && !terrain.lake_covers(wx, wz) {
+                } else if dry && !terrain.lake_covers(wx, wz) && column.get(at) != Block::Air {
                     assert!(
                         matches!(column.get(at), Block::Grass | Block::Sand | Block::Gravel),
                         "{wx}, {wz}"
@@ -404,7 +404,7 @@ fn swamp_mushrooms_and_reeds_grow() {
 fn mushrooms_have_support_and_stand_in_the_dark_or_on_mycelium() {
     let terrain = Terrain::new(SEED);
     let mut seen = 0;
-    for key in columns_of(&terrain, Biome::Forest, 40) {
+    for key in columns_of(&terrain, Biome::Forest, 200) {
         let column = terrain.generate(key);
         for block in [Block::BrownMushroom, Block::RedMushroom] {
             for pos in find(&column, block) {
@@ -741,10 +741,13 @@ fn shallow_seabeds_are_dirt_with_sand_gravel_and_clay_disks() {
         .chain(columns_of(&terrain, Biome::River, 60));
     for key in keys {
         let column = terrain.generate(key);
+        let ground = terrain.generate_ground(key);
         for z in 0..16 {
             for x in 0..16 {
                 let floor = surface_of(&column, x, z);
-                if !(WATER_LEVEL - 3..WATER_LEVEL).contains(&floor) {
+                if !(WATER_LEVEL - 3..WATER_LEVEL).contains(&floor)
+                    || surface_of(&ground, x, z) != floor
+                {
                     continue;
                 }
                 match column.get([x, floor, z].into()) {

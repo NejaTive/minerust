@@ -1,29 +1,7 @@
 use glam::IVec2;
 
 use super::*;
-use crate::biome::Biome;
 use crate::terrain::{Terrain, WATER_LEVEL, lake_key};
-use crate::trees::tree_at;
-
-impl Caves {
-    pub fn is_cave(&self, pos: IVec3) -> bool {
-        hollow(self.sample(pos), 1.0)
-    }
-
-    fn sample(&self, pos: IVec3) -> Sample {
-        let cell = pos.div_euclid(IVec3::splat(CELL));
-        let t = pos - cell * CELL;
-        let layer = |dy| {
-            let at = |dx, dz| self.node((cell + IVec3::new(dx, dy, dz)) * CELL);
-            bilinear(
-                [at(0, 0), at(1, 0), at(0, 1), at(1, 1)],
-                fraction(t.x),
-                fraction(t.z),
-            )
-        };
-        lerp(layer(0), layer(1), fraction(t.y))
-    }
-}
 
 fn local(pos: IVec3) -> IVec3 {
     IVec3::new(pos.x.rem_euclid(16), pos.y, pos.z.rem_euclid(16))
@@ -33,104 +11,43 @@ fn keys(center: ColumnPos, radius: i32) -> impl Iterator<Item = ColumnPos> {
     (-radius..=radius).flat_map(move |z| (-radius..=radius).map(move |x| center + IVec2::new(x, z)))
 }
 
-fn forest_center(terrain: &Terrain) -> ColumnPos {
-    (0..200)
-        .flat_map(|z| (-200..200).map(move |x| ColumnPos::new(x, z)))
-        .find(|key| {
-            let o = key.origin();
-            terrain.sample_biome(o.x + 8, o.z + 8) == Biome::Forest
-                && terrain.surface_height(o.x + 8, o.z + 8) > WATER_LEVEL + 3
-        })
-        .expect("no forest")
+fn cells() -> impl Iterator<Item = IVec3> {
+    (0..WORLD_HEIGHT)
+        .flat_map(|y| (0..16).flat_map(move |z| (0..16).map(move |x| IVec3::new(x, y, z))))
 }
 
 fn ground_and_carved(terrain: &Terrain, key: ColumnPos) -> (Column, Column) {
     (terrain.generate_ground(key), terrain.generate_carved(key))
 }
 
-fn blocks(key: ColumnPos) -> impl Iterator<Item = IVec3> {
-    let origin = key.origin();
-    (0..WORLD_HEIGHT).flat_map(move |y| {
-        (0..16).flat_map(move |z| (0..16).map(move |x| IVec3::new(origin.x + x, y, origin.z + z)))
-    })
-}
-
 #[test]
 fn same_seed_same_caves_other_seed_other() {
-    let (a, b, other) = (Caves::new(42), Caves::new(42), Caves::new(43));
-    let points: Vec<IVec3> = (0..4000)
-        .map(|i| IVec3::new(i * 7 - 9000, 4 + i % 120, i * -13 + 500))
-        .collect();
-    assert!(points.iter().all(|&p| a.is_cave(p) == b.is_cave(p)));
-    let differs = points
-        .iter()
-        .filter(|&&p| a.is_cave(p) != other.is_cave(p))
-        .count();
-    let caves = points.iter().filter(|&&p| a.is_cave(p)).count();
-    assert!(caves > 100, "{caves} caves");
-    assert!(differs > caves / 2, "{differs} of {caves}");
-
-    let terrain = Terrain::new(42);
-    for key in [ColumnPos::new(-3, 7), ColumnPos::new(100, -40)] {
-        let (_, x) = ground_and_carved(&terrain, key);
-        let (_, y) = ground_and_carved(&Terrain::new(42), key);
-        assert!(blocks(key).all(|p| x.get(local(p)) == y.get(local(p))));
-    }
+    let key = ColumnPos::new(-3, 7);
+    let first = Terrain::new(42).generate_carved(key);
+    let second = Terrain::new(42).generate_carved(key);
+    let other = Terrain::new(43).generate_carved(key);
+    assert!(cells().all(|p| first.get(p) == second.get(p)));
+    assert!(cells().any(|p| first.get(p) != other.get(p)));
 }
 
 #[test]
-fn interpolation_hits_nodes_and_stays_between_them() {
-    let caves = Caves::new(7);
-    for i in -20..20 {
-        let node = IVec3::new(i * 4, 8 + (i & 15) * 4, i * -12);
-        assert_eq!(caves.sample(node), caves.node(node));
+fn plan_does_not_depend_on_cache() {
+    let caves = Caves::new(5);
+    let fresh = Caves::new(5);
+    let source = (3, -9);
+    let a = caves.plan(source);
+    caves.plans.lock().unwrap().clear();
+    let b = caves.plan(source);
+    let c = fresh.plan(source);
+    for other in [&b, &c] {
+        assert_eq!(a.caves.len(), other.caves.len());
+        assert!(
+            a.caves
+                .iter()
+                .zip(&other.caves)
+                .all(|(l, r)| l.center == r.center)
+        );
     }
-    for i in 0..2000 {
-        let pos = IVec3::new(i * 5 - 3000, i % 128, i * 3 - 77);
-        let cell = pos.div_euclid(IVec3::splat(CELL));
-        let corners: [Sample; 8] = std::array::from_fn(|c| {
-            let offset = IVec3::new((c & 1) as i32, (c >> 1 & 1) as i32, (c >> 2) as i32);
-            caves.node((cell + offset) * CELL)
-        });
-        let value = caves.sample(pos);
-        for n in 0..3 {
-            let (min, max) = corners.iter().fold((f32::MAX, f32::MIN), |(lo, hi), c| {
-                (lo.min(c[n]), hi.max(c[n]))
-            });
-            assert!(
-                (min - 1e-6..=max + 1e-6).contains(&value[n]),
-                "{pos}: {value:?}"
-            );
-        }
-    }
-}
-
-#[test]
-fn carve_matches_direct_evaluation_across_borders() {
-    let terrain = Terrain::new(1337);
-    let caves = &terrain.caves;
-    let surface = |x, z| terrain.surface_height(x, z);
-    let has_tree = |x, z| tree_at(&terrain, x, z).is_some();
-    let mut carved_total = 0;
-    for key in [
-        ColumnPos::new(2, -5),
-        ColumnPos::new(3, -5),
-        ColumnPos::new(-1, 0),
-        ColumnPos::new(0, 0),
-    ] {
-        let (ground, carved) = ground_and_carved(&terrain, key);
-        for p in blocks(key) {
-            let l = caves.limits(p.x, p.z, surface, has_tree);
-            let expected = p.y > FLOOR
-                && p.y <= l.top
-                && carvable(ground.get(local(p)))
-                && hollow(caves.sample(p), l.density(p.y));
-            let got = carved.get(local(p)) != ground.get(local(p));
-            assert_eq!(got, expected, "{p}");
-            carved_total += usize::from(got);
-        }
-    }
-    assert!(carved_total > 1000, "{carved_total} carved");
 }
 
 #[test]
@@ -138,67 +55,180 @@ fn carved_share_of_underground_is_moderate() {
     for seed in [1337, 42] {
         let terrain = Terrain::new(seed);
         let (mut solid, mut hollow) = (0, 0);
-        for key in keys(ColumnPos::new(5, -3), 3) {
+        for key in keys(ColumnPos::new(5, -3), 4) {
             let (ground, carved) = ground_and_carved(&terrain, key);
-            for p in blocks(key).filter(|p| p.y > FLOOR) {
-                let p = local(p);
-                if carvable(ground.get(p)) {
+            for p in cells().filter(|p| p.y > 4) {
+                if replaceable(ground.get(p), Block::Air) {
                     solid += 1;
-                    hollow += usize::from(carved.get(p) == Block::Air);
+                    hollow += usize::from(matches!(carved.get(p), Block::Air | Block::Lava));
                 }
             }
         }
         let share = hollow as f32 / solid as f32;
-        assert!((0.05..=0.20).contains(&share), "seed {seed}: {share}");
+        assert!((0.01..=0.12).contains(&share), "seed {seed}: {share}");
     }
 }
 
 #[test]
-fn bottom_layers_stay_stone() {
+fn lava_only_below_lava_level_and_air_only_above() {
     let terrain = Terrain::new(1337);
-    for key in keys(ColumnPos::new(-4, 9), 2) {
-        let column = terrain.generate(key);
-        for p in blocks(key).filter(|p| p.y <= FLOOR) {
-            assert!(column.get(local(p)).is_solid(), "{p}");
+    let (mut lava, mut high_air) = (0, 0);
+    for key in keys(ColumnPos::ZERO, 5) {
+        let (ground, carved) = ground_and_carved(&terrain, key);
+        for pos in cells() {
+            let (before, after) = (ground.get(pos), carved.get(pos));
+            if after == Block::Lava && before != Block::Lava {
+                assert!(pos.y < LAVA_LEVEL, "{key} {pos}");
+                assert!(replaceable(before, Block::Air), "{key} {pos}");
+                lava += 1;
+            } else if before != after && after == Block::Air && replaceable(before, Block::Air) {
+                assert!(pos.y >= LAVA_LEVEL, "{key} {pos}");
+                high_air += 1;
+            }
+        }
+    }
+    assert!(lava > 0 && high_air > 0, "lava {lava}, air {high_air}");
+}
+
+#[test]
+fn bedrock_survives() {
+    let terrain = Terrain::new(1337);
+    for key in keys(ColumnPos::new(2, 2), 3) {
+        let (ground, carved) = ground_and_carved(&terrain, key);
+        for p in cells().filter(|p| ground.get(*p) == Block::Bedrock) {
+            assert_eq!(carved.get(p), Block::Bedrock);
         }
     }
 }
 
 #[test]
-fn no_air_under_water() {
+fn ravines_occur_at_vanilla_rate() {
+    let caves = Caves::new(1337);
+    let sources = 120 * 120;
+    let ravines: usize = (0..120)
+        .flat_map(|x| (0..120).map(move |z| (x, z)))
+        .map(|source| caves.plan(source).ravines.len())
+        .sum();
+    let rate = ravines as f32 / sources as f32;
+    assert!((0.01..=0.03).contains(&rate), "{rate}");
+}
+
+#[test]
+fn ravines_cut_tall_narrow_gaps() {
+    let caves = Caves::new(1337);
+    let terrain = Terrain::new(1337);
+    let source = (0..120)
+        .flat_map(|x| (0..120).map(move |z| (x, z)))
+        .find(|&source| !caves.plan(source).ravines.is_empty())
+        .expect("no ravine");
+    let ravine = &caves.plan(source).ravines[0];
+    let middle = ravine.segments[ravine.segments.len() / 2].center;
+    let key = ColumnPos::new(
+        (middle.x.floor() as i32).div_euclid(16),
+        (middle.z.floor() as i32).div_euclid(16),
+    );
+    let tallest = keys(key, 1)
+        .map(|key| {
+            let (ground, carved) = ground_and_carved(&terrain, key);
+            (0..16)
+                .flat_map(|z| (0..16).map(move |x| (x, z)))
+                .map(|(x, z)| {
+                    let (mut run, mut best) = (0, 0);
+                    for y in 0..WORLD_HEIGHT {
+                        let p = IVec3::new(x, y, z);
+                        if ground.get(p) != Block::Air && carved.get(p) == Block::Air {
+                            run += 1;
+                            best = best.max(run);
+                        } else {
+                            run = 0;
+                        }
+                    }
+                    best
+                })
+                .max()
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0);
+    assert!(tallest >= 10, "{tallest}");
+}
+
+#[test]
+fn tunnels_continue_across_column_borders() {
+    let terrain = Terrain::new(1337);
+    let (mut open_pairs, mut total) = (0, 0);
+    for key in keys(ColumnPos::new(5, -3), 4) {
+        let east = key + IVec2::X;
+        let (a, b) = (terrain.generate_carved(key), terrain.generate_carved(east));
+        for y in 11..WORLD_HEIGHT {
+            for z in 0..16 {
+                let (left, right) = (IVec3::new(15, y, z), IVec3::new(0, y, z));
+                if a.get(left) == Block::Air && b.get(right) == Block::Air {
+                    open_pairs += 1;
+                }
+                total += 1;
+            }
+        }
+    }
+    assert!(open_pairs > 50, "{open_pairs} of {total}");
+}
+
+#[test]
+fn carving_never_opens_into_water() {
     let terrain = Terrain::new(1337);
     let lake = lake_key(&terrain);
-    let mut water = 0;
-    for key in keys(lake, 2) {
-        let column = terrain.generate(key);
-        for p in blocks(key).map(local) {
-            let world = key.origin() + p;
-            if column.get(p) != Block::Water || terrain.lake_covers(world.x, world.z) {
-                continue;
-            }
+    let (mut water, mut leaks) = (0, 0);
+    for key in keys(lake, 3) {
+        let (ground, carved) = ground_and_carved(&terrain, key);
+        for p in cells().filter(|p| carved.get(*p) == Block::Water) {
             water += 1;
-            let floor = (0..p.y)
-                .rev()
-                .find(|&y| column.get(p.with_y(y)) != Block::Water);
-            let floor = floor.expect("water down to the bottom");
-            for y in floor - WET_ROOF..=floor {
-                assert!(column.get(p.with_y(y)).is_solid(), "{key} {p} y {y}");
+            for d in [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z, IVec3::NEG_Y] {
+                let n = p + d;
+                if Column::contains(n) && (0..16).contains(&n.x) && (0..16).contains(&n.z) {
+                    let (before, after) = (ground.get(n), carved.get(n));
+                    leaks +=
+                        usize::from(before != after && matches!(after, Block::Air | Block::Lava));
+                }
             }
         }
     }
     assert!(water > 1000, "{water} water blocks");
+    assert_eq!(leaks, 0);
+}
+
+#[test]
+fn surface_is_not_riddled() {
+    let terrain = Terrain::new(1337);
+    let (mut columns, mut opened) = (0, 0);
+    for key in keys(ColumnPos::new(8, 8), 6) {
+        let (ground, carved) = ground_and_carved(&terrain, key);
+        let origin = key.origin();
+        for z in 0..16 {
+            for x in 0..16 {
+                let h = terrain.surface_height(origin.x + x, origin.z + z);
+                if h <= WATER_LEVEL + 1 {
+                    continue;
+                }
+                columns += 1;
+                let p = IVec3::new(x, h, z);
+                opened += usize::from(ground.get(p) != carved.get(p));
+            }
+        }
+    }
+    let share = opened as f32 / columns as f32;
+    assert!(share < 0.04, "{share}");
 }
 
 #[test]
 fn trees_stand_on_ground() {
     let terrain = Terrain::new(1337);
     let mut trees = 0;
-    for key in keys(forest_center(&terrain), 6) {
+    for key in keys(ColumnPos::new(40, 10), 6) {
         let column = terrain.generate(key);
         let origin = key.origin();
         for z in origin.z..origin.z + 16 {
             for x in origin.x..origin.x + 16 {
-                let Some(tree) = tree_at(&terrain, x, z) else {
+                let Some(tree) = crate::trees::tree_at(&terrain, x, z) else {
                     continue;
                 };
                 if terrain.lake_covers(x, z) {
@@ -213,67 +243,4 @@ fn trees_stand_on_ground() {
         }
     }
     assert!(trees > 10, "{trees} trees");
-}
-
-#[test]
-fn tree_closes_entrance_roof() {
-    let terrain = Terrain::new(1337);
-    let caves = &terrain.caves;
-    let (x, z) = (0..100_000)
-        .map(|i| (i * 7, i * -3))
-        .find(|&(x, z)| {
-            caves.entrance(x, z) > 0.5 && terrain.surface_height(x, z) > WATER_LEVEL + 8
-        })
-        .expect("no dry entrance");
-    let surface = |x, z| terrain.surface_height(x, z);
-    let h = surface(x, z);
-    assert_eq!(caves.limits(x, z, surface, |_, _| false).top, h);
-    assert_eq!(caves.limits(x, z, surface, |_, _| true).top, h - ROOF);
-}
-
-#[test]
-fn roof_is_opened_only_in_entrances() {
-    let terrain = Terrain::new(1337);
-    let caves = &terrain.caves;
-    let mut openings = 0;
-    for key in keys(forest_center(&terrain), 8) {
-        let (ground, carved) = ground_and_carved(&terrain, key);
-        let origin = key.origin();
-        for z in origin.z..origin.z + 16 {
-            for x in origin.x..origin.x + 16 {
-                let h = terrain.surface_height(x, z);
-                let opened = (h - ROOF + 1..=h).any(|y| {
-                    let p = local(IVec3::new(x, y, z));
-                    carved.get(p) != ground.get(p)
-                });
-                if opened {
-                    assert!(caves.entrance(x, z) > 0.0, "{x}, {z}");
-                    openings += 1;
-                }
-            }
-        }
-    }
-    assert!(openings > 0, "no entrances");
-    assert!(openings < 17 * 17 * 256 / 40, "{openings} opened columns");
-}
-
-#[test]
-fn deep_caves_fill_with_lava_and_higher_ones_stay_air() {
-    let terrain = Terrain::new(1337);
-    let (mut lava, mut high_air) = (0, 0);
-    for key in keys(ColumnPos::ZERO, 4) {
-        let (ground, carved) = ground_and_carved(&terrain, key);
-        for pos in blocks(key) {
-            let (before, after) = (ground.get(local(pos)), carved.get(local(pos)));
-            if after == Block::Lava {
-                assert!(pos.y < LAVA_LEVEL, "{pos}");
-                assert!(carvable(before), "{pos}");
-                lava += 1;
-            } else if carvable(before) && after == Block::Air {
-                assert!(pos.y >= LAVA_LEVEL, "{pos}");
-                high_air += 1;
-            }
-        }
-    }
-    assert!(lava > 0 && high_air > 0, "lava {lava}, air {high_air}");
 }

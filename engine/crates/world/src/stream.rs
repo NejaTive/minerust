@@ -30,6 +30,10 @@ impl Stream {
         f64::from(self.below(1 << 24)) / f64::from(1 << 24)
     }
 
+    pub fn float(&mut self) -> f32 {
+        self.below(1 << 24) as f32 / (1 << 24) as f32
+    }
+
     pub fn flip(&mut self) -> bool {
         self.below(2) == 1
     }
