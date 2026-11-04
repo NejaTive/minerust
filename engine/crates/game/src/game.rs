@@ -574,7 +574,8 @@ impl Game {
         let seed = self.mob_rng.next_u32();
         let kind = item.def().spawns;
         let mut mob = Mob::new(kind, feet, yaw, seed);
-        mob.variant = random_variant(&mut self.mob_rng, kind);
+        let biome = self.terrain.biome_at(cell.x, cell.z);
+        mob.variant = random_variant(&mut self.mob_rng, kind, biome);
         if self.mob_fits(&mob) && self.world.is_loaded(cell) {
             self.mobs.push(mob);
         }

@@ -1,11 +1,13 @@
 use glam::IVec3;
 use world::block::Block;
 use world::column::Column;
-use world::mob::MobKind;
+use world::item::Item;
+use world::mob::{MobKind, RABBIT_GOLD, RABBIT_SPLOTCHED, RABBIT_WHITE};
 use world::pos::ColumnPos;
 use world::terrain::Biome;
 
 use super::*;
+use crate::raycast::Hit;
 use crate::spawning::{CREATURE_CAP, cap};
 
 const FLOOR: i32 = 10;
@@ -27,6 +29,12 @@ fn keys_in(seed: i32, biomes: &[Biome], count: usize) -> Vec<ColumnPos> {
         .step_by(97)
         .take(count)
         .collect()
+}
+
+fn seed_with(biomes: &[Biome]) -> i32 {
+    (1..60)
+        .find(|&seed| !keys_in(seed, biomes, 1).is_empty())
+        .expect("a seed with these biomes nearby")
 }
 
 fn load_generated(game: &mut Game, key: ColumnPos) {
@@ -178,4 +186,91 @@ fn spawn_spot_needs_distance_and_room() {
         .set_block(IVec3::new(far.x, far.y + 1, far.z), Block::Stone);
     let mob = cow_at(&mut game, far);
     assert!(!game.may_spawn_here(&mob, far));
+}
+
+#[test]
+fn generation_puts_gold_rabbits_on_desert_sand() {
+    let mut game = Game::new(21, None).unwrap();
+    let mut rabbits = 0;
+    for key in keys_in(21, &[Biome::Desert], 200) {
+        load_generated(&mut game, key);
+        for record in game.generation_herds(key) {
+            assert_eq!(record.kind, MobKind::Rabbit);
+            assert_eq!(record.variant, RABBIT_GOLD);
+            let below = record.pos.floor().as_ivec3() - IVec3::Y;
+            assert!(game.world.block(below).collision_height() >= 1.0);
+            assert!(!game.world.block(below).is_grass());
+            rabbits += 1;
+        }
+    }
+    assert!(rabbits > 0);
+}
+
+#[test]
+fn generated_herds_keep_one_rabbit_colour_per_group() {
+    let seed = seed_with(&[Biome::IcePlains]);
+    let mut game = Game::new(seed, None).unwrap();
+    let mut snowy = 0;
+    for key in keys_in(seed, &[Biome::IcePlains], 200) {
+        load_generated(&mut game, key);
+        for record in game.generation_herds(key) {
+            if record.kind == MobKind::Rabbit {
+                assert!([RABBIT_WHITE, RABBIT_SPLOTCHED].contains(&record.variant));
+                snowy += 1;
+            }
+        }
+    }
+    assert!(snowy > 0);
+}
+
+#[test]
+fn generation_never_spawns_on_liquid_or_in_barren_biomes() {
+    let mut game = Game::new(21, None).unwrap();
+    for key in keys_in(21, &[Biome::Ocean, Biome::River, Biome::Beach], 60) {
+        load_generated(&mut game, key);
+        assert!(game.generation_herds(key).is_empty());
+    }
+}
+
+#[test]
+fn ocelots_spawn_on_leaves_above_sea_level_only() {
+    let mut game = farm_game(Block::Grass);
+    game.set_camera_state(&[8.5, 12.7, 8.5, 0.0, 0.0, 1.0])
+        .unwrap();
+    let high = IVec3::new(8, OCELOT_MIN_Y, 38);
+    let low = IVec3::new(8, OCELOT_MIN_Y - 1, 38);
+    for cell in [high, low] {
+        game.world.set_block(cell - IVec3::Y, Block::Leaves);
+    }
+    let ocelot = |game: &Game, cell| game.new_mob(MobKind::Ocelot, 0, cell, &mut Rng::new(5));
+    assert!(game.may_spawn_here(&ocelot(&game, high), high));
+    assert!(!game.may_spawn_here(&ocelot(&game, low), low));
+    let cow = game.new_mob(MobKind::Cow, 0, high, &mut Rng::new(5));
+    assert!(!game.may_spawn_here(&cow, high));
+}
+
+#[test]
+fn egg_rabbit_takes_the_colour_of_the_biome_it_is_summoned_in() {
+    for (biome, allowed) in [
+        (Biome::Desert, vec![RABBIT_GOLD]),
+        (Biome::IcePlains, vec![RABBIT_WHITE, RABBIT_SPLOTCHED]),
+    ] {
+        let seed = seed_with(&[biome]);
+        let mut game = Game::new(seed, None).unwrap();
+        let key = keys_in(seed, &[biome], 1)[0];
+        load_generated(&mut game, key);
+        let origin = key.origin();
+        let cell = IVec3::new(origin.x + 8, 200, origin.z + 8);
+        for _ in 0..20 {
+            game.mobs.clear();
+            let hit = Hit {
+                block: cell - IVec3::Y,
+                normal: IVec3::Y,
+                distance: 1.0,
+            };
+            game.use_item(Item::RabbitSpawnEgg, hit);
+            assert_eq!(game.mobs.len(), 1);
+            assert!(allowed.contains(&game.mobs[0].variant), "{biome:?}");
+        }
+    }
 }

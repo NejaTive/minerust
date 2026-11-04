@@ -1,5 +1,8 @@
-use world::mob::{HORSE_COLOURS, HORSE_MARKINGS, LLAMA_COLOURS, MobKind, horse_variant};
-use world::terrain::Biome;
+use world::mob::{
+    HORSE_COLOURS, HORSE_MARKINGS, LLAMA_COLOURS, MobKind, RABBIT_BLACK, RABBIT_BROWN, RABBIT_GOLD,
+    RABBIT_SALT, RABBIT_SPLOTCHED, RABBIT_WHITE, horse_variant,
+};
+use world::terrain::{Biome, WATER_LEVEL};
 
 use crate::physics::TICK;
 use crate::rng::Rng;
@@ -16,6 +19,7 @@ pub const GROUPS_PER_COLUMN: u32 = 3;
 pub const ATTEMPTS_PER_GROUP: u32 = 4;
 pub const GENERATION_REACH: u32 = 5;
 pub const CYCLE_REACH: u32 = 6;
+pub const OCELOT_MIN_Y: i32 = WATER_LEVEL + 1;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SpawnEntry {
@@ -40,8 +44,29 @@ const CHICKEN: SpawnEntry = entry(MobKind::Chicken, 10, 4, 4);
 const COW: SpawnEntry = entry(MobKind::Cow, 8, 4, 4);
 
 const FARM_ANIMALS: [SpawnEntry; 4] = [SHEEP, PIG, CHICKEN, COW];
+const RABBIT: SpawnEntry = entry(MobKind::Rabbit, 4, 2, 3);
+const RABBIT_SNOW: SpawnEntry = entry(MobKind::Rabbit, 10, 2, 3);
+const POLAR_BEAR: SpawnEntry = entry(MobKind::PolarBear, 1, 1, 2);
+
 const FOREST_ANIMALS: [SpawnEntry; 5] = [SHEEP, PIG, CHICKEN, COW, entry(MobKind::Wolf, 5, 4, 4)];
-const TAIGA_ANIMALS: [SpawnEntry; 5] = [SHEEP, PIG, CHICKEN, COW, entry(MobKind::Wolf, 8, 4, 4)];
+const FLOWER_FOREST_ANIMALS: [SpawnEntry; 5] = [SHEEP, PIG, CHICKEN, COW, RABBIT];
+const TAIGA_ANIMALS: [SpawnEntry; 6] = [
+    SHEEP,
+    PIG,
+    CHICKEN,
+    COW,
+    entry(MobKind::Wolf, 8, 4, 4),
+    RABBIT,
+];
+const JUNGLE_ANIMALS: [SpawnEntry; 6] = [
+    SHEEP,
+    PIG,
+    CHICKEN,
+    COW,
+    entry(MobKind::Chicken, 10, 4, 4),
+    entry(MobKind::Ocelot, 2, 1, 1),
+];
+const DESERT_ANIMALS: [SpawnEntry; 1] = [RABBIT];
 const HORSE_PLAINS: SpawnEntry = entry(MobKind::Horse, 5, 2, 6);
 const DONKEY_PLAINS: SpawnEntry = entry(MobKind::Donkey, 1, 1, 3);
 const HORSE_SAVANNA: SpawnEntry = entry(MobKind::Horse, 1, 2, 6);
@@ -62,7 +87,7 @@ const PLATEAU_ANIMALS: [SpawnEntry; 7] = [
 ];
 const HILLS_ANIMALS: [SpawnEntry; 5] = [SHEEP, PIG, CHICKEN, COW, LLAMA_HILLS];
 const MUSHROOM_ANIMALS: [SpawnEntry; 1] = [entry(MobKind::Mooshroom, 8, 4, 8)];
-const SNOW_ANIMALS: [SpawnEntry; 1] = [entry(MobKind::PolarBear, 1, 1, 2)];
+const SNOW_ANIMALS: [SpawnEntry; 2] = [RABBIT_SNOW, POLAR_BEAR];
 
 pub fn animals(biome: Biome) -> &'static [SpawnEntry] {
     match biome {
@@ -77,6 +102,7 @@ pub fn animals(biome: Biome) -> &'static [SpawnEntry] {
         | Biome::ExtremeHillsM
         | Biome::ExtremeHillsPlusM => &HILLS_ANIMALS,
         Biome::Forest | Biome::ForestHills => &FOREST_ANIMALS,
+        Biome::FlowerForest => &FLOWER_FOREST_ANIMALS,
         Biome::Taiga
         | Biome::TaigaHills
         | Biome::TaigaM
@@ -87,9 +113,10 @@ pub fn animals(biome: Biome) -> &'static [SpawnEntry] {
         | Biome::MegaTaigaHills
         | Biome::MegaSpruceTaiga
         | Biome::MegaSpruceTaigaHills => &TAIGA_ANIMALS,
+        _ if biome.is_desert() => &DESERT_ANIMALS,
+        _ if biome.is_jungle() => &JUNGLE_ANIMALS,
         _ if biome.is_ocean()
             || biome.is_river()
-            || biome.is_desert()
             || biome.is_mesa()
             || matches!(biome, Biome::Beach | Biome::StoneBeach | Biome::ColdBeach) =>
         {
@@ -119,11 +146,31 @@ pub fn group_size(rng: &mut Rng, entry: SpawnEntry) -> u32 {
     entry.min + rng.below(1 + entry.max - entry.min)
 }
 
-pub fn group_colour(rng: &mut Rng, kind: MobKind) -> u8 {
+pub fn group_colour(rng: &mut Rng, kind: MobKind, biome: Biome) -> u8 {
     match kind {
         MobKind::Horse => rng.below(u32::from(HORSE_COLOURS)) as u8,
         MobKind::Llama => rng.below(u32::from(LLAMA_COLOURS)) as u8,
+        MobKind::Rabbit => rabbit_colour(rng, biome),
         _ => 0,
+    }
+}
+
+fn rabbit_colour(rng: &mut Rng, biome: Biome) -> u8 {
+    let roll = rng.below(100);
+    if biome.is_snowy() {
+        if roll < 80 {
+            RABBIT_WHITE
+        } else {
+            RABBIT_SPLOTCHED
+        }
+    } else if biome.is_desert() {
+        RABBIT_GOLD
+    } else if roll < 50 {
+        RABBIT_BROWN
+    } else if roll < 90 {
+        RABBIT_SALT
+    } else {
+        RABBIT_BLACK
     }
 }
 
@@ -134,8 +181,8 @@ pub fn variant_in_group(rng: &mut Rng, kind: MobKind, colour: u8) -> u8 {
     }
 }
 
-pub fn random_variant(rng: &mut Rng, kind: MobKind) -> u8 {
-    let colour = group_colour(rng, kind);
+pub fn random_variant(rng: &mut Rng, kind: MobKind, biome: Biome) -> u8 {
+    let colour = group_colour(rng, kind, biome);
     variant_in_group(rng, kind, colour)
 }
 

@@ -8,5 +8,7 @@
   { "name": "wolf_spawn_egg", "label": "яйцо призыва волка" },
   { "name": "horse_spawn_egg", "label": "яйцо призыва лошади" },
   { "name": "donkey_spawn_egg", "label": "яйцо призыва осла" },
-  { "name": "llama_spawn_egg", "label": "яйцо призыва ламы" }
+  { "name": "llama_spawn_egg", "label": "яйцо призыва ламы" },
+  { "name": "rabbit_spawn_egg", "label": "яйцо призыва кролика" },
+  { "name": "ocelot_spawn_egg", "label": "яйцо призыва оцелота" }
 ]

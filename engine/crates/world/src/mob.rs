@@ -13,10 +13,12 @@ pub enum MobKind {
     Horse,
     Donkey,
     Llama,
+    Rabbit,
+    Ocelot,
 }
 
 impl MobKind {
-    pub const ALL: [MobKind; 10] = [
+    pub const ALL: [MobKind; 12] = [
         MobKind::Pig,
         MobKind::Chicken,
         MobKind::Cow,
@@ -27,6 +29,8 @@ impl MobKind {
         MobKind::Horse,
         MobKind::Donkey,
         MobKind::Llama,
+        MobKind::Rabbit,
+        MobKind::Ocelot,
     ];
 }
 
@@ -52,6 +56,14 @@ pub struct MobRecord {
 pub const HORSE_COLOURS: u8 = 7;
 pub const HORSE_MARKINGS: u8 = 5;
 pub const LLAMA_COLOURS: u8 = 4;
+
+pub const RABBIT_BROWN: u8 = 0;
+pub const RABBIT_WHITE: u8 = 1;
+pub const RABBIT_BLACK: u8 = 2;
+pub const RABBIT_SPLOTCHED: u8 = 3;
+pub const RABBIT_GOLD: u8 = 4;
+pub const RABBIT_SALT: u8 = 5;
+pub const RABBIT_COLOURS: u8 = 6;
 
 /// Вариант лошади: младшие 4 бита — окрас (0..7), старшие — отметины (0 — нет, 1..=4).
 pub const fn horse_variant(colour: u8, markings: u8) -> u8 {

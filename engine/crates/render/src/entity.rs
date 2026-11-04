@@ -45,6 +45,8 @@ pub enum ModelKind {
     Horse,
     Donkey,
     Llama,
+    Rabbit,
+    Ocelot,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -67,6 +69,7 @@ pub struct MobInstance {
     pub limb_swing: f32,
     pub flap_phase: f32,
     pub flap_amount: f32,
+    pub hop: f32,
     pub sky_level: f32,
     pub block_level: f32,
     pub shadow_radius: f32,
@@ -109,6 +112,13 @@ pub enum EntityTexture {
     LlamaWhite,
     LlamaBrown,
     LlamaGray,
+    RabbitBrown,
+    RabbitWhite,
+    RabbitBlack,
+    RabbitSplotched,
+    RabbitGold,
+    RabbitSalt,
+    Ocelot,
 }
 
 impl EntityTexture {
@@ -138,6 +148,13 @@ impl EntityTexture {
         EntityTexture::LlamaWhite,
         EntityTexture::LlamaBrown,
         EntityTexture::LlamaGray,
+        EntityTexture::RabbitBrown,
+        EntityTexture::RabbitWhite,
+        EntityTexture::RabbitBlack,
+        EntityTexture::RabbitSplotched,
+        EntityTexture::RabbitGold,
+        EntityTexture::RabbitSalt,
+        EntityTexture::Ocelot,
     ];
 
     fn units(self) -> Vec2 {
@@ -165,7 +182,7 @@ impl EntityTexture {
     }
 }
 
-pub const TEXTURES: usize = 25;
+pub const TEXTURES: usize = 32;
 
 pub type MobVertices = [Vec<f32>; TEXTURES];
 
@@ -216,6 +233,7 @@ fn leg_rotation(instance: &MobInstance, phase: f32) -> Mat3 {
 }
 
 mod equine;
+mod small;
 
 const WILD_TAIL_ANGLE: f32 = PI / 5.0;
 const MUSHROOM_YAW: f32 = 42.0 * PI / 180.0;
@@ -689,10 +707,10 @@ fn push_double_sided(quad: [(Vec3, Vec2); 4], instance: &MobInstance, out: &mut 
 }
 
 fn to_world(model: Vec3, instance: &MobInstance) -> Vec3 {
-    let scale = if instance.kind == ModelKind::Donkey {
-        equine::DONKEY_SCALE
-    } else {
-        1.0
+    let scale = match instance.kind {
+        ModelKind::Donkey => equine::DONKEY_SCALE,
+        ModelKind::Rabbit => small::RABBIT_SCALE,
+        _ => 1.0,
     };
     let local = Vec3::new(-model.x, MODEL_FEET - model.y, model.z) * scale / PIXELS_PER_BLOCK;
     instance.feet + Mat3::from_rotation_y(-instance.yaw - FRAC_PI_2) * local
@@ -717,6 +735,8 @@ pub fn push_mob(instance: &MobInstance, out: &mut MobVertices) {
         ModelKind::Horse => equine::horse_parts(instance),
         ModelKind::Donkey => equine::donkey_parts(instance),
         ModelKind::Llama => equine::llama_parts(instance),
+        ModelKind::Rabbit => small::rabbit_parts(instance),
+        ModelKind::Ocelot => small::ocelot_parts(instance),
     };
     for part in &parts {
         push_box(part, instance, &mut out[part.sheet as usize]);
@@ -970,6 +990,13 @@ pub fn create_texture_groups(
                 EntityTexture::LlamaWhite => &images.llama[1],
                 EntityTexture::LlamaBrown => &images.llama[2],
                 EntityTexture::LlamaGray => &images.llama[3],
+                EntityTexture::RabbitBrown => &images.rabbit[0],
+                EntityTexture::RabbitWhite => &images.rabbit[1],
+                EntityTexture::RabbitBlack => &images.rabbit[2],
+                EntityTexture::RabbitSplotched => &images.rabbit[3],
+                EntityTexture::RabbitGold => &images.rabbit[4],
+                EntityTexture::RabbitSalt => &images.rabbit[5],
+                EntityTexture::Ocelot => &images.ocelot,
             };
             let texture = device.create_texture_with_data(
                 queue,
