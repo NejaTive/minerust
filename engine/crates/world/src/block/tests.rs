@@ -561,6 +561,7 @@ fn states_cover_every_data_kind() {
             DataKind::Chest => 12,
             DataKind::Furnace | DataKind::Cauldron => 4,
             DataKind::Pot => 16,
+            DataKind::Spawner => 4,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
