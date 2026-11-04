@@ -183,6 +183,9 @@ fn models_have_the_minecraft_box_counts() {
     assert_eq!(count(ModelKind::Chicken), 8);
     assert_eq!(count(ModelKind::Cow), 9);
     assert_eq!(count(ModelKind::Sheep), 12);
+    assert_eq!(count(ModelKind::Mooshroom), 9 + 2);
+    assert_eq!(count(ModelKind::PolarBear), 10);
+    assert_eq!(count(ModelKind::Wolf), 11);
 }
 
 #[test]
@@ -193,6 +196,9 @@ fn each_model_draws_from_its_own_sheets() {
         (ModelKind::Cow, EntityTexture::Cow, 9),
         (ModelKind::Sheep, EntityTexture::Sheep, 6),
         (ModelKind::Sheep, EntityTexture::SheepFur, 6),
+        (ModelKind::Mooshroom, EntityTexture::Mooshroom, 9),
+        (ModelKind::PolarBear, EntityTexture::PolarBear, 10),
+        (ModelKind::Wolf, EntityTexture::Wolf, 11),
     ] {
         let model = of_kind(kind);
         assert_eq!(boxes_on(&model, sheet), boxes, "{kind:?} {sheet:?}");
@@ -201,7 +207,9 @@ fn each_model_draws_from_its_own_sheets() {
             .filter(|&other| other != sheet)
             .map(|other| boxes_on(&model, other))
             .sum();
+        let mushrooms = boxes_on(&model, EntityTexture::Mushroom);
         assert_eq!(others + boxes, vertices(&model).len() / 36);
+        assert_eq!(mushrooms, if kind == ModelKind::Mooshroom { 2 } else { 0 });
     }
 }
 
@@ -211,6 +219,8 @@ fn standing_models_match_their_hitboxes() {
         (ModelKind::Chicken, 0.4, 0.7, 0.5),
         (ModelKind::Cow, 0.9, 1.4, 1.3),
         (ModelKind::Sheep, 0.9, 1.3, 1.1),
+        (ModelKind::PolarBear, 1.3, 1.4, 1.9),
+        (ModelKind::Wolf, 0.6, 0.85, 1.0),
     ] {
         let model = of_kind(kind);
         let (min, max) = bounds(&model);
@@ -229,6 +239,9 @@ fn every_model_stays_on_its_sheet_and_faces_outward() {
         ModelKind::Chicken,
         ModelKind::Cow,
         ModelKind::Sheep,
+        ModelKind::Mooshroom,
+        ModelKind::PolarBear,
+        ModelKind::Wolf,
     ] {
         let model = of_kind(kind);
         let verts = vertices(&model);
@@ -326,4 +339,138 @@ fn bottom_face_uv_matches_model_box() {
     expect(Vec3::new(0.0, dy, dz), u0 + dz + dx, v0);
     expect(Vec3::new(0.0, dy, 0.0), u0 + dz + dx, v0 + dz);
     expect(Vec3::new(dx, dy, 0.0), u0 + dz + 2.0 * dx, v0 + dz);
+}
+
+fn mushroom_points(mob: &MobInstance) -> Vec<Vec3> {
+    sheets(mob)[EntityTexture::Mushroom as usize]
+        .as_chunks::<VERTEX_FLOATS>()
+        .0
+        .iter()
+        .map(position)
+        .collect()
+}
+
+#[test]
+fn mooshroom_carries_two_mushrooms_on_the_back_and_one_on_the_head() {
+    let cow = of_kind(ModelKind::Mooshroom);
+    let points = mushroom_points(&cow);
+    assert_eq!(points.len(), 3 * 24);
+    for back in points[..48].chunks(24) {
+        let min = back.iter().map(|p| p.y).fold(f32::MAX, f32::min) - cow.feet.y;
+        let max = back.iter().map(|p| p.y).fold(f32::MIN, f32::max) - cow.feet.y;
+        assert!(
+            (min - 1.35).abs() < 0.05 && (max - 2.35).abs() < 0.05,
+            "{min} {max}"
+        );
+    }
+    let turned = MobInstance {
+        head_yaw: 1.0,
+        ..cow.clone()
+    };
+    let moved = mushroom_points(&turned);
+    assert_eq!(points[..48], moved[..48]);
+    assert!(
+        points[48..]
+            .iter()
+            .zip(&moved[48..])
+            .any(|(a, b)| a.distance(*b) > 0.05)
+    );
+    for v in &sheets(&cow)[EntityTexture::Mushroom as usize] {
+        assert!(v.is_finite());
+    }
+}
+
+#[test]
+fn mushroom_planes_cover_the_whole_block_texture() {
+    let cow = of_kind(ModelKind::Mooshroom);
+    let uvs: Vec<(f32, f32)> = sheets(&cow)[EntityTexture::Mushroom as usize]
+        .as_chunks::<VERTEX_FLOATS>()
+        .0
+        .iter()
+        .map(|v| (v[3], v[4]))
+        .collect();
+    assert!(
+        uvs.iter()
+            .all(|&(u, v)| u == 0.0 || u == 1.0 && (v == 0.0 || v == 1.0))
+    );
+    assert!(uvs.contains(&(0.0, 0.0)) && uvs.contains(&(1.0, 1.0)));
+}
+
+#[test]
+fn polar_bear_ears_mirror_each_other() {
+    let ear = |mirror| {
+        let mut part = part(
+            EntityTexture::PolarBear,
+            (26.0, 0.0),
+            [2.5, -4.0, -1.0],
+            [2.0, 2.0, 1.0],
+            [0.0, 10.0, -16.0],
+            Mat3::IDENTITY,
+        );
+        part.mirror = mirror;
+        let mut out = Vec::new();
+        push_box(&part, &of_kind(ModelKind::PolarBear), &mut out);
+        out.as_chunks::<VERTEX_FLOATS>()
+            .0
+            .iter()
+            .map(|v| (v[3], v[4]))
+            .collect::<Vec<_>>()
+    };
+    let (plain, flipped) = (ear(false), ear(true));
+    assert_ne!(plain, flipped);
+    let range = |uvs: &[(f32, f32)]| {
+        let us = uvs.iter().map(|uv| uv.0);
+        (
+            us.clone().fold(f32::MAX, f32::min),
+            us.fold(f32::MIN, f32::max),
+        )
+    };
+    assert_eq!(range(&plain), range(&flipped));
+    assert_eq!(range(&plain), (26.0 / 128.0, 32.0 / 128.0));
+}
+
+#[test]
+fn wolf_tail_hangs_back_and_down() {
+    let wolf = of_kind(ModelKind::Wolf);
+    let wolf_sheet = sheets(&wolf);
+    let tail = &wolf_sheet[EntityTexture::Wolf as usize]
+        .as_chunks::<VERTEX_FLOATS>()
+        .0[6 * 36..7 * 36];
+    let (low, high) = tail
+        .iter()
+        .map(position)
+        .fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+            (lo.min(p.y), hi.max(p.y))
+        });
+    assert!((high - wolf.feet.y - 0.78).abs() < 0.03 && low - wolf.feet.y < 0.5);
+}
+
+#[test]
+fn polar_bear_body_is_one_connected_mass_behind_the_head() {
+    let bear = of_kind(ModelKind::PolarBear);
+    let sheet = sheets(&bear);
+    let boxes = sheet[EntityTexture::PolarBear as usize]
+        .as_chunks::<VERTEX_FLOATS>()
+        .0;
+    let extent = |index: usize| {
+        let points: Vec<Vec3> = boxes[index * 36..(index + 1) * 36]
+            .iter()
+            .map(position)
+            .collect();
+        (
+            points.iter().copied().reduce(Vec3::min).unwrap(),
+            points.iter().copied().reduce(Vec3::max).unwrap(),
+        )
+    };
+    let (head, (rear_min, rear_max), (front_min, front_max)) = (extent(0), extent(4), extent(5));
+    assert!(
+        rear_max.y - rear_min.y < 0.8,
+        "body must lie flat: {rear_min} {rear_max}"
+    );
+    assert!(
+        (front_min.x - rear_max.x).abs() < 0.01,
+        "{front_min} {rear_max}"
+    );
+    assert!(front_max.x - front_min.x > 0.7);
+    assert!(head.0.x - front_max.x < 0.45, "gap between head and body");
 }

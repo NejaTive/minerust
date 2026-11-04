@@ -52,12 +52,35 @@ pub const SHEEP: MobSpec = MobSpec {
     fall_speed: None,
 };
 
+pub const MOOSHROOM: MobSpec = COW;
+
+pub const POLAR_BEAR: MobSpec = MobSpec {
+    width: 1.3,
+    height: 1.4,
+    eye: 1.19,
+    walk_input: 0.5,
+    shadow_radius: 1.0,
+    fall_speed: None,
+};
+
+pub const WOLF: MobSpec = MobSpec {
+    width: 0.6,
+    height: 0.85,
+    eye: 0.68,
+    walk_input: 0.6,
+    shadow_radius: 0.5,
+    fall_speed: None,
+};
+
 pub fn spec(kind: MobKind) -> &'static MobSpec {
     match kind {
         MobKind::Pig => &PIG,
         MobKind::Chicken => &CHICKEN,
         MobKind::Cow => &COW,
         MobKind::Sheep => &SHEEP,
+        MobKind::Mooshroom => &MOOSHROOM,
+        MobKind::PolarBear => &POLAR_BEAR,
+        MobKind::Wolf => &WOLF,
     }
 }
 

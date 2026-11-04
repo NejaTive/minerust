@@ -12,6 +12,10 @@ const BLOCKS_DIR: &str = "assets/minecraft/textures/blocks/";
 const ENTITY_PIG: &str = "assets/minecraft/textures/entity/pig/pig.png";
 const ENTITY_CHICKEN: &str = "assets/minecraft/textures/entity/chicken.png";
 const ENTITY_COW: &str = "assets/minecraft/textures/entity/cow/cow.png";
+const ENTITY_MOOSHROOM: &str = "assets/minecraft/textures/entity/cow/mooshroom.png";
+const ENTITY_POLAR_BEAR: &str = "assets/minecraft/textures/entity/bear/polarbear.png";
+const ENTITY_WOLF: &str = "assets/minecraft/textures/entity/wolf/wolf.png";
+const BLOCK_MUSHROOM_RED: &str = "assets/minecraft/textures/blocks/mushroom_red.png";
 const ENTITY_SHEEP: &str = "assets/minecraft/textures/entity/sheep/sheep.png";
 const ENTITY_SHEEP_FUR: &str = "assets/minecraft/textures/entity/sheep/sheep_fur.png";
 const ITEM_SPAWN_EGG: &str = "assets/minecraft/textures/items/spawn_egg.png";
@@ -62,6 +66,11 @@ pub struct EntityImages {
     pub cow: DecodedImage,
     pub sheep: DecodedImage,
     pub sheep_fur: DecodedImage,
+    pub mooshroom: DecodedImage,
+    pub polar_bear: DecodedImage,
+    pub wolf: DecodedImage,
+    /// Квадратная блочная текстура гриба для скрещённых плоскостей на спине грибной коровы.
+    pub mushroom_red: DecodedImage,
     pub spawn_egg: DecodedImage,
     pub spawn_egg_overlay: DecodedImage,
 }
@@ -264,6 +273,12 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
     let cow = image(ENTITY_COW, sheet);
     let sheep = image(ENTITY_SHEEP, sheet);
     let sheep_fur = image(ENTITY_SHEEP_FUR, sheet);
+    let mooshroom = image(ENTITY_MOOSHROOM, sheet);
+    let polar_bear = image(ENTITY_POLAR_BEAR, sheet);
+    let wolf = image(ENTITY_WOLF, sheet);
+    let mushroom_red = image(BLOCK_MUSHROOM_RED, |i| {
+        i.width >= MIN_TILE_SIZE && i.width == i.height
+    });
     let spawn_egg = image(ITEM_SPAWN_EGG, |i| {
         i.width >= MIN_TILE_SIZE && i.width == i.height
     });
@@ -276,6 +291,10 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
         cow,
         sheep,
         sheep_fur,
+        mooshroom,
+        polar_bear,
+        wolf,
+        mushroom_red,
         spawn_egg,
         spawn_egg_overlay,
     }
@@ -534,6 +553,34 @@ const BUILTIN_ENTITIES: &[(&str, &[u8])] = &[
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/assets/textures/entity/sheep/sheep_fur.png"
+        )),
+    ),
+    (
+        ENTITY_MOOSHROOM,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/cow/mooshroom.png"
+        )),
+    ),
+    (
+        ENTITY_POLAR_BEAR,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/bear/polarbear.png"
+        )),
+    ),
+    (
+        ENTITY_WOLF,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/entity/wolf/wolf.png"
+        )),
+    ),
+    (
+        BLOCK_MUSHROOM_RED,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/mushroom_red.png"
         )),
     ),
     (

@@ -10,8 +10,9 @@ use crate::daytime::sky_state;
 use crate::mob::Mob;
 use crate::rng::Rng;
 use crate::spawning::{
-    ATTEMPTS_PER_GROUP, CYCLE_REACH, CYCLE_TICKS, GENERATION_ONE_IN, GENERATION_REACH, GROUP_SIZE,
-    GROUPS_PER_COLUMN, MIN_LIGHT, MIN_PLAYER_DISTANCE, RADIUS, animals, cap, pick, reach_offset,
+    ATTEMPTS_PER_GROUP, CYCLE_GROUP_SIZE, CYCLE_REACH, CYCLE_TICKS, GENERATION_ONE_IN,
+    GENERATION_REACH, GROUPS_PER_COLUMN, MIN_LIGHT, MIN_PLAYER_DISTANCE, RADIUS, animals, cap,
+    group_size, pick, reach_offset,
 };
 
 const COLUMN_SIZE: i32 = 16;
@@ -58,14 +59,16 @@ impl Game {
         let list = animals(self.terrain.biome_at(origin.x + center, origin.z + center));
         let mut records = Vec::new();
         while !list.is_empty() && rng.chance(GENERATION_ONE_IN) {
-            let Some(kind) = pick(&mut rng, list) else {
+            let Some(entry) = pick(&mut rng, list) else {
                 break;
             };
+            let kind = entry.kind;
+            let group = group_size(&mut rng, entry);
             let mut local = (
                 rng.below(COLUMN_SIZE as u32) as i32,
                 rng.below(COLUMN_SIZE as u32) as i32,
             );
-            for _ in 0..GROUP_SIZE {
+            for _ in 0..group {
                 for _ in 0..ATTEMPTS_PER_GROUP {
                     let (x, z) = (origin.x + local.0, origin.z + local.1);
                     let placed = self.grass_surface(x, z).and_then(|feet| {
@@ -88,7 +91,7 @@ impl Game {
             let block = self.world.block(IVec3::new(x, y, z));
             block.collision_height() > 0.0 || block.fluid().is_some()
         })?;
-        (self.world.block(IVec3::new(x, top, z)) == Block::Grass).then(|| IVec3::new(x, top + 1, z))
+        spawn_ground(self.world.block(IVec3::new(x, top, z))).then(|| IVec3::new(x, top + 1, z))
     }
 
     fn new_mob(&self, kind: MobKind, cell: IVec3, rng: &mut Rng) -> Mob {
@@ -132,7 +135,7 @@ impl Game {
         let mut spawned = 0;
         for _ in 0..GROUPS_PER_COLUMN {
             let (mut gx, mut gz) = (x, z);
-            let mut kind = None;
+            let mut chosen: Option<MobKind> = None;
             for _ in 0..ATTEMPTS_PER_GROUP {
                 gx += reach_offset(rng, CYCLE_REACH);
                 gz += reach_offset(rng, CYCLE_REACH);
@@ -140,10 +143,10 @@ impl Game {
                 if !self.world.is_loaded(cell) {
                     continue;
                 }
-                if kind.is_none() {
-                    kind = pick(rng, animals(self.terrain.biome_at(gx, gz)));
+                if chosen.is_none() {
+                    chosen = pick(rng, animals(self.terrain.biome_at(gx, gz))).map(|e| e.kind);
                 }
-                let Some(kind) = kind else {
+                let Some(kind) = chosen else {
                     break;
                 };
                 if self.mobs.len() >= limit {
@@ -153,7 +156,7 @@ impl Game {
                 if self.may_spawn_here(&mob, cell) {
                     self.mobs.push(mob);
                     spawned += 1;
-                    if spawned >= GROUP_SIZE {
+                    if spawned >= CYCLE_GROUP_SIZE {
                         return;
                     }
                 }
@@ -162,7 +165,7 @@ impl Game {
     }
 
     fn may_spawn_here(&self, mob: &Mob, cell: IVec3) -> bool {
-        self.world.block(cell - IVec3::Y) == Block::Grass
+        spawn_ground(self.world.block(cell - IVec3::Y))
             && self.spawn_light(cell) >= MIN_LIGHT
             && mob.body.feet.distance(self.player.feet) >= MIN_PLAYER_DISTANCE
             && self.mob_fits(mob)
@@ -174,6 +177,10 @@ impl Game {
             .block(cell)
             .max(self.light.sky(cell).saturating_sub(darkness))
     }
+}
+
+fn spawn_ground(block: Block) -> bool {
+    block.is_grass() || block == Block::Mycelium
 }
 
 fn column_rng(seed: i32, key: ColumnPos) -> Rng {
