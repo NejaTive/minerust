@@ -8,7 +8,7 @@ pub(crate) fn create_biome_map(device: &wgpu::Device) -> wgpu::Texture {
         label: Some("biome tints"),
         size: wgpu::Extent3d {
             width: BIOME_MAP_SIZE,
-            height: 2 * BIOME_MAP_SIZE,
+            height: 3 * BIOME_MAP_SIZE,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -34,7 +34,7 @@ pub(crate) fn upload_biome_column(
     let (x, z) = column_origin(key);
     let side = SECTION_SIZE as u32;
     let plane = (side * side * 4) as usize;
-    for (n, bytes) in tints.chunks_exact(plane).take(2).enumerate() {
+    for (n, bytes) in tints.chunks_exact(plane).take(3).enumerate() {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,

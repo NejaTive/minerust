@@ -184,17 +184,17 @@ impl Terrain {
         }
     }
 
-    /// Цвета травы и листвы колонки для `Renderer::set_biome_column`, см. `BiomePalette::column_bytes`.
+    /// Цвета травы, листвы и воды колонки для `Renderer::set_biome_column`, см. `BiomePalette::column_bytes`.
     pub fn column_tint_bytes(&self, key: ColumnPos, palette: &BiomePalette) -> Vec<u8> {
         let side = SECTION_SIZE as usize + 2 * BLEND_RADIUS as usize;
+        let origin = key.origin();
         let biomes = if self.world_type == WorldType::Standard {
-            let origin = key.origin();
             self.map
                 .blocks(origin.x - BLEND_RADIUS, origin.z - BLEND_RADIUS, side, side)
         } else {
             vec![Biome::Plains; side * side]
         };
-        palette.column_bytes(&biomes)
+        palette.column_bytes(&biomes, origin.x, origin.z)
     }
 
     fn climate(&self, column_x: i32, column_z: i32) -> Arc<ColumnClimate> {
