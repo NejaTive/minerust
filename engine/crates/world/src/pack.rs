@@ -146,7 +146,7 @@ fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
         Tile::LogSide => ("log_oak", WHITE, BiomeTint::None),
         Tile::LogTop => ("log_oak_top", WHITE, BiomeTint::None),
         Tile::Leaves => ("leaves_oak", WHITE, BiomeTint::Foliage),
-        Tile::Water => ("water_still", WATER, BiomeTint::None),
+        Tile::Water => ("water_still", WATER, BiomeTint::Water),
         Tile::Glowstone => ("glowstone", WHITE, BiomeTint::None),
         Tile::TallGrass => ("tallgrass", WHITE, BiomeTint::Grass),
         Tile::Poppy => ("flower_rose", WHITE, BiomeTint::None),

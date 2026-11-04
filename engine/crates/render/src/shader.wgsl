@@ -120,7 +120,7 @@ var block_sampler: sampler;
 // боковых граней в блоках в секунду, колыхание: 0 нет, 1 листва, 2 трава и цветы; плюс 4 —
 // светящийся тайл, EMISSIVE_FLAG в tile.rs); layers: (первый слой текстуры, 1 если кадры
 // смешиваются, слой наложения, 1 если наложение есть); tint.rgb умножает цвет текстуры,
-// tint.w — окраска биомом: 0 нет, 1 трава, 2 листва (`BiomeTint::code`).
+// tint.w — окраска биомом: 0 нет, 1 трава, 2 листва, 3 вода (`BiomeTint::code`).
 // Строит `world::textures::TextureSet::animation_table`; размер — `TILE_COUNT`.
 struct TileAnim {
     timing: vec4<f32>,
@@ -130,8 +130,7 @@ struct TileAnim {
 @group(0) @binding(3)
 var<uniform> animation: array<TileAnim, 115>;
 
-// Цвет травы (верхняя половина) и листвы (нижняя, на BIOME_MAP_SIZE ниже) на блок, тор
-// BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
+// Цвет травы, листвы (на BIOME_MAP_SIZE ниже) и воды (ещё на BIOME_MAP_SIZE ниже) на блок, тор BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
 @group(0) @binding(11)
 var biome_map: texture_2d<f32>;
 
@@ -334,8 +333,8 @@ const BIOME_MAP_SIZE: i32 = 1024;
 
 fn biome_color(kind: f32, world_pos: vec3<f32>) -> vec3<f32> {
     let cell = vec2<i32>(floor(world_pos.xz)) & vec2<i32>(BIOME_MAP_SIZE - 1);
-    let layer = select(0, BIOME_MAP_SIZE, kind > 1.5);
-    return textureLoad(biome_map, cell + vec2<i32>(0, layer), 0).rgb;
+    let layer = i32(kind) - 1;
+    return textureLoad(biome_map, cell + vec2<i32>(0, layer * BIOME_MAP_SIZE), 0).rgb;
 }
 
 fn block_albedo(uv: vec2<f32>, slot: u32, world_pos: vec3<f32>) -> vec4<f32> {
@@ -825,7 +824,8 @@ fn ssr_trace(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
 
 @fragment
 fn fs_water(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = sample_block(in.uv, in.layer);
+    let sampled = sample_block(in.uv, in.layer);
+    let texel = vec4<f32>(sampled.rgb * biome_color(3.0, in.world_pos), sampled.a);
     var normal = flat_normal(in.world_pos);
     let sun_vis = sun_visibility(in, normal, false);
     if globals.eye_fluid > 0.5 || !effect(FX_WATER_REFLECTIONS) {

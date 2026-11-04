@@ -102,8 +102,8 @@ fn missing_colormap_falls_back_to_constants_per_kind() {
 fn column_bytes_are_flat_inside_one_biome_and_blend_at_borders() {
     let palette = BiomePalette::constants();
     let side = 16 + 2 * BLEND_RADIUS as usize;
-    let flat = palette.column_bytes(&vec![Biome::Plains; side * side]);
-    assert_eq!(flat.len(), 2 * 16 * 16 * 4);
+    let flat = palette.column_bytes(&vec![Biome::Plains; side * side], 0, 0);
+    assert_eq!(flat.len(), 3 * 16 * 16 * 4);
     let plains = palette
         .grass(Biome::Plains)
         .map(|c| (c * 255.0).round() as u8);
@@ -120,7 +120,7 @@ fn column_bytes_are_flat_inside_one_biome_and_blend_at_borders() {
             biomes[z * side + x] = Biome::Desert;
         }
     }
-    let mixed = palette.column_bytes(&biomes);
+    let mixed = palette.column_bytes(&biomes, 0, 0);
     let at = |x: usize| mixed[x * 4];
     let desert = palette
         .grass(Biome::Desert)
@@ -132,4 +132,92 @@ fn column_bytes_are_flat_inside_one_biome_and_blend_at_borders() {
         border > plains[0].min(desert[0]) && border < plains[0].max(desert[0])
             || plains[0] == desert[0]
     );
+}
+
+fn rgb8(c: [f32; 3]) -> [u8; 3] {
+    c.map(|v| (v * 255.0).round() as u8)
+}
+
+#[test]
+fn water_is_white_except_in_swamps() {
+    let palette = BiomePalette::constants();
+    assert_eq!(rgb8(palette.water(Biome::Swampland)), [0xE0, 0xFF, 0xAE]);
+    assert_eq!(rgb8(palette.water(Biome::SwamplandM)), [0xE0, 0xFF, 0xAE]);
+    for &biome in Biome::ALL.iter().filter(|b| !b.is_swamp()) {
+        assert_eq!(palette.water(biome), [1.0; 3], "{biome:?}");
+    }
+    assert_eq!(palette.plains(BiomeTint::Water), [1.0; 3]);
+}
+
+#[test]
+fn water_layer_blends_swamp_into_neighbours() {
+    let palette = BiomePalette::constants();
+    let side = 16 + 2 * BLEND_RADIUS as usize;
+    let mut biomes = vec![Biome::Plains; side * side];
+    for z in 0..side {
+        for x in side / 2..side {
+            biomes[z * side + x] = Biome::Swampland;
+        }
+    }
+    let bytes = palette.column_bytes(&biomes, 0, 0);
+    let water = &bytes[2 * 16 * 16 * 4..];
+    assert_eq!(water[..3], [255; 3]);
+    assert_eq!(water[15 * 4..15 * 4 + 3], [0xE0, 0xFF, 0xAE]);
+    let mid = water[(side / 2 - BLEND_RADIUS as usize - 1) * 4];
+    assert!(mid > 0xE0 && mid < 255);
+}
+
+#[test]
+fn swamp_grass_takes_both_values_with_dark_share_near_a_third() {
+    let (mut dark, mut total) = (0, 0);
+    for z in (-1500..1500).step_by(3) {
+        for x in (-1500..1500).step_by(3) {
+            let color = swamp_grass(x, z);
+            assert!(color == [0x4C, 0x76, 0x3C] || color == [0x6A, 0x70, 0x39]);
+            dark += i32::from(color == [0x4C, 0x76, 0x3C]);
+            total += 1;
+        }
+    }
+    let share = f64::from(dark) / f64::from(total);
+    assert!((0.28..0.40).contains(&share), "dark share {share}");
+}
+
+#[test]
+fn swamp_grass_patches_span_tens_of_blocks() {
+    let run = (0..2000)
+        .map(|x| swamp_grass(x, 17))
+        .collect::<Vec<_>>()
+        .chunk_by(|a, b| a == b)
+        .map(<[_]>::len)
+        .collect::<Vec<_>>();
+    let mean = run.iter().sum::<usize>() as f64 / run.len() as f64;
+    assert!((10.0..100.0).contains(&mean), "mean run {mean}");
+}
+
+#[test]
+fn swamp_grass_is_continuous_across_column_borders() {
+    let palette = BiomePalette::constants();
+    let side = 16 + 2 * BLEND_RADIUS as usize;
+    let swamp = vec![Biome::Swampland; side * side];
+    let left = palette.column_bytes(&swamp, -16, 40);
+    let right = palette.column_bytes(&swamp, 0, 40);
+    let wide: Vec<[u8; 3]> = (-16i32..16)
+        .map(|x| {
+            let bytes = if x < 0 { &left } else { &right };
+            let i = (x.rem_euclid(16) * 4) as usize;
+            [bytes[i], bytes[i + 1], bytes[i + 2]]
+        })
+        .collect();
+    for (k, x) in (-16..16).enumerate() {
+        let around: Vec<[u8; 3]> = (x - BLEND_RADIUS..=x + BLEND_RADIUS)
+            .flat_map(|wx| {
+                (40 - BLEND_RADIUS..=40 + BLEND_RADIUS).map(move |wz| swamp_grass(wx, wz))
+            })
+            .collect();
+        let n = around.len() as u32;
+        let avg: [u8; 3] = std::array::from_fn(|c| {
+            ((around.iter().map(|p| u32::from(p[c])).sum::<u32>() + n / 2) / n) as u8
+        });
+        assert_eq!(wide[k], avg, "x = {x}");
+    }
 }

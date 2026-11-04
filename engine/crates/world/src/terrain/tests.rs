@@ -640,13 +640,15 @@ fn flat_and_debug_worlds_are_all_plains() {
 }
 
 #[test]
-fn tint_bytes_hold_grass_then_foliage_for_every_block() {
+fn tint_bytes_hold_grass_foliage_then_water_for_every_block() {
     let terrain = Terrain::new(7);
     let palette = BiomePalette::constants();
     let bytes = terrain.column_tint_bytes(ColumnPos::new(3, -5), &palette);
-    assert_eq!(bytes.len(), 2 * 16 * 16 * 4);
+    let plane = 16 * 16 * 4;
+    assert_eq!(bytes.len(), 3 * plane);
     assert!(bytes.chunks(4).all(|p| p[3] == 255));
-    assert_ne!(bytes[..3], bytes[16 * 16 * 4..16 * 16 * 4 + 3]);
+    assert_ne!(bytes[..3], bytes[plane..plane + 3]);
+    assert!(bytes[2 * plane..].chunks(4).all(|p| p[..3] == [255; 3]));
 }
 
 #[test]
