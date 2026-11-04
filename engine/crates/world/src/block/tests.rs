@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard())
 }
 
-const ALL: [Block; 81] = Block::ALL;
+const ALL: [Block; 91] = Block::ALL;
 
 const FLOWERS: [Block; 8] = [
     Block::Allium,
@@ -47,7 +47,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(81), Err(81));
+    assert_eq!(Block::try_from(91), Err(91));
     assert_eq!(Block::try_from(255), Err(255));
 }
 

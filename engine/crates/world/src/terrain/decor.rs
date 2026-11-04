@@ -521,8 +521,9 @@ impl Terrain {
         let ground = IVec3::new(spot.x, surface, spot.z);
         if !matches!(
             column.get(ground),
-            Block::Grass | Block::Dirt | Block::Podzol | Block::CoarseDirt | Block::Stone
-        ) {
+            Block::Grass | Block::Dirt | Block::Podzol | Block::CoarseDirt
+        ) && !column.get(ground).is_stone()
+        {
             return;
         }
         let mut center = ground + IVec3::Y;
@@ -739,6 +740,7 @@ fn shaded(column: &Column, at: IVec3) -> bool {
 
 mod disks;
 pub(in crate::terrain) mod lakes;
+mod ores;
 mod pumpkins;
 mod springs;
 

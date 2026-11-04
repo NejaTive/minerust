@@ -61,9 +61,9 @@ impl Terrain {
             || !(0..SECTION_SIZE).contains(&at.z)
             || at.y < 1
             || at.y + 1 >= WORLD_HEIGHT
-            || column.get(at + IVec3::Y) != Block::Stone
-            || column.get(at - IVec3::Y) != Block::Stone
-            || !matches!(column.get(at), Block::Stone | Block::Air)
+            || !column.get(at + IVec3::Y).is_stone()
+            || !column.get(at - IVec3::Y).is_stone()
+            || !(column.get(at).is_stone() || column.get(at) == Block::Air)
         {
             return false;
         }
@@ -77,7 +77,7 @@ impl Terrain {
                 let (x, z) = (origin.x + next.x, origin.z + next.z);
                 relief_block(&self.climate(x >> 4, z >> 4), x, next.y, z)
             };
-            stone += i32::from(block == Block::Stone);
+            stone += i32::from(block.is_stone());
             air += i32::from(block == Block::Air);
         }
         if stone != 3 || air != 1 {

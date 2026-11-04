@@ -88,6 +88,16 @@ pub enum Block {
     WhiteTulip,
     PinkTulip,
     Pumpkin,
+    Granite,
+    Diorite,
+    Andesite,
+    CoalOre,
+    IronOre,
+    GoldOre,
+    RedstoneOre,
+    DiamondOre,
+    LapisOre,
+    EmeraldOre,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -293,7 +303,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 81] = [
+pub const BLOCKS: [BlockDef; 91] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -640,10 +650,20 @@ pub const BLOCKS: [BlockDef; 81] = [
         bottom: Some(Tile::PumpkinTop),
         ..BlockDef::uniform("pumpkin", "тыква", Tile::PumpkinSide)
     },
+    BlockDef::uniform("granite", "гранит", Tile::StoneGranite),
+    BlockDef::uniform("diorite", "диорит", Tile::StoneDiorite),
+    BlockDef::uniform("andesite", "андезит", Tile::StoneAndesite),
+    BlockDef::uniform("coal_ore", "угольная руда", Tile::CoalOre),
+    BlockDef::uniform("iron_ore", "железная руда", Tile::IronOre),
+    BlockDef::uniform("gold_ore", "золотая руда", Tile::GoldOre),
+    BlockDef::uniform("redstone_ore", "редстоуновая руда", Tile::RedstoneOre),
+    BlockDef::uniform("diamond_ore", "алмазная руда", Tile::DiamondOre),
+    BlockDef::uniform("lapis_ore", "лазуритовая руда", Tile::LapisOre),
+    BlockDef::uniform("emerald_ore", "изумрудная руда", Tile::EmeraldOre),
 ];
 
 impl Block {
-    pub const ALL: [Block; 81] = [
+    pub const ALL: [Block; 91] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -725,6 +745,16 @@ impl Block {
         Block::WhiteTulip,
         Block::PinkTulip,
         Block::Pumpkin,
+        Block::Granite,
+        Block::Diorite,
+        Block::Andesite,
+        Block::CoalOre,
+        Block::IronOre,
+        Block::GoldOre,
+        Block::RedstoneOre,
+        Block::DiamondOre,
+        Block::LapisOre,
+        Block::EmeraldOre,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -733,6 +763,13 @@ impl Block {
 
     pub fn is_unbreakable(self) -> bool {
         self.def().unbreakable
+    }
+
+    pub fn is_stone(self) -> bool {
+        matches!(
+            self,
+            Block::Stone | Block::Granite | Block::Diorite | Block::Andesite
+        )
     }
 
     pub fn is_solid(self) -> bool {

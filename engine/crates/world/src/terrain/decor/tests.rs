@@ -752,7 +752,7 @@ fn shallow_seabeds_are_dirt_with_sand_gravel_and_clay_disks() {
                     Block::Sand => sand += 1,
                     Block::Gravel => gravel += 1,
                     Block::Clay => clay += 1,
-                    Block::Stone => {}
+                    other if other.is_stone() => {}
                     other => panic!("{other:?} on a shallow seabed"),
                 }
             }
@@ -941,8 +941,8 @@ fn generated_springs_sit_in_stone_with_one_open_side() {
                 let block = column.get(p);
                 assert!(matches!(block, Block::Water | Block::Lava));
                 assert_eq!(column.get_data(p), 0);
-                assert_eq!(column.get(p + IVec3::Y), Block::Stone);
-                assert_eq!(column.get(p - IVec3::Y), Block::Stone);
+                assert!(column.get(p + IVec3::Y).is_stone());
+                assert!(column.get(p - IVec3::Y).is_stone());
                 let sides = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z]
                     .into_iter()
                     .filter(|&d| Column::contains(p + d))
@@ -950,7 +950,7 @@ fn generated_springs_sit_in_stone_with_one_open_side() {
                 let (inner, stone, air) = sides.fold((0, 0, 0), |(n, s, a), b| {
                     (
                         n + 1,
-                        s + usize::from(b == Block::Stone),
+                        s + usize::from(b.is_stone()),
                         a + usize::from(b == Block::Air),
                     )
                 });
@@ -986,4 +986,117 @@ fn pumpkin_patches_stand_on_grass_facing_a_side() {
         }
     }
     assert!(found > 0);
+}
+
+fn highest(column: &Column, block: Block) -> Option<i32> {
+    find(column, block).iter().map(|p| p.y).max()
+}
+
+fn ore_blocks() -> [Block; 7] {
+    [
+        Block::CoalOre,
+        Block::IronOre,
+        Block::GoldOre,
+        Block::RedstoneOre,
+        Block::DiamondOre,
+        Block::LapisOre,
+        Block::EmeraldOre,
+    ]
+}
+
+#[test]
+fn ores_are_deterministic() {
+    let (a, b) = (Terrain::new(SEED), Terrain::new(SEED));
+    for key in columns_of(&a, Biome::Plains, 4) {
+        assert!(same_columns(&a.generate(key), &b.generate(key)));
+    }
+}
+
+#[test]
+fn ores_stay_under_their_height_limits() {
+    let terrain = Terrain::new(SEED);
+    let limits = [
+        (Block::DiamondOre, 20),
+        (Block::RedstoneOre, 20),
+        (Block::GoldOre, 36),
+        (Block::IronOre, 68),
+        (Block::LapisOre, 36),
+        (Block::CoalOre, 132),
+    ];
+    let mut seen = [0usize; 6];
+    for key in columns_of(&terrain, Biome::Plains, 60) {
+        let column = terrain.generate(key);
+        for (i, (block, limit)) in limits.into_iter().enumerate() {
+            let cells = find(&column, block);
+            seen[i] += cells.len();
+            assert!(cells.iter().all(|p| p.y < limit), "{block:?} {key}");
+        }
+    }
+    assert!(seen.iter().all(|&n| n > 0), "{seen:?}");
+}
+
+#[test]
+fn emeralds_only_grow_in_extreme_hills() {
+    let terrain = Terrain::new(SEED);
+    for key in columns_of(&terrain, Biome::Plains, 30) {
+        assert!(find(&terrain.generate(key), Block::EmeraldOre).is_empty());
+    }
+    let mut total = 0;
+    for key in columns_of(&terrain, Biome::ExtremeHills, 20) {
+        for p in find(&terrain.generate(key), Block::EmeraldOre) {
+            total += 1;
+            assert!((4..32).contains(&p.y), "{key} {p}");
+        }
+    }
+    assert!(total > 0);
+}
+
+#[test]
+fn ores_only_replace_stone() {
+    let terrain = Terrain::new(SEED);
+    for key in columns_of(&terrain, Biome::Plains, 10) {
+        let mut before = terrain.generate_carved(key);
+        terrain.grow_lakes(key, &mut before);
+        let mut after = before.clone();
+        terrain.grow_ores(key, &mut after);
+        let mut changed = 0;
+        for p in cells() {
+            if before.get(p) != after.get(p) {
+                changed += 1;
+                assert!(before.get(p).is_stone(), "{key} {p} {:?}", before.get(p));
+            }
+        }
+        assert!(changed > 0);
+    }
+}
+
+#[test]
+fn veins_continue_across_column_borders() {
+    let terrain = Terrain::new(SEED);
+    let mut joined = 0;
+    for z in 0..6 {
+        for x in 0..6 {
+            let (a, b) = (
+                terrain.generate(ColumnPos::new(x, z)),
+                terrain.generate(ColumnPos::new(x + 1, z)),
+            );
+            for y in 0..WORLD_HEIGHT {
+                for k in 0..16 {
+                    let (left, right) = (a.get([15, y, k].into()), b.get([0, y, k].into()));
+                    joined += usize::from(left == right && ore_blocks().contains(&left));
+                }
+            }
+        }
+    }
+    assert!(joined > 0);
+}
+
+#[test]
+fn mesa_has_extra_gold_high_up() {
+    let terrain = Terrain::new(MESA_SEED);
+    let high = mesa_columns(&terrain, Biome::Mesa, 40)
+        .into_iter()
+        .filter_map(|key| highest(&terrain.generate(key), Block::GoldOre))
+        .max();
+    assert!(high.is_some_and(|y| y >= 40), "{high:?}");
 }

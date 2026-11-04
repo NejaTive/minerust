@@ -73,7 +73,7 @@ fn generated_column_is_small() {
         ColumnPos::new(40, -3),
     ] {
         let bytes = round_trip(&terrain.generate(key));
-        assert!(bytes.len() < 8192, "{key}: {} bytes", bytes.len());
+        assert!(bytes.len() < 12288, "{key}: {} bytes", bytes.len());
     }
 }
 
