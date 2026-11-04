@@ -353,6 +353,15 @@ impl Player {
         }
     }
 
+    pub fn glide(&mut self, velocity: Vec3, collision: impl Fn(IVec3) -> Collision) {
+        self.velocity = velocity;
+        self.on_ground = false;
+        let delta = velocity * TICK;
+        for axis in [1, 0, 2] {
+            self.move_axis(axis, delta[axis], &collision);
+        }
+    }
+
     pub fn push(&mut self, delta: Vec2, collision: impl Fn(IVec3) -> Collision) {
         self.move_axis(0, delta.x, &collision);
         self.move_axis(2, delta.y, &collision);

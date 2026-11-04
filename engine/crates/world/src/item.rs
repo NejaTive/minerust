@@ -16,6 +16,8 @@ pub enum Item {
     LlamaSpawnEgg,
     RabbitSpawnEgg,
     OcelotSpawnEgg,
+    ParrotSpawnEgg,
+    SquidSpawnEgg,
 }
 
 pub struct ItemDef {
@@ -26,7 +28,7 @@ pub struct ItemDef {
     pub egg_secondary: [u8; 3],
 }
 
-pub const ITEMS: [ItemDef; 12] = [
+pub const ITEMS: [ItemDef; 14] = [
     ItemDef {
         name: "pig_spawn_egg",
         label: "яйцо призыва свиньи",
@@ -111,10 +113,24 @@ pub const ITEMS: [ItemDef; 12] = [
         egg_primary: [0xEF, 0xDE, 0x7D],
         egg_secondary: [0x56, 0x44, 0x34],
     },
+    ItemDef {
+        name: "parrot_spawn_egg",
+        label: "яйцо призыва попугая",
+        spawns: MobKind::Parrot,
+        egg_primary: [0x0D, 0xA7, 0x0B],
+        egg_secondary: [0xFF, 0x00, 0x00],
+    },
+    ItemDef {
+        name: "squid_spawn_egg",
+        label: "яйцо призыва кальмара",
+        spawns: MobKind::Squid,
+        egg_primary: [0x22, 0x3B, 0x4D],
+        egg_secondary: [0x70, 0x88, 0x99],
+    },
 ];
 
 impl Item {
-    pub const ALL: [Item; 12] = [
+    pub const ALL: [Item; 14] = [
         Item::PigSpawnEgg,
         Item::ChickenSpawnEgg,
         Item::CowSpawnEgg,
@@ -127,6 +143,8 @@ impl Item {
         Item::LlamaSpawnEgg,
         Item::RabbitSpawnEgg,
         Item::OcelotSpawnEgg,
+        Item::ParrotSpawnEgg,
+        Item::SquidSpawnEgg,
     ];
 
     pub fn def(self) -> &'static ItemDef {

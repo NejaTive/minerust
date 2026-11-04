@@ -10,5 +10,7 @@
   { "name": "donkey_spawn_egg", "label": "яйцо призыва осла" },
   { "name": "llama_spawn_egg", "label": "яйцо призыва ламы" },
   { "name": "rabbit_spawn_egg", "label": "яйцо призыва кролика" },
-  { "name": "ocelot_spawn_egg", "label": "яйцо призыва оцелота" }
+  { "name": "ocelot_spawn_egg", "label": "яйцо призыва оцелота" },
+  { "name": "parrot_spawn_egg", "label": "яйцо призыва попугая" },
+  { "name": "squid_spawn_egg", "label": "яйцо призыва кальмара" }
 ]

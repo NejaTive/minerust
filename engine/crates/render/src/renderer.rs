@@ -165,11 +165,20 @@ fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGrou
     }
 }
 
-#[derive(Default)]
 struct MobDraw {
     sheets: [u32; entity::TEXTURES],
     blob_offset: u64,
     blobs: u32,
+}
+
+impl Default for MobDraw {
+    fn default() -> Self {
+        MobDraw {
+            sheets: [0; entity::TEXTURES],
+            blob_offset: 0,
+            blobs: 0,
+        }
+    }
 }
 
 const ENTITY_BUFFER_START: u64 = 64 * 1024;

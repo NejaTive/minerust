@@ -49,6 +49,8 @@ fn hitboxes_match_minecraft() {
         (MobKind::Wolf, 0.6, 0.85),
         (MobKind::Rabbit, 0.4, 0.5),
         (MobKind::Ocelot, 0.6, 0.7),
+        (MobKind::Parrot, 0.5, 0.9),
+        (MobKind::Squid, 0.8, 0.8),
     ] {
         let (min, max) = mob(kind, 1).body.aabb();
         let expected = Vec3::new(width, height, width);
@@ -228,6 +230,9 @@ fn does_not_jump_under_a_ceiling() {
 #[test]
 fn every_kind_wanders_and_stays_on_the_ground() {
     for kind in MobKind::ALL {
+        if matches!(kind, MobKind::Parrot | MobKind::Squid) {
+            continue;
+        }
         let mut mob = mob(kind, 7);
         run(&mut mob, 3000, &flat, &dry);
         if kind == MobKind::Rabbit {
@@ -356,4 +361,255 @@ fn standing_rabbit_stays_on_the_ground() {
         assert_eq!(rabbit.body.feet.y, 64.0);
         assert_eq!(rabbit.pose().hop, 0.0);
     }
+}
+
+const POND_RADIUS: i32 = 3;
+const SEABED: i32 = 49;
+const SURFACE: i32 = 62;
+
+fn in_pond(pos: IVec3) -> bool {
+    pos.x.abs() <= POND_RADIUS && pos.z.abs() <= POND_RADIUS
+}
+
+fn pond_collision(pos: IVec3) -> Collision {
+    let open_water = in_pond(pos) && pos.y > SEABED;
+    if pos.y <= SURFACE && !open_water {
+        Collision::FULL
+    } else {
+        Collision::NONE
+    }
+}
+
+fn pond_fluid(pos: IVec3) -> Option<(FluidKind, f32)> {
+    (in_pond(pos) && pos.y > SEABED && pos.y <= SURFACE).then_some((FluidKind::Water, 1.0))
+}
+
+fn open_sea_collision(pos: IVec3) -> Collision {
+    if pos.y <= SEABED {
+        Collision::FULL
+    } else {
+        Collision::NONE
+    }
+}
+
+fn open_sea_fluid(pos: IVec3) -> Option<(FluidKind, f32)> {
+    (pos.y > SEABED && pos.y <= SURFACE).then_some((FluidKind::Water, 1.0))
+}
+
+fn squid_in_open_sea(seed: u32) -> Mob {
+    Mob::new(MobKind::Squid, Vec3::new(0.5, 55.0, 0.5), 0.0, seed)
+}
+
+fn horizontal_speed(mob: &Mob) -> f32 {
+    mob.body.velocity.x.hypot(mob.body.velocity.z)
+}
+
+#[test]
+fn squid_swims_in_bursts_that_fade_out() {
+    let mut squid = squid_in_open_sea(5);
+    let around = Surroundings {
+        collision: &open_sea_collision,
+        fluid: &open_sea_fluid,
+        player_eye: Vec3::ZERO,
+    };
+    let (mut fastest, mut slowest) = (0.0_f32, f32::MAX);
+    let (mut swing, mut closed) = (0.0_f32, false);
+    for tick in 0..3000 {
+        squid.tick(&around);
+        if tick > 600 {
+            fastest = fastest.max(horizontal_speed(&squid));
+            slowest = slowest.min(horizontal_speed(&squid));
+        }
+        swing = swing.max(squid.pose().tentacle);
+        closed |= squid.pose().tentacle == 0.0;
+        assert!(squid.body.feet.y >= (SEABED + 1) as f32 - 1e-3);
+        assert!(squid.body.feet.y + 0.8 <= (SURFACE + 1) as f32 + 1e-3);
+    }
+    assert!(fastest > 2.5 && fastest < 4.5, "{fastest}");
+    assert!(slowest < 0.5, "{slowest}");
+    assert!(
+        swing > 0.5 && swing <= std::f32::consts::FRAC_PI_4 + 1e-3,
+        "{swing}"
+    );
+    assert!(closed);
+    assert!(squid.body.feet.distance(Vec3::new(0.5, 55.0, 0.5)) > 3.0);
+}
+
+#[test]
+fn squid_tilts_with_its_motion_and_turns_towards_it() {
+    let mut squid = squid_in_open_sea(9);
+    let around = Surroundings {
+        collision: &open_sea_collision,
+        fluid: &open_sea_fluid,
+        player_eye: Vec3::ZERO,
+    };
+    let mut tilted = false;
+    for _ in 0..1500 {
+        squid.tick(&around);
+        let flat = Vec2::new(squid.body.velocity.x, squid.body.velocity.z);
+        tilted |= squid.pose().pitch > 0.8;
+        if flat.length() > 3.5 {
+            let heading = flat.y.atan2(flat.x);
+            assert!(angle_diff(heading, squid.yaw).abs() < 1.6);
+        }
+    }
+    assert!(tilted);
+}
+
+#[test]
+fn squid_stays_in_its_pond_and_below_the_surface() {
+    for seed in 1..=3 {
+        let mut squid = Mob::new(MobKind::Squid, Vec3::new(0.5, 55.0, 0.5), 0.0, seed);
+        let around = Surroundings {
+            collision: &pond_collision,
+            fluid: &pond_fluid,
+            player_eye: Vec3::ZERO,
+        };
+        for _ in 0..6000 {
+            squid.tick(&around);
+            let feet = squid.body.feet;
+            assert!(feet.x.abs() <= POND_RADIUS as f32 + 1.0, "{feet}");
+            assert!(feet.z.abs() <= POND_RADIUS as f32 + 1.0, "{feet}");
+            assert!(feet.y + 0.8 <= (SURFACE + 1) as f32 + 0.15, "{feet}");
+        }
+    }
+}
+
+#[test]
+fn squid_on_land_falls_and_lies_still() {
+    let mut squid = mob(MobKind::Squid, 4);
+    squid.body.feet.y = 70.0;
+    run(&mut squid, 600, &flat, &dry);
+    assert_eq!(squid.body.feet.y, 64.0);
+    assert_eq!(squid.pose().tentacle, 0.0);
+    let spot = squid.body.feet;
+    run(&mut squid, 600, &flat, &dry);
+    assert_eq!(squid.body.feet, spot);
+    assert!(squid.pose().pitch > 1.0);
+}
+
+fn parrot_flight(
+    seed: u32,
+    ticks: u32,
+    collision: &impl Fn(IVec3) -> Collision,
+) -> (f32, f32, f32) {
+    let mut parrot = mob(MobKind::Parrot, seed);
+    let around = Surroundings {
+        collision,
+        fluid: &dry,
+        player_eye: Vec3::new(2.0, 65.6, 0.5),
+    };
+    let (mut highest, mut farthest, mut landed_after_flight) = (0.0_f32, 0.0_f32, 0.0_f32);
+    let mut airborne = false;
+    for _ in 0..ticks {
+        parrot.tick(&around);
+        let feet = parrot.body.feet;
+        highest = highest.max(feet.y - 64.0);
+        farthest = farthest.max(feet.x.hypot(feet.z));
+        assert!(feet.y >= 64.0 - 1e-3, "{feet}");
+        let (min, max) = parrot.body.aabb();
+        let (lo, hi) = (
+            (min + 1e-3).floor().as_ivec3(),
+            (max - 1e-3).floor().as_ivec3(),
+        );
+        for x in lo.x..=hi.x {
+            for y in lo.y..=hi.y {
+                for z in lo.z..=hi.z {
+                    assert_eq!(collision(IVec3::new(x, y, z)).height, 0.0, "{feet}");
+                }
+            }
+        }
+        if !parrot.body.on_ground {
+            airborne = true;
+        } else if airborne {
+            landed_after_flight += 1.0;
+            airborne = false;
+        }
+    }
+    (highest, farthest, landed_after_flight)
+}
+
+#[test]
+fn parrot_takes_off_flies_far_and_lands_again() {
+    let (highest, farthest, landings) = parrot_flight(3, 12000, &flat);
+    assert!(highest > 1.5, "{highest}");
+    assert!(farthest > 8.0, "{farthest}");
+    assert!(landings >= 2.0, "{landings}");
+}
+
+#[test]
+fn parrot_never_flies_through_a_wall() {
+    let walled = |pos: IVec3| {
+        if pos.y <= FLOOR || pos.x >= 6 && pos.y <= FLOOR + 40 {
+            Collision::FULL
+        } else {
+            Collision::NONE
+        }
+    };
+    for seed in 1..=4 {
+        let (_, farthest, _) = parrot_flight(seed, 8000, &walled);
+        assert!(farthest < 80.0);
+    }
+}
+
+#[test]
+fn parrot_flaps_in_the_air_and_folds_its_wings_on_the_ground() {
+    let mut parrot = mob(MobKind::Parrot, 6);
+    parrot.body.feet.y = 80.0;
+    let around = Surroundings {
+        collision: &flat,
+        fluid: &dry,
+        player_eye: Vec3::ZERO,
+    };
+    for _ in 0..60 {
+        parrot.tick(&around);
+    }
+    assert!(parrot.pose().flap_amount > 0.9);
+    assert!(-parrot.body.velocity.y <= 2.3 + 1e-3);
+    for _ in 0..1200 {
+        parrot.tick(&around);
+        if parrot.body.on_ground {
+            break;
+        }
+    }
+    assert!(parrot.body.on_ground);
+    for _ in 0..30 {
+        parrot.tick(&around);
+        if !parrot.body.on_ground {
+            return;
+        }
+    }
+    assert!(parrot.pose().flap_amount < 0.2);
+}
+
+#[test]
+fn flight_targets_are_dry_and_within_reach() {
+    let around = Surroundings {
+        collision: &flat,
+        fluid: &dry,
+        player_eye: Vec3::ZERO,
+    };
+    let mut parrot = mob(MobKind::Parrot, 11);
+    let mut picked = 0;
+    for _ in 0..200 {
+        if let Some(target) = parrot.pick_flight(&around) {
+            picked += 1;
+            let reach = Vec2::new(target.x - 0.5, target.z - 0.5).length();
+            assert!((4.9..14.1).contains(&reach), "{reach}");
+            assert!(target.y >= 64.0 && target.y < 64.0 + 4.1, "{target}");
+        }
+    }
+    assert!(picked > 150);
+    let sea = Surroundings {
+        collision: &flat,
+        fluid: &|pos: IVec3| (pos.y > FLOOR).then_some((FluidKind::Water, 1.0)),
+        player_eye: Vec3::ZERO,
+    };
+    assert!((0..50).all(|_| parrot.pick_flight(&sea).is_none()));
+    let void = Surroundings {
+        collision: &|_: IVec3| Collision::NONE,
+        fluid: &dry,
+        player_eye: Vec3::ZERO,
+    };
+    assert!((0..50).all(|_| parrot.pick_flight(&void).is_none()));
 }

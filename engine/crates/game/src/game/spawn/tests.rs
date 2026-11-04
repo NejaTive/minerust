@@ -2,13 +2,13 @@ use glam::IVec3;
 use world::block::Block;
 use world::column::Column;
 use world::item::Item;
-use world::mob::{MobKind, RABBIT_GOLD, RABBIT_SPLOTCHED, RABBIT_WHITE};
+use world::mob::{MobKind, PARROT_COLOURS, RABBIT_GOLD, RABBIT_SPLOTCHED, RABBIT_WHITE};
 use world::pos::ColumnPos;
 use world::terrain::Biome;
 
 use super::*;
 use crate::raycast::Hit;
-use crate::spawning::{CREATURE_CAP, cap};
+use crate::spawning::{CREATURE_CAP, WATER_CAP, cap, water_cap};
 
 const FLOOR: i32 = 10;
 const SPAN: i32 = 6;
@@ -273,4 +273,188 @@ fn egg_rabbit_takes_the_colour_of_the_biome_it_is_summoned_in() {
             assert!(allowed.contains(&game.mobs[0].variant), "{biome:?}");
         }
     }
+}
+
+const SEABED: i32 = 44;
+const SURFACE: i32 = 62;
+
+fn sea_game(floor: Block) -> Game {
+    let mut game = farm_game(floor);
+    for x in -SPAN..=SPAN {
+        for z in -SPAN..=SPAN {
+            let key = ColumnPos::new(x, z);
+            let origin = key.origin();
+            for lx in 0..16 {
+                for lz in 0..16 {
+                    game.world.set_block(
+                        IVec3::new(origin.x + lx, SEABED, origin.z + lz),
+                        Block::Stone,
+                    );
+                    for y in SEABED + 1..=SURFACE {
+                        game.world
+                            .set_block(IVec3::new(origin.x + lx, y, origin.z + lz), Block::Water);
+                    }
+                }
+            }
+        }
+    }
+    game
+}
+
+fn water_cycles(game: &mut Game, count: usize) {
+    for _ in 0..count {
+        game.spawn_water_cycle();
+    }
+}
+
+fn squids(game: &Game) -> usize {
+    game.mobs()
+        .iter()
+        .filter(|mob| mob.kind == MobKind::Squid)
+        .count()
+}
+
+#[test]
+fn squids_spawn_in_water_between_the_height_limits_within_their_own_cap() {
+    let mut game = sea_game(Block::Stone);
+    water_cycles(&mut game, 600);
+    let limit = water_cap((2 * SPAN as usize + 1).pow(2));
+    assert!(limit > 0 && limit <= WATER_CAP);
+    assert_eq!(squids(&game), limit);
+    assert_eq!(game.mob_count(), limit);
+    for mob in game.mobs() {
+        let cell = mob.body.feet.floor().as_ivec3();
+        assert!(cell.y > 45 && cell.y <= SURFACE, "{cell}");
+        assert!(game.world.block(cell).is_water());
+        assert!(mob.body.feet.distance(game.player().feet) >= MIN_PLAYER_DISTANCE);
+    }
+}
+
+#[test]
+fn squid_spot_needs_water_below_free_space_above_and_a_height_in_range() {
+    let game = sea_game(Block::Stone);
+    let squid = |cell| game.new_mob(MobKind::Squid, 0, cell, &mut Rng::new(5));
+    let far = |y| IVec3::new(60, y, 60);
+    assert!(game.may_spawn_here(&squid(far(50)), far(50)));
+    assert!(game.may_spawn_here(&squid(far(SURFACE)), far(SURFACE)));
+    assert!(!game.may_spawn_here(&squid(far(45)), far(45)));
+    assert!(!game.may_spawn_here(&squid(far(SURFACE + 1)), far(SURFACE + 1)));
+    assert!(!game.may_spawn_here(&squid(far(SEABED + 1)), far(SEABED + 1)));
+    let mut roofed = sea_game(Block::Stone);
+    roofed.world.set_block(far(51), Block::Stone);
+    assert!(!roofed.may_spawn_here(&squid(far(50)), far(50)));
+    let near = IVec3::new(0, 50, 0);
+    assert!(!game.may_spawn_here(&squid(near), near));
+    let cow = game.new_mob(MobKind::Cow, 0, far(50), &mut Rng::new(5));
+    assert!(!game.may_spawn_here(&cow, far(50)));
+}
+
+#[test]
+fn water_and_land_limits_are_counted_apart() {
+    let mut game = sea_game(Block::Grass);
+    let land_limit = cap((2 * SPAN as usize + 1).pow(2));
+    let water_limit = water_cap((2 * SPAN as usize + 1).pow(2));
+    for i in 0..land_limit {
+        let cell = IVec3::new(40 + i as i32, FLOOR + 1, 40);
+        let cow = cow_at(&mut game, cell);
+        game.mobs.push(cow);
+    }
+    water_cycles(&mut game, 600);
+    assert_eq!(squids(&game), water_limit);
+    cycle_many(&mut game);
+    assert_eq!(game.mob_count(), land_limit + water_limit);
+
+    let mut crowded = sea_game(Block::Grass);
+    water_cycles(&mut crowded, 600);
+    cycle_many(&mut crowded);
+    assert_eq!(squids(&crowded), water_limit);
+    assert!(crowded.mob_count() > water_limit);
+}
+
+#[test]
+fn the_land_cycle_never_spawns_squids_and_generation_never_either() {
+    let mut game = sea_game(Block::Grass);
+    cycle_many(&mut game);
+    assert_eq!(squids(&game), 0);
+    let mut generated = Game::new(21, None).unwrap();
+    for key in keys_in(
+        21,
+        &[Biome::Ocean, Biome::DeepOcean, Biome::River, Biome::Plains],
+        120,
+    ) {
+        load_generated(&mut generated, key);
+        assert!(
+            generated
+                .generation_herds(key)
+                .iter()
+                .all(|record| record.kind != MobKind::Squid)
+        );
+    }
+}
+
+#[test]
+fn nothing_spawns_in_the_debug_world_water() {
+    let mut game = sea_game(Block::Stone);
+    game.terrain = world::terrain::Terrain::of(1, WorldType::Debug);
+    water_cycles(&mut game, 100);
+    assert_eq!(game.mob_count(), 0);
+}
+
+#[test]
+fn parrot_spot_accepts_leaves_logs_grass_and_open_air_only() {
+    let mut game = farm_game(Block::Stone);
+    game.set_camera_state(&[8.5, 12.7, 8.5, 0.0, 0.0, 1.0])
+        .unwrap();
+    let parrot = |game: &Game, cell| game.new_mob(MobKind::Parrot, 0, cell, &mut Rng::new(5));
+    for (i, below) in [Block::Leaves, Block::Grass, Block::Log, Block::Air]
+        .into_iter()
+        .enumerate()
+    {
+        let cell = IVec3::new(40 + 3 * i as i32, FLOOR + 5, 40);
+        game.world.set_block(cell - IVec3::Y, below);
+        assert!(game.may_spawn_here(&parrot(&game, cell), cell), "{below:?}");
+    }
+    let cell = IVec3::new(60, FLOOR + 5, 40);
+    game.world.set_block(cell - IVec3::Y, Block::Stone);
+    assert!(!game.may_spawn_here(&parrot(&game, cell), cell));
+    let cow = game.new_mob(
+        MobKind::Cow,
+        0,
+        IVec3::new(40, FLOOR + 5, 40),
+        &mut Rng::new(5),
+    );
+    assert!(!game.may_spawn_here(&cow, IVec3::new(40, FLOOR + 5, 40)));
+}
+
+#[test]
+fn parrots_appear_in_jungle_columns_with_their_own_plumage() {
+    let seed = seed_with(&[Biome::Jungle]);
+    let mut game = Game::new(seed, None).unwrap();
+    let mut plumage = Vec::new();
+    let mut parrots = 0;
+    for key in keys_in(
+        seed,
+        &[Biome::Jungle, Biome::JungleHills, Biome::JungleEdge],
+        400,
+    ) {
+        load_generated(&mut game, key);
+        for record in game.generation_herds(key) {
+            if record.kind == MobKind::Parrot {
+                parrots += 1;
+                plumage.push(record.variant);
+                let below = game.world.block(record.pos.floor().as_ivec3() - IVec3::Y);
+                assert!(below.collision_height() >= 1.0);
+            }
+        }
+    }
+    assert!(parrots > 0);
+    assert!(plumage.iter().all(|&variant| variant < PARROT_COLOURS));
+    let mut rng = Rng::new(8);
+    let birds: std::collections::HashSet<u8> = (0..100)
+        .map(|_| {
+            game.new_mob(MobKind::Parrot, 0, IVec3::ZERO, &mut rng)
+                .variant
+        })
+        .collect();
+    assert_eq!(birds.len(), usize::from(PARROT_COLOURS));
 }

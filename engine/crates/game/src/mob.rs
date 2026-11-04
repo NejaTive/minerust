@@ -7,6 +7,8 @@ use world::mob::{MobKind, MobRecord};
 use crate::physics::{Collision, Input, JUMP_SPEED, Mode, Player};
 use crate::rng::Rng;
 
+use self::swim::Swim;
+
 pub struct MobSpec {
     pub width: f32,
     pub height: f32,
@@ -110,6 +112,24 @@ pub const OCELOT: MobSpec = MobSpec {
     fall_speed: None,
 };
 
+pub const PARROT: MobSpec = MobSpec {
+    width: 0.5,
+    height: 0.9,
+    eye: 0.77,
+    walk_input: 0.4,
+    shadow_radius: 0.3,
+    fall_speed: Some(2.3),
+};
+
+pub const SQUID: MobSpec = MobSpec {
+    width: 0.8,
+    height: 0.8,
+    eye: 0.4,
+    walk_input: 0.0,
+    shadow_radius: 0.7,
+    fall_speed: None,
+};
+
 pub fn spec(kind: MobKind) -> &'static MobSpec {
     match kind {
         MobKind::Pig => &PIG,
@@ -124,6 +144,8 @@ pub fn spec(kind: MobKind) -> &'static MobSpec {
         MobKind::Llama => &LLAMA,
         MobKind::Rabbit => &RABBIT,
         MobKind::Ocelot => &OCELOT,
+        MobKind::Parrot => &PARROT,
+        MobKind::Squid => &SQUID,
     }
 }
 
@@ -173,6 +195,9 @@ pub struct Pose {
     pub flap_phase: f32,
     pub flap_amount: f32,
     pub hop: f32,
+    pub pitch: f32,
+    pub tentacle: f32,
+    pub spin: f32,
 }
 
 impl Pose {
@@ -187,6 +212,9 @@ impl Pose {
             flap_phase: self.flap_phase + (next.flap_phase - self.flap_phase) * alpha,
             flap_amount: self.flap_amount + (next.flap_amount - self.flap_amount) * alpha,
             hop: self.hop + (next.hop - self.hop) * alpha,
+            pitch: self.pitch + (next.pitch - self.pitch) * alpha,
+            tentacle: self.tentacle + (next.tentacle - self.tentacle) * alpha,
+            spin: self.spin + (next.spin - self.spin) * alpha,
         }
     }
 }
@@ -198,6 +226,11 @@ enum Plan {
         target: Vec2,
         ticks: u32,
         checkpoint: Vec2,
+    },
+    Fly {
+        target: Vec3,
+        ticks: u32,
+        checkpoint: Vec3,
     },
 }
 
@@ -216,6 +249,7 @@ pub struct Mob {
     air_ticks: u32,
     hop_rest: u32,
     plan: Plan,
+    swim: Swim,
     head_goal: Vec2,
     head_hold: u32,
     watching: u32,
@@ -252,6 +286,7 @@ impl Mob {
             air_ticks: 0,
             hop_rest: 0,
             plan: Plan::Idle,
+            swim: Swim::new(seed),
             head_goal: Vec2::ZERO,
             head_hold: 0,
             watching: 0,
@@ -266,6 +301,9 @@ impl Mob {
                 flap_phase: 0.0,
                 flap_amount: 0.0,
                 hop: 0.0,
+                pitch: 0.0,
+                tentacle: 0.0,
+                spin: 0.0,
             },
         };
         mob.prev = mob.pose();
@@ -299,6 +337,9 @@ impl Mob {
             flap_phase: self.flap_phase,
             flap_amount: self.flap_amount,
             hop: self.hop(),
+            pitch: self.swim.pitch,
+            tentacle: self.swim.tentacle,
+            spin: self.swim.spin,
         }
     }
 
@@ -312,6 +353,17 @@ impl Mob {
         F: Fn(IVec3) -> Option<(FluidKind, f32)>,
     {
         self.prev = self.pose();
+        if self.kind == MobKind::Squid {
+            self.tick_squid(around);
+            return;
+        }
+        if self.kind == MobKind::Parrot && self.tick_flight(around) {
+            let moved = self.body.feet.distance(self.prev.feet);
+            self.animate_limbs(moved);
+            self.animate_wings();
+            self.animate_head(around);
+            return;
+        }
         let swimming = self
             .body
             .fluid_depth(around.fluid)
@@ -396,6 +448,7 @@ impl Mob {
                 }
                 None
             }
+            Plan::Fly { .. } => None,
             Plan::Walk {
                 target,
                 ticks,
@@ -539,6 +592,9 @@ fn turn_towards(from: f32, to: f32, max_step: f32) -> f32 {
 fn lerp_angle(a: f32, b: f32, alpha: f32) -> f32 {
     a + angle_diff(b, a) * alpha
 }
+
+mod flight;
+mod swim;
 
 #[cfg(test)]
 mod tests;

@@ -47,6 +47,8 @@ pub enum ModelKind {
     Llama,
     Rabbit,
     Ocelot,
+    Parrot,
+    Squid,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +72,9 @@ pub struct MobInstance {
     pub flap_phase: f32,
     pub flap_amount: f32,
     pub hop: f32,
+    pub pitch: f32,
+    pub tentacle: f32,
+    pub spin: f32,
     pub sky_level: f32,
     pub block_level: f32,
     pub shadow_radius: f32,
@@ -119,6 +124,12 @@ pub enum EntityTexture {
     RabbitGold,
     RabbitSalt,
     Ocelot,
+    ParrotRedBlue,
+    ParrotBlue,
+    ParrotGreen,
+    ParrotYellowBlue,
+    ParrotGrey,
+    Squid,
 }
 
 impl EntityTexture {
@@ -155,6 +166,12 @@ impl EntityTexture {
         EntityTexture::RabbitGold,
         EntityTexture::RabbitSalt,
         EntityTexture::Ocelot,
+        EntityTexture::ParrotRedBlue,
+        EntityTexture::ParrotBlue,
+        EntityTexture::ParrotGreen,
+        EntityTexture::ParrotYellowBlue,
+        EntityTexture::ParrotGrey,
+        EntityTexture::Squid,
     ];
 
     fn units(self) -> Vec2 {
@@ -177,14 +194,23 @@ impl EntityTexture {
             | EntityTexture::MarkingsWhiteDots
             | EntityTexture::MarkingsBlackDots
             | EntityTexture::Donkey => Vec2::new(128.0, 128.0),
+            EntityTexture::ParrotRedBlue
+            | EntityTexture::ParrotBlue
+            | EntityTexture::ParrotGreen
+            | EntityTexture::ParrotYellowBlue
+            | EntityTexture::ParrotGrey => Vec2::new(32.0, 32.0),
             _ => Vec2::new(64.0, 32.0),
         }
     }
 }
 
-pub const TEXTURES: usize = 32;
+pub const TEXTURES: usize = 38;
 
 pub type MobVertices = [Vec<f32>; TEXTURES];
+
+pub fn empty_vertices() -> MobVertices {
+    std::array::from_fn(|_| Vec::new())
+}
 
 struct BoxPart {
     sheet: EntityTexture,
@@ -233,6 +259,7 @@ fn leg_rotation(instance: &MobInstance, phase: f32) -> Mat3 {
 }
 
 mod equine;
+mod sky_sea;
 mod small;
 
 const WILD_TAIL_ANGLE: f32 = PI / 5.0;
@@ -737,6 +764,8 @@ pub fn push_mob(instance: &MobInstance, out: &mut MobVertices) {
         ModelKind::Llama => equine::llama_parts(instance),
         ModelKind::Rabbit => small::rabbit_parts(instance),
         ModelKind::Ocelot => small::ocelot_parts(instance),
+        ModelKind::Parrot => sky_sea::parrot_parts(instance),
+        ModelKind::Squid => sky_sea::squid_parts(instance),
     };
     for part in &parts {
         push_box(part, instance, &mut out[part.sheet as usize]);
@@ -915,7 +944,7 @@ pub fn visible_vertices(
     instances: &[MobInstance],
     visible: impl Fn(Vec3, Vec3) -> bool,
 ) -> MobVertices {
-    let mut out = MobVertices::default();
+    let mut out = empty_vertices();
     for instance in instances {
         let (min, max) = instance.bounds();
         if visible(min, max) {
@@ -997,6 +1026,12 @@ pub fn create_texture_groups(
                 EntityTexture::RabbitGold => &images.rabbit[4],
                 EntityTexture::RabbitSalt => &images.rabbit[5],
                 EntityTexture::Ocelot => &images.ocelot,
+                EntityTexture::ParrotRedBlue => &images.parrot[0],
+                EntityTexture::ParrotBlue => &images.parrot[1],
+                EntityTexture::ParrotGreen => &images.parrot[2],
+                EntityTexture::ParrotYellowBlue => &images.parrot[3],
+                EntityTexture::ParrotGrey => &images.parrot[4],
+                EntityTexture::Squid => &images.squid,
             };
             let texture = device.create_texture_with_data(
                 queue,

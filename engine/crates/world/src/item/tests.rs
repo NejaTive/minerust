@@ -38,3 +38,13 @@ fn each_egg_summons_its_own_mob_with_its_own_colors() {
         assert!(icons[i + 1..].iter().all(|b| a != b));
     }
 }
+
+#[test]
+fn parrot_and_squid_eggs_use_vanilla_colors() {
+    assert_eq!(Item::ParrotSpawnEgg.def().egg_primary, [0x0D, 0xA7, 0x0B]);
+    assert_eq!(Item::ParrotSpawnEgg.def().egg_secondary, [0xFF, 0x00, 0x00]);
+    assert_eq!(Item::SquidSpawnEgg.def().egg_primary, [0x22, 0x3B, 0x4D]);
+    assert_eq!(Item::SquidSpawnEgg.def().egg_secondary, [0x70, 0x88, 0x99]);
+    assert_eq!(Item::ParrotSpawnEgg.def().label, "яйцо призыва попугая");
+    assert_eq!(Item::SquidSpawnEgg.def().label, "яйцо призыва кальмара");
+}

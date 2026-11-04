@@ -1,6 +1,6 @@
 use world::mob::{
-    HORSE_COLOURS, HORSE_MARKINGS, LLAMA_COLOURS, MobKind, RABBIT_BLACK, RABBIT_BROWN, RABBIT_GOLD,
-    RABBIT_SALT, RABBIT_SPLOTCHED, RABBIT_WHITE, horse_variant,
+    HORSE_COLOURS, HORSE_MARKINGS, LLAMA_COLOURS, MobKind, PARROT_COLOURS, RABBIT_BLACK,
+    RABBIT_BROWN, RABBIT_GOLD, RABBIT_SALT, RABBIT_SPLOTCHED, RABBIT_WHITE, horse_variant,
 };
 use world::terrain::{Biome, WATER_LEVEL};
 
@@ -20,6 +20,22 @@ pub const ATTEMPTS_PER_GROUP: u32 = 4;
 pub const GENERATION_REACH: u32 = 5;
 pub const CYCLE_REACH: u32 = 6;
 pub const OCELOT_MIN_Y: i32 = WATER_LEVEL + 1;
+pub const WATER_CAP: usize = 5;
+pub const WATER_MIN_Y: i32 = 45;
+pub const WATER_COLUMNS_PER_TICK: u32 = 6;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Category {
+    Creature,
+    Water,
+}
+
+pub fn category(kind: MobKind) -> Category {
+    match kind {
+        MobKind::Squid => Category::Water,
+        _ => Category::Creature,
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SpawnEntry {
@@ -58,14 +74,16 @@ const TAIGA_ANIMALS: [SpawnEntry; 6] = [
     entry(MobKind::Wolf, 8, 4, 4),
     RABBIT,
 ];
-const JUNGLE_ANIMALS: [SpawnEntry; 6] = [
+const JUNGLE_ANIMALS: [SpawnEntry; 7] = [
     SHEEP,
     PIG,
     CHICKEN,
     COW,
     entry(MobKind::Chicken, 10, 4, 4),
     entry(MobKind::Ocelot, 2, 1, 1),
+    entry(MobKind::Parrot, 40, 1, 2),
 ];
+const WATER_CREATURES: [SpawnEntry; 1] = [entry(MobKind::Squid, 10, 4, 4)];
 const DESERT_ANIMALS: [SpawnEntry; 1] = [RABBIT];
 const HORSE_PLAINS: SpawnEntry = entry(MobKind::Horse, 5, 2, 6);
 const DONKEY_PLAINS: SpawnEntry = entry(MobKind::Donkey, 1, 1, 3);
@@ -126,6 +144,10 @@ pub fn animals(biome: Biome) -> &'static [SpawnEntry] {
     }
 }
 
+pub fn water_creatures(_biome: Biome) -> &'static [SpawnEntry] {
+    &WATER_CREATURES
+}
+
 pub fn pick(rng: &mut Rng, list: &[SpawnEntry]) -> Option<SpawnEntry> {
     let total: u32 = list.iter().map(|entry| entry.weight).sum();
     if total == 0 {
@@ -177,6 +199,7 @@ fn rabbit_colour(rng: &mut Rng, biome: Biome) -> u8 {
 pub fn variant_in_group(rng: &mut Rng, kind: MobKind, colour: u8) -> u8 {
     match kind {
         MobKind::Horse => horse_variant(colour, rng.below(u32::from(HORSE_MARKINGS)) as u8),
+        MobKind::Parrot => rng.below(u32::from(PARROT_COLOURS)) as u8,
         _ => colour,
     }
 }
@@ -192,6 +215,10 @@ pub fn reach_offset(rng: &mut Rng, reach: u32) -> i32 {
 
 pub fn cap(columns: usize) -> usize {
     CREATURE_CAP * columns / CAP_COLUMNS
+}
+
+pub fn water_cap(columns: usize) -> usize {
+    WATER_CAP * columns / CAP_COLUMNS
 }
 
 #[cfg(test)]
