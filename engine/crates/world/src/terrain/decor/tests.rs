@@ -1,4 +1,5 @@
 use super::*;
+use crate::block::FluidKind;
 
 const SEED: i32 = 1337;
 const MESA_SEED: i32 = 99;
@@ -307,11 +308,12 @@ fn swamp_columns(terrain: &Terrain) -> Vec<(ColumnPos, Column)> {
 fn lilies_float_only_on_water_and_swamps_have_them() {
     let terrain = Terrain::new(SEED);
     let mut total = 0;
-    for (_, column) in swamp_columns(&terrain) {
+    for (key, column) in swamp_columns(&terrain) {
         for pos in find(&column, Block::Waterlily) {
             total += 1;
             assert_eq!(column.get(pos - IVec3::Y), Block::Water, "{pos}");
-            assert_eq!(pos.y, WATER_LEVEL + 1);
+            let world = key.origin() + pos;
+            assert!(pos.y == WATER_LEVEL + 1 || terrain.lake_covers(world.x, world.z));
         }
     }
     assert!(total > 40, "only {total} lilies");
@@ -331,14 +333,14 @@ fn swamp_puddles_replace_the_sea_level_top_with_water() {
                 let (wx, wz) = (origin.x + x, origin.z + z);
                 let at = IVec3::new(x, WATER_LEVEL, z);
                 let dry = terrain.surface_height(wx, wz) == WATER_LEVEL;
-                if dry && terrain.is_puddle(wx, wz) {
+                if dry && terrain.is_puddle(wx, wz) && !terrain.lake_covers(wx, wz) {
                     puddles += 1;
                     assert_eq!(column.get(at), Block::Water);
                     assert!(matches!(
                         column.get(at - IVec3::Y),
                         Block::Dirt | Block::Clay | Block::Sand | Block::Gravel
                     ));
-                } else if dry {
+                } else if dry && !terrain.lake_covers(wx, wz) {
                     assert!(
                         matches!(column.get(at), Block::Grass | Block::Sand | Block::Gravel),
                         "{wx}, {wz}"
@@ -758,4 +760,230 @@ fn shallow_seabeds_are_dirt_with_sand_gravel_and_clay_disks() {
     }
     assert!(dirt > sand / 2 && dirt > gravel, "{dirt} {sand} {gravel}");
     assert!(sand > 0 && gravel > 0 && clay > 0, "{sand} {gravel} {clay}");
+}
+
+fn open_water_lake_cell(column: &Column, at: IVec3) -> bool {
+    at.y > WATER_LEVEL && column.get(at) == Block::Water && column.get_data(at) == 0
+}
+
+fn lake_cells(column: &Column) -> Vec<IVec3> {
+    cells()
+        .filter(|&p| open_water_lake_cell(column, p))
+        .filter(|&p| {
+            [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z]
+                .into_iter()
+                .filter(|&d| Column::contains(p + d) && column.get(p + d) == Block::Water)
+                .count()
+                >= 2
+        })
+        .collect()
+}
+
+#[test]
+fn lakes_and_springs_are_deterministic() {
+    let (a, b) = (Terrain::new(SEED), Terrain::new(SEED));
+    for z in -3..3 {
+        for x in -3..3 {
+            let key = ColumnPos::new(x, z);
+            assert!(same_columns(&a.generate(key), &b.generate(key)));
+        }
+    }
+}
+
+#[test]
+fn water_and_lava_lakes_appear_but_not_in_deserts() {
+    let terrain = Terrain::new(SEED);
+    let (mut water, mut lava) = (0, 0);
+    for z in -14..14 {
+        for x in -14..14 {
+            let column = terrain.generate(ColumnPos::new(x, z));
+            water += lake_cells(&column).len();
+            lava += cells()
+                .filter(|&p| p.y >= 11 && column.get(p) == Block::Lava && column.get_data(p) == 0)
+                .count();
+        }
+    }
+    assert!(water > 50, "water lake cells: {water}");
+    assert!(lava > 5, "lava cells: {lava}");
+
+    let corner_dry = |key: ColumnPos| {
+        [(0, 0), (1, 0), (0, 1), (1, 1)]
+            .into_iter()
+            .all(|(dx, dz)| {
+                let at = ColumnPos::new(key.x() + dx, key.z() + dz).origin();
+                matches!(
+                    terrain.sample_biome(at.x, at.z),
+                    Biome::Desert | Biome::DesertHills
+                )
+            })
+    };
+    let mut checked = 0;
+    for key in columns_of(&terrain, Biome::Desert, 400)
+        .into_iter()
+        .filter(|&k| corner_dry(k))
+    {
+        checked += 1;
+        assert!(lake_cells(&terrain.generate(key)).is_empty(), "{key:?}");
+    }
+    assert!(checked > 0);
+}
+
+#[test]
+fn lakes_are_whole_across_column_borders() {
+    let terrain = Terrain::new(SEED);
+    let mut straddling = 0;
+    let mut checked = 0;
+    for sz in -40..40 {
+        for sx in -40..40 {
+            for lake in terrain.lakes_of(sx, sz).iter() {
+                if lake.kind != FluidKind::Water
+                    || lake.y0 + 4 <= WATER_LEVEL + 1
+                    || straddling >= 12
+                {
+                    continue;
+                }
+                straddling += 1;
+                let columns: Vec<(ColumnPos, Column)> = [(0, 0), (1, 0), (0, 1), (1, 1)]
+                    .into_iter()
+                    .map(|(dx, dz)| {
+                        let key = ColumnPos::new(sx + dx, sz + dz);
+                        (key, terrain.generate(key))
+                    })
+                    .collect();
+                for cell in lake.liquid_cells() {
+                    let key = ColumnPos::of_block(cell);
+                    let (_, column) = columns.iter().find(|(k, _)| *k == key).unwrap();
+                    let found = column.get(cell - key.origin());
+                    assert!(
+                        matches!(found, Block::Water | Block::Ice),
+                        "{cell} {found:?}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        straddling >= 5 && checked > 500,
+        "{straddling} lakes, {checked} cells"
+    );
+}
+
+fn stone_box() -> Column {
+    let mut column = Column::new();
+    for y in 0..80 {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set(IVec3::new(x, y, z), Block::Stone);
+            }
+        }
+    }
+    column
+}
+
+#[test]
+fn spring_needs_three_stone_sides_and_one_open() {
+    let terrain = Terrain::new(SEED);
+    let key = ColumnPos::new(0, 0);
+    let at = IVec3::new(8, 40, 8);
+    let mut column = stone_box();
+    assert!(!terrain.try_spring(key, &mut column, at, FluidKind::Water));
+    column.set(at + IVec3::Z, Block::Air);
+    assert!(terrain.try_spring(key, &mut column, at, FluidKind::Water));
+    assert_eq!(column.get(at), Block::Water);
+    column.set(at, Block::Stone);
+    column.set(at - IVec3::Z, Block::Air);
+    assert!(!terrain.try_spring(key, &mut column, at, FluidKind::Lava));
+    column.set(at - IVec3::Z, Block::Stone);
+    column.set(at + IVec3::Y, Block::Air);
+    assert!(!terrain.try_spring(key, &mut column, at, FluidKind::Lava));
+}
+
+#[test]
+fn spring_flows_down_the_open_shaft_once_the_world_wakes_it() {
+    use crate::fluid::Fluid;
+    use crate::world::World;
+    let terrain = Terrain::new(SEED);
+    let key = ColumnPos::new(0, 0);
+    let at = IVec3::new(8, 50, 8);
+    let mut column = stone_box();
+    for y in 30..=50 {
+        column.set(IVec3::new(8, y, 9), Block::Air);
+    }
+    assert!(terrain.try_spring(key, &mut column, at, FluidKind::Water));
+    column.springs.push(at);
+    let mut world = World::new();
+    world.insert(key, column);
+    let wakes = world.drain_fluid_wakes();
+    assert_eq!(wakes, vec![at]);
+    assert!(world.drain_fluid_wakes().is_empty());
+    let mut water = Fluid::new();
+    for pos in wakes {
+        water.block_changed(&world, pos);
+    }
+    for _ in 0..64 {
+        water.step(&mut world);
+    }
+    assert_eq!(world.block(at), Block::Water);
+    for y in 31..=49 {
+        assert_eq!(world.block(IVec3::new(8, y, 9)), Block::Water, "{y}");
+    }
+}
+
+#[test]
+fn generated_springs_sit_in_stone_with_one_open_side() {
+    let terrain = Terrain::new(SEED);
+    let (mut water, mut lava) = (0, 0);
+    for z in -12..12 {
+        for x in -12..12 {
+            let column = terrain.generate(ColumnPos::new(x, z));
+            for &p in &column.springs {
+                let block = column.get(p);
+                assert!(matches!(block, Block::Water | Block::Lava));
+                assert_eq!(column.get_data(p), 0);
+                assert_eq!(column.get(p + IVec3::Y), Block::Stone);
+                assert_eq!(column.get(p - IVec3::Y), Block::Stone);
+                let sides = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z]
+                    .into_iter()
+                    .filter(|&d| Column::contains(p + d))
+                    .map(|d| column.get(p + d));
+                let (inner, stone, air) = sides.fold((0, 0, 0), |(n, s, a), b| {
+                    (
+                        n + 1,
+                        s + usize::from(b == Block::Stone),
+                        a + usize::from(b == Block::Air),
+                    )
+                });
+                assert!(stone <= 3 && (inner < 4 || (stone == 3 && air == 1)), "{p}");
+                if block == Block::Water {
+                    water += 1;
+                } else {
+                    lava += 1;
+                }
+            }
+        }
+    }
+    assert!(water > 5 && lava > 1, "water {water}, lava {lava}");
+}
+
+#[test]
+fn pumpkin_patches_stand_on_grass_facing_a_side() {
+    let terrain = Terrain::new(SEED);
+    let sources: Vec<(i32, i32)> = (-300..300)
+        .flat_map(|z| (-300..300).map(move |x| (x, z)))
+        .filter(|&(x, z)| terrain.pumpkin_patch(x, z).is_some())
+        .take(80)
+        .collect();
+    let mut found = 0;
+    for (sx, sz) in sources {
+        for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let column = terrain.generate(ColumnPos::new(sx + dx, sz + dz));
+            for p in find(&column, Block::Pumpkin) {
+                found += 1;
+                assert_eq!(column.get(p - IVec3::Y), Block::Grass);
+                assert!(column.get_data(p) < 4);
+            }
+        }
+    }
+    assert!(found > 0);
 }

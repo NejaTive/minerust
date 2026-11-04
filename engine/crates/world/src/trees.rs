@@ -577,11 +577,21 @@ fn pick_kind(biome: Biome, bits: u32) -> TreeKind {
 }
 
 pub fn plant(terrain: &Terrain, key: ColumnPos, column: &mut Column) {
+    plant_where(terrain, key, column, |_| true);
+}
+
+pub fn plant_where(
+    terrain: &Terrain,
+    key: ColumnPos,
+    column: &mut Column,
+    allowed: impl Fn(&Tree) -> bool,
+) {
     let origin = key.origin();
     let range = |start: i32| start - MAX_REACH..start + SECTION_SIZE + MAX_REACH;
     let trees: Vec<Tree> = range(origin.z)
         .flat_map(|z| range(origin.x).map(move |x| (x, z)))
         .filter_map(|(x, z)| tree_at(terrain, x, z))
+        .filter(|tree| allowed(tree))
         .collect();
     let built: Vec<shapes::Parts> = trees
         .iter()

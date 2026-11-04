@@ -14,6 +14,7 @@ pub struct World {
     edited: HashSet<ColumnPos>,
     stashed: HashMap<ColumnPos, Column>,
     dirty: HashSet<ColumnPos>,
+    fluid_wakes: Vec<IVec3>,
 }
 
 const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
@@ -25,6 +26,7 @@ impl World {
             edited: HashSet::new(),
             stashed: HashMap::new(),
             dirty: HashSet::new(),
+            fluid_wakes: Vec::new(),
         }
     }
 
@@ -204,8 +206,15 @@ impl World {
         self.columns.get(&key)
     }
 
-    pub fn insert(&mut self, key: ColumnPos, column: Column) {
+    pub fn insert(&mut self, key: ColumnPos, mut column: Column) {
+        let origin = key.origin();
+        self.fluid_wakes
+            .extend(column.springs.drain(..).map(|spring| origin + spring));
         self.columns.insert(key, column);
+    }
+
+    pub fn drain_fluid_wakes(&mut self) -> Vec<IVec3> {
+        std::mem::take(&mut self.fluid_wakes)
     }
 
     pub fn remove(&mut self, key: ColumnPos) -> Option<Column> {

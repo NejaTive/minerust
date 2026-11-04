@@ -753,6 +753,7 @@ impl Game {
         self.weather
             .advance(ticks, weather_pace, self.weather_enabled);
         if self.terrain.world_type() != WorldType::Debug {
+            self.wake_springs();
             self.advance_fluid(ticks);
             self.advance_lava(ticks);
             self.advance_falling(ticks);
@@ -791,6 +792,13 @@ impl Game {
     fn sync_prev(&mut self) {
         self.prev_feet = self.player.feet;
         self.prev_step_offset = self.player.step_offset;
+    }
+
+    fn wake_springs(&mut self) {
+        for pos in self.world.drain_fluid_wakes() {
+            self.fluid.block_changed(&self.world, pos);
+            self.lava.block_changed(&self.world, pos);
+        }
     }
 
     fn advance_fluid(&mut self, ticks: u32) {

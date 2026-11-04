@@ -17,6 +17,10 @@ impl Stream {
         self.below(bound)
     }
 
+    pub fn fraction(&mut self) -> f64 {
+        f64::from(self.below(1 << 24)) / f64::from(1 << 24)
+    }
+
     pub fn flip(&mut self) -> bool {
         self.below(2) == 1
     }

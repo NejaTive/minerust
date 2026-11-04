@@ -78,5 +78,6 @@
   { "name": "red_tulip", "label": "красный тюльпан", "placeable": true },
   { "name": "orange_tulip", "label": "оранжевый тюльпан", "placeable": true },
   { "name": "white_tulip", "label": "белый тюльпан", "placeable": true },
-  { "name": "pink_tulip", "label": "розовый тюльпан", "placeable": true }
+  { "name": "pink_tulip", "label": "розовый тюльпан", "placeable": true },
+  { "name": "pumpkin", "label": "тыква", "placeable": true }
 ]

@@ -86,6 +86,8 @@ impl ColumnClimate {
     }
 }
 
+type LakeCache = HashMap<(i32, i32), Arc<Vec<decor::lakes::Lake>>>;
+
 pub struct Terrain {
     seed: i32,
     world_type: WorldType,
@@ -96,6 +98,7 @@ pub struct Terrain {
     mega: FastNoiseLite,
     color: FastNoiseLite,
     climate: Mutex<HashMap<(i32, i32), Arc<ColumnClimate>>>,
+    lakes: Mutex<LakeCache>,
     pub(crate) caves: Caves,
 }
 
@@ -129,6 +132,7 @@ impl Terrain {
             map: BiomeMap::new(seed),
             mesa: Mesa::new(seed),
             climate: Mutex::new(HashMap::new()),
+            lakes: Mutex::new(HashMap::new()),
             caves: Caves::new(seed),
         }
     }
@@ -248,7 +252,11 @@ impl Terrain {
         if self.world_type == WorldType::Debug {
             return Self::generate_debug(key);
         }
-        let mut column = self.generate_trees(key);
+        let mut column = self.generate_carved(key);
+        self.grow_lakes(key, &mut column);
+        trees::plant_where(self, key, &mut column, |tree| {
+            !self.lake_covers(tree.base.x, tree.base.z)
+        });
         plants::plant(self, key, &mut column);
         self.decorate(key, &mut column);
         column

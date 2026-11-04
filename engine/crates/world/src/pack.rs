@@ -176,6 +176,9 @@ fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
         Tile::TulipOrange => ("flower_tulip_orange", WHITE, BiomeTint::None),
         Tile::TulipWhite => ("flower_tulip_white", WHITE, BiomeTint::None),
         Tile::TulipPink => ("flower_tulip_pink", WHITE, BiomeTint::None),
+        Tile::PumpkinSide => ("pumpkin_side", WHITE, BiomeTint::None),
+        Tile::PumpkinTop => ("pumpkin_top", WHITE, BiomeTint::None),
+        Tile::PumpkinFace => ("pumpkin_face_off", WHITE, BiomeTint::None),
     }
 }
 
@@ -413,6 +416,9 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
     "vine.png",
     "melon_side.png",
     "melon_top.png",
+    "pumpkin_face_off.png",
+    "pumpkin_side.png",
+    "pumpkin_top.png",
     "mushroom_block_skin_brown.png",
     "mushroom_block_skin_red.png",
     "mushroom_block_skin_stem.png",

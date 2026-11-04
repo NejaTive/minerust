@@ -328,3 +328,24 @@ fn solid_blocks_are_not_placed_into_a_pig_but_flowers_are() {
     let mut empty = floor_game();
     assert_eq!(try_place(&mut empty, "stone"), Block::Stone);
 }
+
+#[test]
+fn generated_springs_start_flowing_after_the_column_is_inserted() {
+    let terrain = Terrain::new(SEED);
+    let key = (-12..12)
+        .flat_map(|z| (-12..12).map(move |x| ColumnPos::new(x, z)))
+        .find(|&key| !terrain.generate(key).springs.is_empty())
+        .expect("a spring column near the origin");
+    let mut game = game_at((key.origin().x, key.origin().z));
+    let column = game.terrain.generate(key);
+    let spring = key.origin() + column.springs[0];
+    game.world.insert(key, column);
+    run(&mut game, 0.5);
+    assert!(game.world.drain_fluid_wakes().is_empty());
+    let cells = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z, IVec3::NEG_Y]
+        .map(|d| game.world.block(spring + d));
+    assert!(
+        cells.iter().any(|b| b.fluid().is_some()),
+        "no liquid beside {spring}: {cells:?}"
+    );
+}
