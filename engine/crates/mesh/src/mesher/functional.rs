@@ -156,6 +156,24 @@ fn brewing_stand_draws_a_rod_over_a_base() {
 }
 
 #[test]
+fn a_pressure_plate_is_a_stone_box_inset_by_a_pixel() {
+    let quads = quads_of(&mesh(Block::StonePressurePlate, 0));
+    assert_eq!(quads.len(), 6);
+    assert!(
+        quads
+            .iter()
+            .all(|q| q.layer() == Tile::Stone.layer() as u16)
+    );
+    let (low, high) = Block::StonePressurePlate
+        .boxes(0, |_| (Block::Air, 0))
+        .bounds();
+    assert_eq!(
+        (low.x, high.x, high.y),
+        (1.0 / 16.0, 15.0 / 16.0, 1.0 / 16.0)
+    );
+}
+
+#[test]
 fn a_trapdoor_is_a_slab_that_stands_up_when_open() {
     use world::block::{TRAPDOOR_OPEN, TRAPDOOR_TOP};
     let flat = Block::OakTrapdoor.boxes(0, |_| (Block::Air, 0));

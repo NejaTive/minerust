@@ -11,6 +11,7 @@ use crate::stream::Stream;
 use crate::terrain::Terrain;
 
 mod cell;
+mod desert_temple;
 mod igloo;
 mod piece;
 mod placement;
@@ -114,7 +115,10 @@ impl Variant {
 
 impl TempleKind {
     pub fn ready(self) -> bool {
-        matches!(self, TempleKind::SwampHut | TempleKind::Igloo)
+        matches!(
+            self,
+            TempleKind::DesertPyramid | TempleKind::SwampHut | TempleKind::Igloo
+        )
     }
 
     pub fn name(self) -> &'static str {
@@ -246,6 +250,7 @@ fn layout(
     rng: &mut Stream,
 ) -> Vec<Piece> {
     match variant {
+        Variant::Temple(TempleKind::DesertPyramid) => desert_temple::layout(terrain, anchor, rng),
         Variant::Temple(TempleKind::SwampHut) => swamp_hut::layout(terrain, anchor, rng),
         Variant::Temple(TempleKind::Igloo) => igloo::layout(terrain, anchor, rng),
         #[cfg(test)]

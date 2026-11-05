@@ -131,7 +131,7 @@ struct TileAnim {
     tint: vec4<f32>,
 };
 @group(0) @binding(3)
-var<uniform> animation: array<TileAnim, 274>;
+var<uniform> animation: array<TileAnim, 278>;
 
 // Цвет травы, листвы (на BIOME_MAP_SIZE ниже) и воды (ещё на BIOME_MAP_SIZE ниже) на блок, тор BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
 @group(0) @binding(11)

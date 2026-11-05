@@ -49,6 +49,7 @@ impl Plot {
 }
 
 const TEMPLE: i32 = 48;
+const DESERT_TEMPLE: i32 = 32;
 const VILLAGE: i32 = 192;
 
 const SPECS: [(StructureKind, Variant, Biome, Ground, i32); 13] = [
@@ -71,7 +72,7 @@ const SPECS: [(StructureKind, Variant, Biome, Ground, i32); 13] = [
         Variant::Temple(TempleKind::DesertPyramid),
         Biome::Desert,
         Ground::Land,
-        TEMPLE,
+        DESERT_TEMPLE,
     ),
     (
         StructureKind::Temple,

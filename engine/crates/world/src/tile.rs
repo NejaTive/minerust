@@ -281,10 +281,14 @@ pub enum Tile {
     BrewingStand,
     BrewingStandBase,
     TrapdoorOak,
+    TntSide,
+    TntTop,
+    TntBottom,
+    TerracottaBlue,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 274] = [
+    pub const ALL: [Tile; 278] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -559,6 +563,10 @@ impl Tile {
         Tile::BrewingStand,
         Tile::BrewingStandBase,
         Tile::TrapdoorOak,
+        Tile::TntSide,
+        Tile::TntTop,
+        Tile::TntBottom,
+        Tile::TerracottaBlue,
     ];
 
     pub fn sway(self) -> f32 {

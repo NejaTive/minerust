@@ -1,7 +1,7 @@
 use glam::IVec3;
 
 use super::super::*;
-use super::dump::{assert_snapshot, dump};
+use super::dump::{assert_snapshot, dump, dump_below};
 
 const ORIGIN: IVec3 = IVec3::new(10, 5, 12);
 const BASEMENT_SALT: u32 = 123_456;
@@ -50,4 +50,23 @@ fn igloo_top_snapshot() {
 fn igloo_basement_snapshots() {
     assert_snapshot("igloo_basement_min", &dump(&basement(4, Facing::South)));
     assert_snapshot("igloo_basement_max", &dump(&basement(11, Facing::South)));
+}
+
+const DESERT_TEMPLE_DEPTH_BELOW: i32 = 14;
+
+pub(super) fn desert_temple(facing: Facing) -> Piece {
+    Piece {
+        bounds: BlockBox::from_local(IVec3::new(10, 30, 12), IVec3::new(21, 15, 21), facing),
+        facing,
+        kind: PieceKind::DesertTemple,
+        salt: 0,
+    }
+}
+
+#[test]
+fn desert_temple_snapshot() {
+    assert_snapshot(
+        "desert_temple",
+        &dump_below(&desert_temple(Facing::South), DESERT_TEMPLE_DEPTH_BELOW),
+    );
 }

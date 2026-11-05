@@ -376,6 +376,7 @@ impl Block {
             BoxKind::Fence => self.fence_boxes(&around, true),
             BoxKind::Gate => self.gate_boxes(data, true),
             BoxKind::Bed => BoxList::of(&[VoxelBox::new([0, 0, 0], [16, BED_UNITS, 16])]),
+            BoxKind::Plate => BoxList::EMPTY,
             _ => self.boxes(data, around),
         }
     }

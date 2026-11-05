@@ -685,3 +685,20 @@ fn double_plant_halves_need_each_other_and_the_ground() {
     world.set_block(lower, Block::Stone);
     assert!(!world.is_supported(lower + IVec3::Y, Block::SunflowerUpper, 0));
 }
+
+#[test]
+fn pressure_plate_needs_solid_floor_and_breaks_with_it() {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    let floor = IVec3::new(3, 10, 3);
+    let above = floor + IVec3::Y;
+    assert!(!world.can_place(above, Block::StonePressurePlate));
+    world.set_block(floor, Block::Water);
+    assert!(!world.can_place(above, Block::StonePressurePlate));
+    world.set_block(floor, Block::Stone);
+    assert!(world.can_place(above, Block::StonePressurePlate));
+    world.set_block(above, Block::StonePressurePlate);
+    let changed = world.set_block_supported(floor, Block::Air);
+    assert_eq!(changed, vec![floor, above]);
+    assert_eq!(world.block(above), Block::Air);
+}

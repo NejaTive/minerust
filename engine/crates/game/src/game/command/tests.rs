@@ -411,7 +411,7 @@ fn locate_unbuilt_structures_are_reported_missing() {
     }
     assert_eq!(
         g.complete_command("/locate ").options,
-        ["biome", "Temple", "Swamp_Hut", "Igloo"]
+        ["biome", "Temple", "Desert_Pyramid", "Swamp_Hut", "Igloo"]
     );
 }
 
@@ -422,7 +422,14 @@ fn locate_names_appear_once_the_structure_is_built() {
     assert_eq!(g.complete_command("/locate vi").options, ["Village"]);
     assert_eq!(
         g.complete_command("/locate ").options,
-        ["biome", "Village", "Temple", "Swamp_Hut", "Igloo"]
+        [
+            "biome",
+            "Village",
+            "Temple",
+            "Desert_Pyramid",
+            "Swamp_Hut",
+            "Igloo"
+        ]
     );
 }
 
@@ -435,15 +442,15 @@ fn showcase_locate_returns_the_plot_center() {
     let out = g.run_command("/locate VILLAGE");
     assert!(out.ok, "{}", out.text);
     assert!(
-        out.text.contains("[688, ~, 0] (688 блоков)"),
+        out.text.contains("[672, ~, 0] (672 блоков)"),
         "{}",
         out.text
     );
-    assert_eq!(out.suggest.as_deref(), Some("/tp 688 ~ 0"));
+    assert_eq!(out.suggest.as_deref(), Some("/tp 672 ~ 0"));
     let hut = g.run_command("/locate swamp_hut");
     assert!(hut.text.contains("[40, ~, 0]"), "{}", hut.text);
     assert!(ok(&mut g, "/locate igloo").contains("[88, ~, 0]"));
-    assert!(ok(&mut g, "/locate Stronghold").contains("[1584, ~, 0]"));
+    assert!(ok(&mut g, "/locate Stronghold").contains("[1568, ~, 0]"));
 }
 
 #[test]
