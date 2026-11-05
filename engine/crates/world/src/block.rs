@@ -586,6 +586,7 @@ pub struct BlockDef {
     pub needs_support: bool,
     pub falls: bool,
     pub unbreakable: bool,
+    pub blast_resistance: f32,
     pub random_ticks: bool,
     pub slippery: bool,
     pub data: DataKind,
@@ -613,6 +614,7 @@ impl BlockDef {
         needs_support: false,
         falls: false,
         unbreakable: false,
+        blast_resistance: 0.0,
         random_ticks: false,
         slippery: false,
         data: DataKind::None,
@@ -773,7 +775,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-pub const BLOCKS: [BlockDef; 182] = [
+const BASE_BLOCKS: [BlockDef; 182] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -1641,7 +1643,10 @@ pub const BLOCKS: [BlockDef; 182] = [
     BlockDef::uniform("blue_terracotta", "синяя терракота", Tile::TerracottaBlue),
 ];
 
+mod resistance;
 mod shapes;
+
+pub const BLOCKS: [BlockDef; 182] = resistance::BLOCKS_WITH_RESISTANCE;
 
 pub use shapes::{CAULDRON_LEVELS, POT_PLANTS};
 
@@ -1833,6 +1838,10 @@ impl Block {
 
     pub fn def(self) -> &'static BlockDef {
         &BLOCKS[self as usize]
+    }
+
+    pub fn blast_resistance(self) -> f32 {
+        self.def().blast_resistance
     }
 
     pub fn is_unbreakable(self) -> bool {

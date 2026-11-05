@@ -11,6 +11,8 @@ pub const BLOB_BYTES: usize = BLOB_FLOATS * 4;
 const MUSHROOM_UNITS: Vec2 = Vec2::new(16.0, 16.0);
 const PIXELS_PER_BLOCK: f32 = 16.0;
 const MODEL_FEET: f32 = 24.0;
+const TNT_SIZE: f32 = 16.0;
+const TNT_HALF: f32 = TNT_SIZE / 2.0;
 const CULL_RADIUS: f32 = 1.6;
 const SHADOW_DROP: f32 = 2.0;
 const CULL_HEIGHT: f32 = 2.6;
@@ -49,6 +51,7 @@ pub enum ModelKind {
     Ocelot,
     Parrot,
     Squid,
+    PrimedTnt,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -75,6 +78,7 @@ pub struct MobInstance {
     pub pitch: f32,
     pub tentacle: f32,
     pub spin: f32,
+    pub scale: f32,
     pub sky_level: f32,
     pub block_level: f32,
     pub shadow_radius: f32,
@@ -130,6 +134,8 @@ pub enum EntityTexture {
     ParrotYellowBlue,
     ParrotGrey,
     Squid,
+    Tnt,
+    TntFlash,
 }
 
 impl EntityTexture {
@@ -172,6 +178,8 @@ impl EntityTexture {
         EntityTexture::ParrotYellowBlue,
         EntityTexture::ParrotGrey,
         EntityTexture::Squid,
+        EntityTexture::Tnt,
+        EntityTexture::TntFlash,
     ];
 
     fn units(self) -> Vec2 {
@@ -204,7 +212,7 @@ impl EntityTexture {
     }
 }
 
-pub const TEXTURES: usize = 38;
+pub const TEXTURES: usize = 40;
 
 pub type MobVertices = [Vec<f32>; TEXTURES];
 
@@ -733,13 +741,36 @@ fn push_double_sided(quad: [(Vec3, Vec2); 4], instance: &MobInstance, out: &mut 
     }
 }
 
+fn tnt_part(instance: &MobInstance) -> BoxPart {
+    let sheet = if instance.variant == 0 {
+        EntityTexture::Tnt
+    } else {
+        EntityTexture::TntFlash
+    };
+    part(
+        sheet,
+        (0.0, 0.0),
+        [-TNT_HALF, MODEL_FEET - TNT_SIZE, -TNT_HALF],
+        [TNT_SIZE; 3],
+        [0.0; 3],
+        Mat3::IDENTITY,
+    )
+}
+
 fn to_world(model: Vec3, instance: &MobInstance) -> Vec3 {
     let scale = match instance.kind {
         ModelKind::Donkey => equine::DONKEY_SCALE,
         ModelKind::Rabbit => small::RABBIT_SCALE,
+        ModelKind::PrimedTnt => instance.scale,
         _ => 1.0,
     };
-    let local = Vec3::new(-model.x, MODEL_FEET - model.y, model.z) * scale / PIXELS_PER_BLOCK;
+    let rise = if instance.kind == ModelKind::PrimedTnt {
+        TNT_HALF * (1.0 - scale)
+    } else {
+        0.0
+    };
+    let local = Vec3::new(-model.x, MODEL_FEET - model.y + rise / scale, model.z) * scale
+        / PIXELS_PER_BLOCK;
     instance.feet + Mat3::from_rotation_y(-instance.yaw - FRAC_PI_2) * local
 }
 
@@ -766,6 +797,7 @@ pub fn push_mob(instance: &MobInstance, out: &mut MobVertices) {
         ModelKind::Ocelot => small::ocelot_parts(instance),
         ModelKind::Parrot => sky_sea::parrot_parts(instance),
         ModelKind::Squid => sky_sea::squid_parts(instance),
+        ModelKind::PrimedTnt => vec![tnt_part(instance)],
     };
     for part in &parts {
         push_box(part, instance, &mut out[part.sheet as usize]);
@@ -1032,6 +1064,8 @@ pub fn create_texture_groups(
                 EntityTexture::ParrotYellowBlue => &images.parrot[3],
                 EntityTexture::ParrotGrey => &images.parrot[4],
                 EntityTexture::Squid => &images.squid,
+                EntityTexture::Tnt => &images.tnt,
+                EntityTexture::TntFlash => &images.tnt_flash,
             };
             let texture = device.create_texture_with_data(
                 queue,

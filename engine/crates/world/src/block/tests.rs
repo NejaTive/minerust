@@ -1510,3 +1510,26 @@ fn stone_pressure_plate_is_a_flat_box_without_collision() {
     }
     assert_eq!(plate.support_dir(0), Some(IVec3::NEG_Y));
 }
+
+#[test]
+fn blast_resistance_follows_vanilla_1_12() {
+    for (block, resistance) in [
+        (Block::Tnt, 0.0),
+        (Block::Dirt, 0.5),
+        (Block::OakPlanks, 3.0),
+        (Block::Stone, 6.0),
+        (Block::Water, 100.0),
+        (Block::Lava, 100.0),
+        (Block::Obsidian, 1200.0),
+    ] {
+        assert_eq!(block.blast_resistance(), resistance, "{block:?}");
+    }
+    assert!(Block::Bedrock.blast_resistance() > 1_000_000.0);
+}
+
+#[test]
+fn unbreakable_blocks_outlast_any_blast() {
+    for block in ALL.into_iter().filter(|block| block.is_unbreakable()) {
+        assert!(block.blast_resistance() > 1_000.0, "{block:?}");
+    }
+}

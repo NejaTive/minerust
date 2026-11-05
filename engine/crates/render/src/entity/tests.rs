@@ -17,6 +17,7 @@ fn instance() -> MobInstance {
         pitch: 0.0,
         tentacle: 0.0,
         spin: 0.0,
+        scale: 1.0,
         sky_level: 15.0,
         block_level: 0.0,
         shadow_radius: 0.7,
@@ -765,4 +766,38 @@ fn squid_tentacles_spread_and_squeeze_with_the_swing() {
         hi.x - lo.x
     };
     assert!(reach(&at(0.7)) > reach(&at(0.0)));
+}
+
+#[test]
+fn primed_tnt_is_a_textured_cube_that_swells_around_its_center() {
+    let tnt = MobInstance {
+        feet: Vec3::new(2.0, 5.0, 3.0),
+        ..of_kind(ModelKind::PrimedTnt)
+    };
+    let out = sheets(&tnt);
+    assert_eq!(out[EntityTexture::Tnt as usize].len(), 36 * VERTEX_FLOATS);
+    let (min, max) = bounds(&tnt);
+    assert!((max - min - Vec3::ONE).abs().max_element() < 1e-4);
+    assert!((min - Vec3::new(1.5, 5.0, 2.5)).abs().max_element() < 1e-4);
+
+    let swollen = MobInstance {
+        scale: 1.3,
+        ..tnt.clone()
+    };
+    let (min, max) = bounds(&swollen);
+    assert!((max - min - Vec3::splat(1.3)).abs().max_element() < 1e-4);
+    assert!(
+        ((min + max) / 2.0 - Vec3::new(2.0, 5.5, 3.0))
+            .abs()
+            .max_element()
+            < 1e-4
+    );
+
+    let flashing = MobInstance { variant: 1, ..tnt };
+    let out = sheets(&flashing);
+    assert!(out[EntityTexture::Tnt as usize].is_empty());
+    assert_eq!(
+        out[EntityTexture::TntFlash as usize].len(),
+        36 * VERTEX_FLOATS
+    );
 }

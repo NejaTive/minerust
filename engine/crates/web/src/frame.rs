@@ -100,6 +100,7 @@ pub(crate) fn frame_params(
                 pitch: view.pose.pitch,
                 tentacle: view.pose.tentacle,
                 spin: view.pose.spin,
+                scale: 1.0,
                 sky_level: f32::from(view.sky_level),
                 block_level: f32::from(view.block_level),
                 shadow_radius: view.shadow_radius,
@@ -114,6 +115,27 @@ pub(crate) fn frame_params(
                     })
                     .collect(),
             })
+            .chain(game.tnt_views().into_iter().map(|view| MobInstance {
+                kind: ModelKind::PrimedTnt,
+                variant: u8::from(view.flash),
+                feet: view.feet,
+                yaw: 0.0,
+                head_yaw: 0.0,
+                head_pitch: 0.0,
+                limb_phase: 0.0,
+                limb_swing: 0.0,
+                flap_phase: 0.0,
+                flap_amount: 0.0,
+                hop: 0.0,
+                pitch: 0.0,
+                tentacle: 0.0,
+                spin: 0.0,
+                scale: view.scale,
+                sky_level: f32::from(view.sky_level),
+                block_level: f32::from(view.block_level),
+                shadow_radius: 0.5,
+                shadow: Vec::new(),
+            }))
             .collect(),
     }
 }

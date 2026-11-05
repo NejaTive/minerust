@@ -73,6 +73,14 @@ pub struct MobView {
     pub shadow: Vec<ShadowPatch>,
 }
 
+pub struct TntView {
+    pub feet: Vec3,
+    pub scale: f32,
+    pub flash: bool,
+    pub sky_level: u8,
+    pub block_level: u8,
+}
+
 #[derive(Default)]
 pub struct Edits {
     pub dirty: Vec<SectionPos>,
@@ -98,6 +106,7 @@ pub struct Game {
     lava_ticks: u32,
     falling: Falling,
     fall_ticks: u32,
+    blasts: blast::Blasts,
     random_ticks: RandomTicks,
     random_tick_acc: u32,
     view_radius: i32,
@@ -181,6 +190,7 @@ impl Game {
             lava_ticks: 0,
             falling: Falling::new(),
             fall_ticks: 0,
+            blasts: blast::Blasts::new(seed),
             random_ticks: RandomTicks::new(seed),
             random_tick_acc: 0,
             view_radius: DEFAULT_RADIUS,
@@ -487,6 +497,7 @@ impl Game {
                 self.sleep();
                 Vec::new()
             }
+            Block::Tnt => self.ignite(pos),
             Block::FlowerPot => match self.selected {
                 Some(Held::Block(plant, _)) if self.world.plant_in_pot(pos, plant) => vec![pos],
                 _ => Vec::new(),
@@ -579,7 +590,9 @@ impl Game {
         }
         let uses_target = target.is_some_and(|hit| {
             let block = self.world.block(hit.block);
-            block.opens_by_hand() && (block != Block::FlowerPot || self.pot_accepts(hit.block))
+            block == Block::Tnt
+                || block.opens_by_hand()
+                    && (block != Block::FlowerPot || self.pot_accepts(hit.block))
         });
         if uses_target {
             if editable
@@ -781,6 +794,7 @@ impl Game {
             self.fluid.block_changed(&self.world, pos);
             self.lava.block_changed(&self.world, pos);
             self.falling.block_changed(&self.world, pos);
+            self.blasts.signal.block_changed(&self.world, pos);
             self.rain_cover.invalidate(pos);
             dirty.extend(affected_sections(pos));
             if !light_neutral.contains(&pos) {
@@ -855,6 +869,7 @@ impl Game {
             let Some(column) = self.world.column(key) else {
                 continue;
             };
+            self.blasts.plates.adopt_column(key, column);
             let populated = column.populated;
             let mut records = column.mobs.clone();
             if !populated {
@@ -974,6 +989,7 @@ impl Game {
             self.advance_fluid(ticks);
             self.advance_lava(ticks);
             self.advance_falling(ticks);
+            self.advance_blasts(ticks);
             self.advance_random_ticks(ticks * factor);
         }
         self.adopt_mobs();
@@ -1129,6 +1145,7 @@ fn restore_player(state: &[f32]) -> Option<(Camera, Player)> {
     Some((camera, player))
 }
 
+mod blast;
 mod command;
 mod spawn;
 

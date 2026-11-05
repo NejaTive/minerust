@@ -12,5 +12,6 @@ mod raycast;
 mod repeat;
 mod rng;
 mod spawning;
+pub mod tnt;
 pub mod weather;
-pub use game::{BadCameraState, Edits, Game, MobView};
+pub use game::{BadCameraState, Edits, Game, MobView, TntView};
