@@ -92,6 +92,43 @@ fn chest_faces_show_their_entity_tiles() {
     }
 }
 
+#[test]
+fn double_chest_has_no_end_faces_between_the_halves() {
+    let facing = world::chest::data(IVec3::NEG_Z, world::chest::HALF_RIGHT);
+    let other = world::chest::data(IVec3::NEG_Z, world::chest::HALF_LEFT);
+    let mut section = Section::new();
+    section.set_with_data(AT, Block::Chest, facing);
+    section.set_with_data(AT + IVec3::X, Block::Chest, other);
+    let meshes = mesh_section(&section, air, full, MeshOptions::default());
+    let ends = meshes
+        .cutout
+        .quads
+        .iter()
+        .filter(|q| {
+            [Tile::ChestDoubleEndL, Tile::ChestDoubleEndR]
+                .iter()
+                .any(|t| q.layer() == t.layer() as u16)
+        })
+        .count();
+    assert_eq!(ends, 6);
+}
+
+#[test]
+fn flower_pot_is_a_six_pixel_ring_around_recessed_dirt() {
+    let meshes = mesh(Block::FlowerPot, 0);
+    let dirt_tops = top_planes(&meshes, Tile::Dirt);
+    assert_eq!(dirt_tops, vec![4.0]);
+    let list = Block::FlowerPot.boxes(0, |_| (Block::Air, 0));
+    let (lo, hi) = list.iter().fold((16, 0), |(lo, hi), b| {
+        (
+            lo.min(b.min[0]).min(b.min[2]),
+            hi.max(b.max[0]).max(b.max[2]),
+        )
+    });
+    assert_eq!((lo, hi), (5, 11));
+    assert!(list.iter().all(|b| b.max[1] <= 6));
+}
+
 fn quads_of(meshes: &SectionMeshes) -> Vec<crate::mesh::Quad> {
     meshes
         .solid

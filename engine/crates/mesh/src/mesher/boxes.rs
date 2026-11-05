@@ -102,7 +102,9 @@ fn neighbor_mask(
     if block.is_opaque() {
         return FaceMask::FULL;
     }
-    if block.shape() != Shape::Boxes || block.render_layer() != RenderLayer::Opaque {
+    if block.shape() != Shape::Boxes
+        || (block.render_layer() != RenderLayer::Opaque && block != Block::Chest)
+    {
         return FaceMask::EMPTY;
     }
     let (axis, positive) = face_axis(face_index);
