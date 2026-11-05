@@ -14,6 +14,7 @@ mod cell;
 mod desert_temple;
 mod igloo;
 mod jungle_temple;
+mod mineshaft;
 mod piece;
 mod placement;
 mod showcase;
@@ -258,6 +259,7 @@ fn layout(
         Variant::Temple(TempleKind::JunglePyramid) => jungle_temple::layout(terrain, anchor, rng),
         Variant::Temple(TempleKind::SwampHut) => swamp_hut::layout(terrain, anchor, rng),
         Variant::Temple(TempleKind::Igloo) => igloo::layout(terrain, anchor, rng),
+        Variant::Mineshaft(shaft) => mineshaft::layout(terrain, shaft, anchor, rng),
         #[cfg(test)]
         _ => tests::layout(terrain, kind, variant, anchor, rng),
         #[cfg(not(test))]
@@ -279,7 +281,9 @@ pub struct Structures {
 impl Default for Structures {
     fn default() -> Self {
         Self {
-            built: AtomicU8::new(1 << StructureKind::Temple.index()),
+            built: AtomicU8::new(
+                1 << StructureKind::Temple.index() | 1 << StructureKind::Mineshaft.index(),
+            ),
             cache: Mutex::default(),
             strongholds: OnceLock::new(),
         }

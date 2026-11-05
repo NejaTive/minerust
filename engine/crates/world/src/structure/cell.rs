@@ -66,6 +66,11 @@ impl Cell {
         Self::of(Block::Vine).front(toward_wall)
     }
 
+    /// Факел на стене; `toward_wall` — от факела к блоку, на котором он держится.
+    pub const fn torch(toward_wall: IVec3) -> Self {
+        Self::of(Block::Torch).front(toward_wall)
+    }
+
     /// Рычаг на стене; `away` — от стены в комнату.
     pub fn lever(away: IVec3, powered: bool) -> Self {
         let data = if powered { LEVER_POWERED } else { 0 };

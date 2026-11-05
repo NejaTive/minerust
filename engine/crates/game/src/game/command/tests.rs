@@ -414,6 +414,7 @@ fn locate_unbuilt_structures_are_reported_missing() {
         [
             "biome",
             "Temple",
+            "Mineshaft",
             "Desert_Pyramid",
             "Jungle_Pyramid",
             "Swamp_Hut",
@@ -433,6 +434,7 @@ fn locate_names_appear_once_the_structure_is_built() {
             "biome",
             "Village",
             "Temple",
+            "Mineshaft",
             "Desert_Pyramid",
             "Jungle_Pyramid",
             "Swamp_Hut",
@@ -450,15 +452,15 @@ fn showcase_locate_returns_the_plot_center() {
     let out = g.run_command("/locate VILLAGE");
     assert!(out.ok, "{}", out.text);
     assert!(
-        out.text.contains("[672, ~, 0] (672 блоков)"),
+        out.text.contains("[800, ~, 0] (800 блоков)"),
         "{}",
         out.text
     );
-    assert_eq!(out.suggest.as_deref(), Some("/tp 672 ~ 0"));
+    assert_eq!(out.suggest.as_deref(), Some("/tp 800 ~ 0"));
     let hut = g.run_command("/locate swamp_hut");
     assert!(hut.text.contains("[40, ~, 0]"), "{}", hut.text);
     assert!(ok(&mut g, "/locate igloo").contains("[88, ~, 0]"));
-    assert!(ok(&mut g, "/locate Stronghold").contains("[1568, ~, 0]"));
+    assert!(ok(&mut g, "/locate Stronghold").contains("[1696, ~, 0]"));
 }
 
 #[test]
