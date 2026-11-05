@@ -1,8 +1,12 @@
 use glam::IVec3;
 
+use super::MineshaftKind;
 use super::cell::{Cell, Selector};
+use super::mineshaft::{self, CorridorSpec};
 use super::template::{Entry, Template};
-use crate::block::{Block, VINE_SIDES, facing_code};
+use crate::block::{
+    ATTACH_NEG_X, ATTACH_NEG_Z, ATTACH_POS_X, ATTACH_POS_Z, Block, VINE_SIDES, facing_code,
+};
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
@@ -149,6 +153,12 @@ pub enum PieceKind {
     JungleTemple,
     /// Шахта и комната под иглу: число сегментов шахты.
     IglooBasement(u8),
+    MineshaftRoom,
+    /// Проём из комнаты шахты в коридор: рамка целиком заполняется воздухом.
+    MineshaftOpening,
+    MineshaftCorridor(CorridorSpec),
+    MineshaftCross(MineshaftKind),
+    MineshaftStairs,
     #[cfg(test)]
     Probe,
 }
@@ -163,6 +173,11 @@ pub struct Piece {
 }
 
 impl Piece {
+    /// Мировая клетка по локальным координатам части, как `PieceWriter::world`.
+    pub fn world(&self, x: i32, y: i32, z: i32) -> IVec3 {
+        world_of(&self.bounds, self.facing, x, y, z)
+    }
+
     pub fn place(&self, writer: &mut PieceWriter) {
         match self.kind {
             PieceKind::SwampHut => super::swamp_hut::place(writer),
@@ -170,9 +185,33 @@ impl Piece {
             PieceKind::DesertTemple => super::desert_temple::place(writer),
             PieceKind::JungleTemple => super::jungle_temple::place(writer),
             PieceKind::IglooBasement(segments) => super::igloo::place_basement(writer, segments),
+            PieceKind::MineshaftRoom => mineshaft::place_room(writer),
+            PieceKind::MineshaftOpening => mineshaft::place_opening(writer),
+            PieceKind::MineshaftCorridor(spec) => mineshaft::place_corridor(writer, spec),
+            PieceKind::MineshaftCross(kind) => mineshaft::place_cross(writer, kind),
+            PieceKind::MineshaftStairs => mineshaft::place_stairs(writer),
             #[cfg(test)]
             PieceKind::Probe => super::tests::draw_probe(writer),
         }
+    }
+}
+
+fn world_of(b: &BlockBox, facing: Facing, x: i32, y: i32, z: i32) -> IVec3 {
+    let (wx, wz) = match facing {
+        Facing::North => (b.min.x + x, b.max.z - z),
+        Facing::South => (b.min.x + x, b.min.z + z),
+        Facing::West => (b.max.x - z, b.min.z + x),
+        Facing::East => (b.min.x + z, b.min.z + x),
+    };
+    IVec3::new(wx, b.min.y + y, wz)
+}
+
+fn attach_code(toward_wall: IVec3) -> u8 {
+    match toward_wall {
+        IVec3::X => ATTACH_POS_X,
+        IVec3::NEG_X => ATTACH_NEG_X,
+        IVec3::Z => ATTACH_POS_Z,
+        _ => ATTACH_NEG_Z,
     }
 }
 
@@ -237,14 +276,7 @@ impl<'a> PieceWriter<'a> {
 
     /// Локальные координаты части (x вдоль ширины, z вдоль глубины) в мировые, как `getXWithOffset`/`getZWithOffset`.
     pub fn world(&self, x: i32, y: i32, z: i32) -> IVec3 {
-        let b = &self.bounds;
-        let (wx, wz) = match self.facing {
-            Facing::North => (b.min.x + x, b.max.z - z),
-            Facing::South => (b.min.x + x, b.min.z + z),
-            Facing::West => (b.max.x - z, b.min.z + x),
-            Facing::East => (b.min.x + z, b.min.z + x),
-        };
-        IVec3::new(wx, b.min.y + y, wz)
+        world_of(&self.bounds, self.facing, x, y, z)
     }
 
     fn local(&self, at: IVec3) -> Option<IVec3> {
@@ -256,6 +288,7 @@ impl<'a> PieceWriter<'a> {
         let cell = cell.into();
         let data = match cell.front {
             Some(front) if cell.block == Block::Vine => vine_side(self.world_dir(front)),
+            Some(front) if cell.block == Block::Torch => attach_code(self.world_dir(front)),
             Some(front) => cell.data | facing_code(self.world_dir(front)),
             None => cell.data,
         };
@@ -266,6 +299,26 @@ impl<'a> PieceWriter<'a> {
     /// Бросок «один из `one_in`» по хэшу клетки: не зависит от порядка колонок.
     pub fn chance(&self, x: i32, y: i32, z: i32, one_in: u32) -> bool {
         mix(!self.salt, x, y, z).is_multiple_of(one_in)
+    }
+
+    /// Бросок «`percent` из 100» по хэшу клетки; `tag` разводит независимые броски на одной клетке.
+    pub fn chance_pct(&self, x: i32, y: i32, z: i32, tag: u32, percent: u32) -> bool {
+        mix(self.salt ^ tag.wrapping_mul(0x9E37_79B9), x, y, z) % 100 < percent
+    }
+
+    /// Над клеткой в этой колонке есть непустой блок: приближение `getSkyBrightness < 8` при генерации.
+    pub fn sky_blocked(&self, x: i32, y: i32, z: i32) -> bool {
+        let Some(mut local) = self.local(self.world(x, y, z)) else {
+            return false;
+        };
+        local.y += 1;
+        while local.y < WORLD_HEIGHT {
+            if self.column.get(local) != Block::Air {
+                return true;
+            }
+            local.y += 1;
+        }
+        false
     }
 
     /// Число от 0 до `n` по хэшу клетки.

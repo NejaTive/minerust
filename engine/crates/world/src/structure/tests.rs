@@ -9,6 +9,7 @@ use crate::trees::tree_at;
 
 mod api;
 mod dump;
+mod mineshaft;
 mod snapshots;
 
 const PROBE_WIDTH: i32 = 23;
@@ -383,7 +384,7 @@ fn unbuilt_kinds_generate_nothing() {
     let terrain = Terrain::new(5);
     for kind in StructureKind::ALL
         .into_iter()
-        .filter(|&kind| kind != StructureKind::Temple)
+        .filter(|&kind| !matches!(kind, StructureKind::Temple | StructureKind::Mineshaft))
     {
         assert!(!terrain.structure_built(kind));
         assert!(terrain.starts_near(kind, ColumnPos::ZERO, 50).is_empty());
@@ -726,12 +727,13 @@ const HUT_SEED: i32 = 1337;
 fn is_built_temple(variant: Variant) -> bool {
     matches!(
         variant,
-        Variant::Temple(
-            TempleKind::DesertPyramid
-                | TempleKind::JunglePyramid
-                | TempleKind::SwampHut
-                | TempleKind::Igloo
-        )
+        Variant::Mineshaft(_)
+            | Variant::Temple(
+                TempleKind::DesertPyramid
+                    | TempleKind::JunglePyramid
+                    | TempleKind::SwampHut
+                    | TempleKind::Igloo
+            )
     )
 }
 

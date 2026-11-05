@@ -51,6 +51,7 @@ impl Plot {
 const TEMPLE: i32 = 48;
 const DESERT_TEMPLE: i32 = 32;
 const VILLAGE: i32 = 192;
+const MINESHAFT: i32 = 256;
 
 const SPECS: [(StructureKind, Variant, Biome, Ground, i32); 13] = [
     (
@@ -86,14 +87,14 @@ const SPECS: [(StructureKind, Variant, Biome, Ground, i32); 13] = [
         Variant::Mineshaft(MineshaftKind::Normal),
         Biome::Plains,
         Ground::Land,
-        VILLAGE,
+        MINESHAFT,
     ),
     (
         StructureKind::Mineshaft,
         Variant::Mineshaft(MineshaftKind::Mesa),
         Biome::Mesa,
         Ground::Land,
-        VILLAGE,
+        MINESHAFT,
     ),
     (
         StructureKind::Village,
