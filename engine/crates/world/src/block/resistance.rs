@@ -1,6 +1,6 @@
 use super::{BASE_BLOCKS, Block, BlockDef};
 
-pub(super) const fn with_blast_resistance(mut blocks: [BlockDef; 182]) -> [BlockDef; 182] {
+pub(super) const fn with_blast_resistance(mut blocks: [BlockDef; 186]) -> [BlockDef; 186] {
     let mut i = 0;
     while i < blocks.len() {
         blocks[i].blast_resistance = blast_resistance(Block::ALL[i]);
@@ -9,7 +9,7 @@ pub(super) const fn with_blast_resistance(mut blocks: [BlockDef; 182]) -> [Block
     blocks
 }
 
-pub(super) const BLOCKS_WITH_RESISTANCE: [BlockDef; 182] = with_blast_resistance(BASE_BLOCKS);
+pub(super) const BLOCKS_WITH_RESISTANCE: [BlockDef; 186] = with_blast_resistance(BASE_BLOCKS);
 
 /// Значение `Block.getExplosionResistance` 1.12 (внутреннее сопротивление, делённое на 5).
 const fn blast_resistance(block: Block) -> f32 {
@@ -20,14 +20,16 @@ const fn blast_resistance(block: Block) -> f32 {
         | SunflowerLower | SunflowerUpper | LilacLower | LilacUpper | RoseBushLower
         | RoseBushUpper | PeonyLower | PeonyUpper | Allium | BlueOrchid | Houstonia
         | OxeyeDaisy | RedTulip | OrangeTulip | WhiteTulip | PinkTulip | BrownMushroom
-        | RedMushroom | Waterlily | FlowerPot | RedstoneTorch | Tnt => 0.0,
+        | RedMushroom | Waterlily | FlowerPot | RedstoneTorch | Tnt | TripwireHook | Tripwire => {
+            0.0
+        }
         Snow | Carpet => 0.1,
         Leaves | BirchLeaves | SpruceLeaves | JungleLeaves | AcaciaLeaves | DarkOakLeaves
         | Vine | SnowBlock | BrownMushroomBlock | RedMushroomBlock | MushroomStem | Bed => 0.2,
         Glowstone | Glass | GlassPane => 0.3,
         Cactus | Ladder => 0.4,
         Dirt | Sand | RedSand | Podzol | CoarseDirt | Ice | IcePacked | BrewingStand
-        | StonePressurePlate => 0.5,
+        | StonePressurePlate | Lever => 0.5,
         Grass | SnowyGrass | Gravel | Clay | Mycelium => 0.6,
         Rail => 0.7,
         MonsterEgg => 0.75,
@@ -48,7 +50,7 @@ const fn blast_resistance(block: Block) -> f32 {
         | DarkOakFenceGate | OakDoor | OakDoorUpper | SpruceDoor | SpruceDoorUpper | BirchDoor
         | BirchDoorUpper | JungleDoor | JungleDoorUpper | AcaciaDoor | AcaciaDoorUpper
         | DarkOakDoor | DarkOakDoorUpper | OakTrapdoor => 3.0,
-        Furnace | LitFurnace => 3.5,
+        Furnace | LitFurnace | Dispenser => 3.5,
         Web => 4.0,
         Terracotta | WhiteTerracotta | OrangeTerracotta | YellowTerracotta | BrownTerracotta
         | RedTerracotta | SilverTerracotta | BlueTerracotta => 4.2,

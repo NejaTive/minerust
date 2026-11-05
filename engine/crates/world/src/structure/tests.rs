@@ -726,7 +726,12 @@ const HUT_SEED: i32 = 1337;
 fn is_built_temple(variant: Variant) -> bool {
     matches!(
         variant,
-        Variant::Temple(TempleKind::DesertPyramid | TempleKind::SwampHut | TempleKind::Igloo)
+        Variant::Temple(
+            TempleKind::DesertPyramid
+                | TempleKind::JunglePyramid
+                | TempleKind::SwampHut
+                | TempleKind::Igloo
+        )
     )
 }
 
@@ -903,12 +908,20 @@ fn locate_finds_only_ready_temple_variants() {
     let hut = nearest(huts(&terrain));
     let igloo = nearest(igloos(&terrain));
     let pyramid = nearest(desert_temples(&terrain));
-    let all = [huts(&terrain), igloos(&terrain), desert_temples(&terrain)].concat();
+    let jungle_temple = nearest(jungle_temples(&terrain));
+    let all = [
+        huts(&terrain),
+        igloos(&terrain),
+        desert_temples(&terrain),
+        jungle_temples(&terrain),
+    ]
+    .concat();
     let both = nearest(all);
     for (name, expected) in [
         ("Swamp_Hut", hut),
         ("Igloo", igloo),
         ("Desert_Pyramid", pyramid),
+        ("Jungle_Pyramid", jungle_temple),
         ("Temple", both),
     ] {
         let target = LocateName::find(name).unwrap();
@@ -916,9 +929,6 @@ fn locate_finds_only_ready_temple_variants() {
         let (x, z, _) = terrain.nearest_structure(target, 0, 0, 20_000).unwrap();
         assert_eq!((x, z), expected, "{name}");
     }
-    let jungle = LocateName::find("Jungle_Pyramid").unwrap();
-    assert!(!jungle.ready());
-    assert_eq!(terrain.nearest_structure(jungle, 0, 0, 20_000), None);
 }
 
 #[test]
@@ -1001,6 +1011,57 @@ fn desert_temple_vault_holds_nine_tnt_under_a_plate_and_four_chests() {
     assert_eq!(count_in(&columns, Block::StonePressurePlate), 1);
     assert_eq!(count_in(&columns, Block::BlueTerracotta), 1);
     assert_eq!(count_in(&columns, Block::Chest), 4);
+}
+
+fn jungle_temples(terrain: &Terrain) -> Vec<StartRef> {
+    temples(
+        terrain,
+        Variant::Temple(TempleKind::JunglePyramid),
+        ColumnPos::ZERO,
+    )
+}
+
+#[test]
+fn jungle_temples_only_stand_in_jungles_and_are_deterministic() {
+    let terrain = Terrain::new(HUT_SEED);
+    let found = jungle_temples(&terrain);
+    assert!(!found.is_empty());
+    for start in &found {
+        let start = start.get().unwrap();
+        assert!(matches!(
+            terrain.biome_at(start.anchor.0, start.anchor.1),
+            Biome::Jungle | Biome::JungleHills
+        ));
+        assert_eq!(start.pieces.len(), 1);
+        assert_eq!(start.pieces[0].kind, PieceKind::JungleTemple);
+        assert_eq!(start.pieces[0].bounds.size().y, 10);
+    }
+    let origins = |starts: &[StartRef]| -> Vec<_> {
+        starts.iter().map(|s| s.get().unwrap().origin).collect()
+    };
+    assert_eq!(
+        origins(&found),
+        origins(&jungle_temples(&Terrain::new(HUT_SEED)))
+    );
+}
+
+#[test]
+fn jungle_temple_holds_two_chests_a_trap_and_a_lever_puzzle() {
+    let terrain = Terrain::new(HUT_SEED);
+    let origin = jungle_temples(&terrain)[0].get().unwrap().origin;
+    let start = build(&terrain, StructureKind::Temple, origin).unwrap();
+    let columns: Vec<Column> = start_columns(&start)
+        .into_iter()
+        .map(|key| terrain.generate(key))
+        .collect();
+    assert_eq!(count_in(&columns, Block::Chest), 2);
+    assert_eq!(count_in(&columns, Block::Lever), 3);
+    assert_eq!(count_in(&columns, Block::TripwireHook), 2);
+    assert_eq!(count_in(&columns, Block::Tripwire), 2);
+    assert_eq!(count_in(&columns, Block::Dispenser), 2);
+    assert_eq!(count_in(&columns, Block::ChiseledStoneBricks), 1);
+    assert!(count_in(&columns, Block::MossyCobblestone) > 100);
+    assert!(count_in(&columns, Block::Cobblestone) > 100);
 }
 
 fn igloo_start(terrain: &Terrain, basement: bool) -> StructureStart {

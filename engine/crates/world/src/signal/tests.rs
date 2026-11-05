@@ -108,3 +108,54 @@ fn unpowered_tnt_stays() {
     assert!(signal.step(&mut world).ignited.is_empty());
     assert_eq!(world.block(tnt), Block::Tnt);
 }
+
+#[test]
+fn powered_lever_strongly_powers_its_support_and_tnt_around_it() {
+    use crate::block::{FACING_POS_X, LEVER_POWERED};
+    let mut world = flat_world();
+    let support = at(8, FLOOR + 1, 8);
+    world.set_block(support, Block::Stone);
+    let lever = at(9, FLOOR + 1, 8);
+    world.set_block_with_data(lever, Block::Lever, FACING_POS_X | LEVER_POWERED);
+    world.set_block(at(8, FLOOR + 2, 8), Block::Tnt);
+    world.set_block(at(9, FLOOR + 2, 8), Block::Tnt);
+    assert_eq!(strong_power_into(&world, support), MAX_POWER);
+    assert_eq!(power(&world, at(8, FLOOR + 2, 8)), MAX_POWER);
+    assert_eq!(power(&world, at(9, FLOOR + 2, 8)), MAX_POWER);
+}
+
+#[test]
+fn unpowered_lever_gives_nothing() {
+    use crate::block::FACING_POS_X;
+    let mut world = flat_world();
+    world.set_block(at(8, FLOOR + 1, 8), Block::Stone);
+    world.set_block_with_data(at(9, FLOOR + 1, 8), Block::Lever, FACING_POS_X);
+    world.set_block(at(8, FLOOR + 2, 8), Block::Tnt);
+    assert_eq!(power(&world, at(8, FLOOR + 2, 8)), 0);
+}
+
+#[test]
+fn toggling_a_lever_by_hand_flips_its_power() {
+    use crate::block::{FACING_POS_X, LEVER_POWERED};
+    let mut world = flat_world();
+    world.set_block(at(8, FLOOR + 1, 8), Block::Stone);
+    let lever = at(9, FLOOR + 1, 8);
+    world.set_block_with_data(lever, Block::Lever, FACING_POS_X);
+    assert_eq!(world.toggle_by_hand(lever, IVec3::X), vec![lever]);
+    assert_ne!(world.block_data(lever) & LEVER_POWERED, 0);
+    world.toggle_by_hand(lever, IVec3::X);
+    assert_eq!(world.block_data(lever) & LEVER_POWERED, 0);
+}
+
+#[test]
+fn powered_lever_next_to_tnt_ignites_it() {
+    use crate::block::{FACING_POS_X, LEVER_POWERED};
+    let mut world = flat_world();
+    world.set_block(at(8, FLOOR + 1, 8), Block::Stone);
+    world.set_block(at(9, FLOOR + 2, 8), Block::Tnt);
+    let lever = at(9, FLOOR + 1, 8);
+    world.set_block_with_data(lever, Block::Lever, FACING_POS_X | LEVER_POWERED);
+    let mut signal = Signal::new();
+    signal.block_changed(&world, lever);
+    assert_eq!(signal.step(&mut world).ignited, vec![at(9, FLOOR + 2, 8)]);
+}

@@ -1,6 +1,7 @@
 use glam::IVec3;
 
 use super::*;
+use crate::models;
 
 const FENCE_REACH_UNITS: u8 = 24;
 const GATE_REACH_UNITS: u8 = 24;
@@ -64,9 +65,20 @@ impl Block {
     }
 
     /// Правая кнопка открывает и закрывает; железная дверь ждёт механизмов.
+    /// Коробки блока, которые рисуются; остальные — только для луча и обводки.
+    pub fn box_rendered(self, index: usize) -> bool {
+        match self {
+            Block::Lever | Block::TripwireHook => index == 0,
+            Block::Tripwire => false,
+            _ => true,
+        }
+    }
+
     pub fn opens_by_hand(self) -> bool {
-        matches!(self, Block::Chest | Block::FlowerPot | Block::Bed)
-            || self.is_trapdoor()
+        matches!(
+            self,
+            Block::Chest | Block::FlowerPot | Block::Bed | Block::Lever
+        ) || self.is_trapdoor()
             || self.is_gate()
             || (self.is_door() && !matches!(self, Block::IronDoor | Block::IronDoorUpper))
     }
@@ -290,6 +302,30 @@ impl Block {
         BoxList::of(&[panel])
     }
 
+    /// Основание и ручка, наклонённая ступеньками; у стены опора — со стороны -x до поворота.
+    pub(super) fn lever_boxes(data: u8) -> BoxList {
+        BoxList::of(&models::lever_boxes(data))
+    }
+
+    pub(super) fn hook_boxes(data: u8) -> BoxList {
+        BoxList::of(&models::hook_boxes(data))
+    }
+
+    /// Нить идёт вдоль соседней нити или крюка, иначе вдоль x.
+    pub fn wire_along_z(around: &impl Fn(IVec3) -> (Block, u8)) -> bool {
+        let linked = |dir: IVec3| matches!(around(dir).0, Block::Tripwire | Block::TripwireHook);
+        (linked(IVec3::Z) || linked(IVec3::NEG_Z)) && !(linked(IVec3::X) || linked(IVec3::NEG_X))
+    }
+
+    pub(super) fn wire_boxes(around: &impl Fn(IVec3) -> (Block, u8)) -> BoxList {
+        let along_z = Self::wire_along_z(around);
+        BoxList::of(&[if along_z {
+            VoxelBox::new([7, 1, 0], [9, 2, 16])
+        } else {
+            VoxelBox::new([0, 1, 7], [16, 2, 9])
+        }])
+    }
+
     pub(super) fn brewing_stand_boxes() -> BoxList {
         let b = VoxelBox::new;
         BoxList::of(&[
@@ -360,6 +396,16 @@ impl Block {
             } else {
                 Tile::FlowerPot
             }),
+            Block::Lever => Some(if box_index == 0 {
+                Tile::Cobblestone
+            } else {
+                Tile::Lever
+            }),
+            Block::TripwireHook => Some(if box_index == 0 {
+                Tile::PlanksOak
+            } else {
+                Tile::TripwireHook
+            }),
             Block::Bed => Some(match (box_index, facing) {
                 (0, Facing::Top) => Tile::bed(bed::color_of(data), bed::is_head(data), true),
                 (0, Facing::Side) => Tile::bed(bed::color_of(data), bed::is_head(data), false),
@@ -392,7 +438,7 @@ impl Block {
             BoxKind::Fence => self.fence_boxes(&around, true),
             BoxKind::Gate => self.gate_boxes(data, true),
             BoxKind::Bed => BoxList::of(&[VoxelBox::new([0, 0, 0], [16, BED_UNITS, 16])]),
-            BoxKind::Plate => BoxList::EMPTY,
+            BoxKind::Plate | BoxKind::Lever | BoxKind::Hook | BoxKind::Wire => BoxList::EMPTY,
             _ => self.boxes(data, around),
         }
     }

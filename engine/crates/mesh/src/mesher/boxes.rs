@@ -8,7 +8,10 @@ use super::{
     CornerStrides, Datas, Lights, MeshData, Neighborhood, PADDED, half_average, vertex_ao,
 };
 use crate::mesh::Quad;
-use crate::templates::{FACES, Face, POT_CROSS, POT_CROSS_PARTS};
+use crate::models;
+use crate::templates::{
+    FACES, Face, HOOK_ARM_PARTS, HOOK_PARTS, LEVER_PARTS, POT_CROSS, POT_CROSS_PARTS,
+};
 
 const SPECIAL_NEIGHBOR: [bool; 256] = {
     let mut table = [false; 256];
@@ -157,7 +160,7 @@ pub(super) fn push_boxes(
     let cell = [local.x as u8, local.y as u8, local.z as u8];
     let list = block.boxes(data, |offset| cell_at(blocks, datas, local + offset));
     for (box_index, voxel) in list.iter().enumerate() {
-        if voxel.is_flat() {
+        if voxel.is_flat() || !block.box_rendered(box_index) {
             continue;
         }
         for (face_index, face) in FACES.iter().enumerate() {
@@ -178,7 +181,7 @@ pub(super) fn push_boxes(
                 } else {
                     other.max[axis] >= plane && other.min[axis] < plane
                 };
-                if other_index != box_index && spans {
+                if other_index != box_index && spans && block.box_rendered(other_index) {
                     mask.subtract(&rect(other));
                 }
             }
@@ -237,6 +240,43 @@ pub(super) fn push_boxes(
         }
     }
     push_contents(target, block, data, cell, light_of(lights, index));
+    let around = |offset: IVec3| cell_at(blocks, datas, local + offset);
+    push_models(target, block, data, cell, light_of(lights, index), &around);
+}
+
+/// Повёрнутые элементы рычага, крюка и нити: квады шаблонов из `models.rs`.
+fn push_models(
+    target: &mut MeshData,
+    block: Block,
+    data: u8,
+    cell: [u8; 3],
+    light: [u8; 2],
+    around: &impl Fn(IVec3) -> (Block, u8),
+) {
+    let (tile, first, parts) = match block {
+        Block::Lever => (Tile::Lever, models::lever_first(data), LEVER_PARTS),
+        Block::TripwireHook => (Tile::TripwireHook, models::hook_first(data), HOOK_PARTS),
+        Block::Tripwire => (
+            Tile::Tripwire,
+            models::wire_first(Block::wire_along_z(around)),
+            2,
+        ),
+        _ => return,
+    };
+    for part in 0..parts {
+        let tile = if block == Block::TripwireHook && part < HOOK_ARM_PARTS {
+            Tile::PlanksOak
+        } else {
+            tile
+        };
+        target.quads.push(Quad::extended(
+            cell,
+            first + part,
+            tile.layer() as u16,
+            light,
+            [3; 4],
+        ));
+    }
 }
 
 fn light_of(lights: &Lights, index: usize) -> [u8; 2] {

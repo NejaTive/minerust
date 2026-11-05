@@ -1,8 +1,8 @@
 use glam::IVec3;
 
 use crate::block::{
-    Block, DOOR_OPEN, DOOR_PLACED_RIGHT, GATE_FACING_MASK, GATE_OPEN, Shape, TRAPDOOR_OPEN,
-    facing_code,
+    Block, DOOR_OPEN, DOOR_PLACED_RIGHT, GATE_FACING_MASK, GATE_OPEN, LEVER_POWERED, Shape,
+    TRAPDOOR_OPEN, facing_code,
 };
 use crate::column::WORLD_HEIGHT;
 use crate::world::World;
@@ -74,6 +74,15 @@ impl World {
             return Vec::new();
         }
         let data = self.block_data(pos);
+        if block == Block::Lever {
+            return if self.set_block_with_data(pos, block, data ^ LEVER_POWERED) {
+                let mut changed = vec![pos];
+                changed.extend(self.solve_lever_puzzle(pos));
+                changed
+            } else {
+                Vec::new()
+            };
+        }
         if block.is_trapdoor() {
             return if self.set_block_with_data(pos, block, data ^ TRAPDOOR_OPEN) {
                 vec![pos]

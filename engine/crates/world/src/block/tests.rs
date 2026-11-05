@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard(), 0)
 }
 
-const ALL: [Block; 182] = Block::ALL;
+const ALL: [Block; 186] = Block::ALL;
 
 fn is_connected_family(block: Block) -> bool {
     block as usize >= Block::OakFence as usize
@@ -51,7 +51,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(182), Err(182));
+    assert_eq!(Block::try_from(186), Err(186));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -338,6 +338,9 @@ fn only_log_torch_and_water_use_data() {
             Block::Wool | Block::Carpet => DataKind::Color,
             Block::MonsterEgg => DataKind::Egg,
             Block::StonePressurePlate => DataKind::Plate,
+            Block::Lever => DataKind::Lever,
+            Block::TripwireHook => DataKind::Hook,
+            Block::Dispenser => DataKind::Dispenser,
             block if block.is_slab() => DataKind::Slab,
             block if block.is_stairs() => DataKind::Stairs,
             _ => DataKind::None,
@@ -568,6 +571,9 @@ fn states_cover_every_data_kind() {
             DataKind::Trapdoor => 16,
             DataKind::Egg => 6,
             DataKind::Plate => 2,
+            DataKind::Lever => 24,
+            DataKind::Hook => 8,
+            DataKind::Dispenser => 6,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();
@@ -1532,4 +1538,105 @@ fn unbreakable_blocks_outlast_any_blast() {
     for block in ALL.into_iter().filter(|block| block.is_unbreakable()) {
         assert!(block.blast_resistance() > 1_000.0, "{block:?}");
     }
+}
+
+#[test]
+fn lever_attaches_to_floor_ceiling_and_walls() {
+    let lever = Block::Lever;
+    assert!(!lever.is_solid() && lever.needs_support());
+    assert_eq!(lever.support_dir(LEVER_FLOOR), Some(IVec3::NEG_Y));
+    assert_eq!(lever.support_dir(LEVER_CEILING), Some(IVec3::Y));
+    assert_eq!(lever.support_dir(FACING_POS_X), Some(IVec3::NEG_X));
+    let place = |normal, look| {
+        lever.placement_state(&Placement {
+            normal,
+            hit_x: 0.5,
+            hit_y: 0.5,
+            hit_z: 0.5,
+            look,
+            variant: 0,
+        })
+    };
+    assert_eq!(
+        place(IVec3::Y, IVec3::Z).map(|d| d & LEVER_MOUNT_MASK),
+        Some(LEVER_FLOOR)
+    );
+    assert_eq!(
+        place(IVec3::NEG_Y, IVec3::Z).map(|d| d & LEVER_MOUNT_MASK),
+        Some(LEVER_CEILING)
+    );
+    assert_eq!(place(IVec3::NEG_X, IVec3::Z), Some(FACING_NEG_X));
+}
+
+#[test]
+fn lever_boxes_lean_with_the_state_and_keep_to_the_support_side() {
+    let around = |_| (Block::Air, 0);
+    let off = Block::Lever.boxes(FACING_POS_X, around);
+    let on = Block::Lever.boxes(FACING_POS_X | LEVER_POWERED, around);
+    assert_eq!(off.bounds(), on.bounds());
+    assert!(Block::Lever.collision_boxes(0, around).is_empty());
+    for data in Block::Lever.states() {
+        let (lo, hi) = Block::Lever.boxes(data, around).bounds();
+        assert!(lo.min_element() >= 0.0 && hi.max_element() <= 1.0, "{data}");
+    }
+    let (lo, _) = off.bounds();
+    assert_eq!(lo.x, 0.0);
+}
+
+#[test]
+fn tripwire_hook_hangs_on_a_wall_only() {
+    let hook = Block::TripwireHook;
+    assert_eq!(hook.placement_data(IVec3::Y), None);
+    assert_eq!(hook.placement_data(IVec3::X), Some(FACING_POS_X));
+    assert_eq!(hook.support_dir(FACING_POS_X), Some(IVec3::NEG_X));
+    assert_eq!(
+        hook.support_dir(FACING_NEG_Z | HOOK_POWERED),
+        Some(IVec3::Z)
+    );
+}
+
+#[test]
+fn tripwire_runs_along_linked_neighbours() {
+    let wire = |linked: IVec3| {
+        Block::Tripwire.boxes(0, move |offset| {
+            if offset == linked {
+                (Block::Tripwire, 0)
+            } else {
+                (Block::Air, 0)
+            }
+        })
+    };
+    assert!(wire(IVec3::Z).bounds().1.z > wire(IVec3::Z).bounds().1.x);
+    assert!(wire(IVec3::X).bounds().1.x > wire(IVec3::X).bounds().1.z);
+    assert!(
+        Block::Tripwire
+            .collision_boxes(0, |_| (Block::Air, 0))
+            .is_empty()
+    );
+}
+
+#[test]
+fn dispenser_shows_its_front_on_the_chosen_side() {
+    let d = Block::Dispenser;
+    assert!(d.is_solid() && d.is_opaque());
+    assert_eq!(
+        d.face_tile(Facing::Side, IVec3::X, FACING_POS_X),
+        Some(Tile::DispenserFrontHorizontal)
+    );
+    assert_eq!(
+        d.face_tile(Facing::Side, IVec3::NEG_X, FACING_POS_X),
+        Some(Tile::FurnaceSide)
+    );
+    assert_eq!(
+        d.face_tile(Facing::Top, IVec3::Y, FACING_POS_X),
+        Some(Tile::FurnaceTop)
+    );
+    assert_eq!(
+        d.face_tile(Facing::Top, IVec3::Y, DISPENSER_UP),
+        Some(Tile::DispenserFrontVertical)
+    );
+    assert_eq!(
+        d.face_tile(Facing::Bottom, IVec3::NEG_Y, DISPENSER_DOWN),
+        Some(Tile::DispenserFrontVertical)
+    );
 }

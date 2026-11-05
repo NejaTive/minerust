@@ -1,6 +1,6 @@
 use glam::IVec3;
 
-use crate::block::{Block, PLATE_POWERED, Shape};
+use crate::block::{Block, HOOK_POWERED, LEVER_POWERED, PLATE_POWERED, Shape};
 use crate::updates::Updates;
 use crate::world::World;
 
@@ -30,8 +30,19 @@ pub fn output(block: Block, data: u8) -> Option<Output> {
             strong: MAX_POWER,
             strong_toward: IVec3::NEG_Y,
         }),
+        Block::Lever if data & LEVER_POWERED != 0 => held_output(block, data),
+        Block::TripwireHook if data & HOOK_POWERED != 0 => held_output(block, data),
         _ => None,
     }
+}
+
+/// Рычаг и крюк питают сильно только опору, к которой прикреплены.
+fn held_output(block: Block, data: u8) -> Option<Output> {
+    Some(Output {
+        weak: MAX_POWER,
+        strong: MAX_POWER,
+        strong_toward: block.support_dir(data)?,
+    })
 }
 
 fn conducts(block: Block) -> bool {

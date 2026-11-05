@@ -13,6 +13,7 @@ use crate::terrain::Terrain;
 mod cell;
 mod desert_temple;
 mod igloo;
+mod jungle_temple;
 mod piece;
 mod placement;
 mod showcase;
@@ -117,7 +118,10 @@ impl TempleKind {
     pub fn ready(self) -> bool {
         matches!(
             self,
-            TempleKind::DesertPyramid | TempleKind::SwampHut | TempleKind::Igloo
+            TempleKind::DesertPyramid
+                | TempleKind::JunglePyramid
+                | TempleKind::SwampHut
+                | TempleKind::Igloo
         )
     }
 
@@ -251,6 +255,7 @@ fn layout(
 ) -> Vec<Piece> {
     match variant {
         Variant::Temple(TempleKind::DesertPyramid) => desert_temple::layout(terrain, anchor, rng),
+        Variant::Temple(TempleKind::JunglePyramid) => jungle_temple::layout(terrain, anchor, rng),
         Variant::Temple(TempleKind::SwampHut) => swamp_hut::layout(terrain, anchor, rng),
         Variant::Temple(TempleKind::Igloo) => igloo::layout(terrain, anchor, rng),
         #[cfg(test)]

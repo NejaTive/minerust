@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use glam::IVec3;
 
 use super::super::*;
-use crate::block::{Block, DataKind, facing_dir_of};
+use crate::block::{Block, DataKind, VINE_SIDES, facing_dir_of};
 
 const SENTINEL: Block = Block::Bedrock;
 const SYMBOLS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -29,6 +29,9 @@ fn has_front(block: Block) -> bool {
             | DataKind::Trapdoor
             | DataKind::Bed
             | DataKind::Chest
+            | DataKind::Lever
+            | DataKind::Hook
+            | DataKind::Dispenser
     )
 }
 
@@ -125,14 +128,21 @@ fn spec_of(probe: &PieceWriter, block: Block, data: u8) -> String {
     assert!(!name.is_empty(), "block {block:?} has no name");
     let mut spec = name.to_string();
     let mut rest = data;
-    if has_front(block) {
-        let world = facing_dir_of(data & FRONT_MASK);
+    let vine_wall = (block == Block::Vine)
+        .then(|| VINE_SIDES.iter().find(|&&(bit, _)| bit == data))
+        .flatten();
+    if has_front(block) || vine_wall.is_some() {
+        let world = vine_wall.map_or_else(|| facing_dir_of(data & FRONT_MASK), |&(_, dir)| dir);
         let local = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z]
             .into_iter()
             .find(|&dir| probe.world_dir(dir) == world)
             .unwrap();
         write!(spec, " front={}", front_name(local)).unwrap();
-        rest &= !FRONT_MASK;
+        rest = if vine_wall.is_some() {
+            0
+        } else {
+            rest & !FRONT_MASK
+        };
     }
     if rest != 0 {
         write!(spec, " data={rest}").unwrap();

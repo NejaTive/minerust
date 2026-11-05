@@ -108,7 +108,14 @@ pub const COCOA_PARTS: u8 = 11;
 pub const RAIL: u8 = COCOA + COCOA_STAGES * 4 * COCOA_PARTS;
 pub const POT_CROSS: u8 = RAIL + RAIL_SHAPES;
 pub const POT_CROSS_PARTS: u8 = 4;
-pub const TEMPLATE_COUNT: usize = POT_CROSS as usize + POT_CROSS_PARTS as usize;
+pub const LEVER: u16 = POT_CROSS as u16 + POT_CROSS_PARTS as u16;
+pub const LEVER_PARTS: u16 = 6;
+pub const HOOK: u16 = LEVER + crate::models::LEVER_STATES * LEVER_PARTS;
+pub const HOOK_PARTS: u16 = 8;
+pub const HOOK_ARM_PARTS: u16 = 6;
+pub const WIRE: u16 = HOOK + crate::models::HOOK_STATES * HOOK_PARTS;
+pub const WIRE_PARTS: u16 = 4;
+pub const TEMPLATE_COUNT: usize = (WIRE + WIRE_PARTS) as usize;
 const POT_PLANT_SPAN: (u8, u8) = (2, 14);
 const POT_PLANT_BOTTOM: u8 = 4;
 
@@ -485,6 +492,9 @@ fn build() -> [Template; TEMPLATE_COUNT] {
             });
         }
     }
+    out.extend(crate::models::lever_templates());
+    out.extend(crate::models::hook_templates());
+    out.extend(crate::models::wire_templates());
     out.try_into().expect("template count")
 }
 
@@ -495,7 +505,9 @@ pub fn pack_corner(c: Corner) -> u32 {
 }
 
 fn is_fluid_side(index: usize) -> bool {
-    let index = index as u8;
+    let Ok(index) = u8::try_from(index) else {
+        return false;
+    };
     (WATER_SIDE..WATER_BOTTOM).contains(&index) || (WATER_SIDE_SLOPED..SNOW_TOP).contains(&index)
 }
 
