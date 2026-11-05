@@ -19,6 +19,11 @@ const ENTITY_MOOSHROOM: &str = "assets/minecraft/textures/entity/cow/mooshroom.p
 const ENTITY_POLAR_BEAR: &str = "assets/minecraft/textures/entity/bear/polarbear.png";
 const ENTITY_WOLF: &str = "assets/minecraft/textures/entity/wolf/wolf.png";
 const BLOCK_MUSHROOM_RED: &str = "assets/minecraft/textures/blocks/mushroom_red.png";
+const BLOCK_TNT: [&str; 3] = [
+    "assets/minecraft/textures/blocks/tnt_top.png",
+    "assets/minecraft/textures/blocks/tnt_bottom.png",
+    "assets/minecraft/textures/blocks/tnt_side.png",
+];
 const ENTITY_HORSE: [&str; 7] = [
     "assets/minecraft/textures/entity/horse/horse_white.png",
     "assets/minecraft/textures/entity/horse/horse_creamy.png",
@@ -125,6 +130,9 @@ pub struct EntityImages {
     pub squid: DecodedImage,
     /// Квадратная блочная текстура гриба для скрещённых плоскостей на спине грибной коровы.
     pub mushroom_red: DecodedImage,
+    /// Лист 2:1 куба подожжённого динамита: верх, низ и четыре стороны в раскладке коробки 16×16×16.
+    pub tnt: DecodedImage,
+    pub tnt_flash: DecodedImage,
     pub spawn_egg: DecodedImage,
     pub spawn_egg_overlay: DecodedImage,
 }
@@ -457,6 +465,9 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
     let mushroom_red = image(BLOCK_MUSHROOM_RED, |i| {
         i.width >= MIN_TILE_SIZE && i.width == i.height
     });
+    let tnt_tiles =
+        BLOCK_TNT.map(|path| image(path, |i| i.width >= MIN_TILE_SIZE && i.width == i.height));
+    let (tnt, tnt_flash) = tnt_sheets(&tnt_tiles);
     let spawn_egg = image(ITEM_SPAWN_EGG, |i| {
         i.width >= MIN_TILE_SIZE && i.width == i.height
     });
@@ -481,9 +492,46 @@ fn entity_images(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> EntityImages 
         parrot,
         squid,
         mushroom_red,
+        tnt,
+        tnt_flash,
         spawn_egg,
         spawn_egg_overlay,
     }
+}
+
+fn tnt_sheets([top, bottom, side]: &[DecodedImage; 3]) -> (DecodedImage, DecodedImage) {
+    let size = side.width;
+    let width = size * 4;
+    let mut rgba = vec![0u8; (width * size * 2 * 4) as usize];
+    let faces: [(&DecodedImage, u32, u32); 6] = [
+        (top, 1, 0),
+        (bottom, 2, 0),
+        (side, 0, 1),
+        (side, 1, 1),
+        (side, 2, 1),
+        (side, 3, 1),
+    ];
+    for (face, col, row) in faces {
+        for y in 0..size {
+            for x in 0..size {
+                let from = ((y * face.height / size) * face.width + x * face.width / size) * 4;
+                let to = (((row * size + y) * width) + col * size + x) * 4;
+                rgba[to as usize..to as usize + 4]
+                    .copy_from_slice(&face.rgba[from as usize..from as usize + 4]);
+            }
+        }
+    }
+    let flash = DecodedImage {
+        width,
+        height: size * 2,
+        rgba: vec![255; rgba.len()],
+    };
+    let sheet = DecodedImage {
+        width,
+        height: size * 2,
+        rgba,
+    };
+    (sheet, flash)
 }
 
 pub fn builtin_gui() -> GuiImages {
@@ -821,6 +869,27 @@ fn builtin_gui_file(name: &str) -> Option<&'static [u8]> {
 }
 
 const BUILTIN_ENTITIES: &[(&str, &[u8])] = &[
+    (
+        BLOCK_TNT[0],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/tnt_top.png"
+        )),
+    ),
+    (
+        BLOCK_TNT[1],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/tnt_bottom.png"
+        )),
+    ),
+    (
+        BLOCK_TNT[2],
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/textures/tnt_side.png"
+        )),
+    ),
     (
         ENTITY_HORSE[0],
         include_bytes!(concat!(
