@@ -8,6 +8,7 @@ const GATE_REACH_UNITS: u8 = 24;
 pub const CAULDRON_LEVELS: u8 = 3;
 const CAULDRON_WATER_BASE: u8 = 6;
 const CAULDRON_WATER_STEP: u8 = 3;
+const POT_DIRT: usize = 4;
 
 pub const POT_PLANTS: [Block; 15] = [
     Block::Poppy,
@@ -299,6 +300,17 @@ impl Block {
         ])
     }
 
+    pub(super) fn pot_boxes() -> BoxList {
+        let b = VoxelBox::new;
+        BoxList::of(&[
+            b([5, 0, 5], [6, 6, 11]),
+            b([10, 0, 5], [11, 6, 11]),
+            b([6, 0, 5], [10, 6, 6]),
+            b([6, 0, 10], [10, 6, 11]),
+            b([6, 0, 6], [10, 4, 10]),
+        ])
+    }
+
     pub(super) fn cauldron_boxes() -> BoxList {
         let b = VoxelBox::new;
         BoxList::of(&[
@@ -343,7 +355,11 @@ impl Block {
                 }
                 _ => Tile::CauldronSide,
             }),
-            Block::FlowerPot if facing == Facing::Top => Some(Tile::Dirt),
+            Block::FlowerPot => Some(if box_index == POT_DIRT && facing == Facing::Top {
+                Tile::Dirt
+            } else {
+                Tile::FlowerPot
+            }),
             Block::Bed => Some(match (box_index, facing) {
                 (0, Facing::Top) => Tile::bed(bed::color_of(data), bed::is_head(data), true),
                 (0, Facing::Side) => Tile::bed(bed::color_of(data), bed::is_head(data), false),

@@ -1994,7 +1994,7 @@ impl Block {
             BoxKind::Rail => Self::rail_boxes(data),
             BoxKind::Chest => Self::chest_boxes(data),
             BoxKind::Cauldron => Self::cauldron_boxes(),
-            BoxKind::Pot => unit([5, 0, 5], [11, 6, 11]),
+            BoxKind::Pot => Self::pot_boxes(),
             BoxKind::Bed => Self::bed_boxes(data),
             BoxKind::Trapdoor => Self::trapdoor_boxes(data),
             BoxKind::BrewingStand => Self::brewing_stand_boxes(),
