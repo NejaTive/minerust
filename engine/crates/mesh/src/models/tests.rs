@@ -1,5 +1,5 @@
 use super::*;
-use crate::templates::{TABLE_BYTES, TEMPLATE_COUNT, WIRE_PARTS, templates};
+use crate::templates::{CROP, CROP_PARTS, TABLE_BYTES, TEMPLATE_COUNT, WIRE_PARTS, templates};
 use world::block::{Block, FACING_POS_X, HOOK_POWERED};
 
 #[test]
@@ -14,7 +14,8 @@ fn every_state_has_its_own_run_of_templates() {
         usize::from(HOOK_STATES * HOOK_PARTS)
     );
     assert_eq!(wire_templates().len(), usize::from(WIRE_PARTS));
-    assert_eq!(WIRE + WIRE_PARTS, TEMPLATE_COUNT as u16);
+    assert_eq!(WIRE + WIRE_PARTS, CROP);
+    assert_eq!(CROP + CROP_PARTS, TEMPLATE_COUNT as u16);
     assert_eq!(TABLE_BYTES, TEMPLATE_COUNT * 32 + 16);
     let mut firsts: Vec<u16> = Block::Lever.states().map(lever_first).collect();
     firsts.sort_unstable();

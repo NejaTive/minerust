@@ -115,9 +115,12 @@ pub const HOOK_PARTS: u16 = 8;
 pub const HOOK_ARM_PARTS: u16 = 6;
 pub const WIRE: u16 = HOOK + crate::models::HOOK_STATES * HOOK_PARTS;
 pub const WIRE_PARTS: u16 = 4;
-pub const TEMPLATE_COUNT: usize = (WIRE + WIRE_PARTS) as usize;
+pub const CROP: u16 = WIRE + WIRE_PARTS;
+pub const CROP_PARTS: u16 = 8;
+pub const TEMPLATE_COUNT: usize = (CROP + CROP_PARTS) as usize;
 const POT_PLANT_SPAN: (u8, u8) = (2, 14);
 const POT_PLANT_BOTTOM: u8 = 4;
+const CROP_INSET: u8 = 4;
 
 // shader.wgsl (vs_main) подставляет высоту из записи квада вместо этих значений y
 pub const TOP_CORNER: u8 = 31;
@@ -495,7 +498,42 @@ fn build() -> [Template; TEMPLATE_COUNT] {
     out.extend(crate::models::lever_templates());
     out.extend(crate::models::hook_templates());
     out.extend(crate::models::wire_templates());
+    out.extend(crop_templates());
     out.try_into().expect("template count")
+}
+
+/// Решётка культур: четыре плоскости на 4/16 от краёв, у каждой лицевая и обратная сторона.
+fn crop_templates() -> Vec<Template> {
+    let u = POSITION_UNITS as u8;
+    let mut out = Vec::new();
+    for along_x in [false, true] {
+        for at in [CROP_INSET, u - CROP_INSET] {
+            let (a, b) = if along_x {
+                ([0, at], [u, at])
+            } else {
+                ([at, 0], [at, u])
+            };
+            let corner = |p: [u8; 2], y: u8, uv: [u8; 2]| Corner {
+                pos: [p[0], y, p[1]],
+                uv,
+            };
+            let front = [
+                corner(a, 0, [0, u]),
+                corner(b, 0, [u, u]),
+                corner(b, u, [u, 0]),
+                corner(a, u, [0, 0]),
+            ];
+            let mut back = front;
+            back.reverse();
+            for corners in [front, back] {
+                out.push(Template {
+                    corners,
+                    shade: CROSS_SHADE,
+                });
+            }
+        }
+    }
+    out
 }
 
 pub fn pack_corner(c: Corner) -> u32 {

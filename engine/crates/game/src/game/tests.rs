@@ -542,3 +542,56 @@ fn an_open_trapdoor_over_a_ladder_is_climbable_only_when_facing_the_same_way() {
         .set_block_with_data(trapdoor, Block::OakTrapdoor, FACING_NEG_Z | TRAPDOOR_OPEN);
     assert!(!game.climbable(trapdoor));
 }
+
+fn farm_game() -> Game {
+    let mut game = floor_game();
+    game.world.set_block(SPOT - IVec3::Y, Block::Farmland);
+    game.world.set_block_supported(SPOT, Block::Wheat);
+    game.set_camera_state(&[8.5, FLOOR as f32 + 1.0 + EYE_HEIGHT, 8.5, 0.0, 0.0, 0.0])
+        .unwrap();
+    game.player.feet = Vec3::new(8.5, FLOOR as f32 + 15.0 / 16.0, 8.5);
+    game
+}
+
+#[test]
+fn a_hard_landing_tramples_farmland_and_its_crop() {
+    let mut game = farm_game();
+    let field = SPOT - IVec3::Y;
+    game.trample_under_player(3.0);
+    assert_eq!(game.world.block(field), Block::Dirt);
+    assert_eq!(game.world.block(SPOT), Block::Air);
+}
+
+#[test]
+fn a_soft_landing_leaves_farmland_alone() {
+    let mut game = farm_game();
+    for _ in 0..200 {
+        game.trample_under_player(0.5);
+    }
+    assert_eq!(game.world.block(SPOT - IVec3::Y), Block::Farmland);
+    assert_eq!(game.world.block(SPOT), Block::Wheat);
+}
+
+#[test]
+fn an_empty_hand_tills_grass_and_a_block_in_hand_does_not() {
+    let mut game = floor_game();
+    game.world.set_block(SPOT - IVec3::Y, Block::Grass);
+    right_click_down_on(&mut game, "stone");
+    assert_eq!(game.world.block(SPOT - IVec3::Y), Block::Grass);
+    assert_eq!(game.world.block(SPOT), Block::Stone);
+    game.world.set_block(SPOT, Block::Air);
+    right_click_down_on(&mut game, "");
+    assert_eq!(game.world.block(SPOT - IVec3::Y), Block::Farmland);
+    assert_eq!(game.world.block_data(SPOT - IVec3::Y), 0);
+}
+
+#[test]
+fn a_crop_goes_only_on_farmland_by_right_click() {
+    let mut game = floor_game();
+    right_click_down_on(&mut game, "wheat");
+    assert_eq!(game.world.block(SPOT), Block::Air);
+    game.world.set_block(SPOT - IVec3::Y, Block::Farmland);
+    right_click_down_on(&mut game, "wheat");
+    assert_eq!(game.world.block(SPOT), Block::Wheat);
+    assert_eq!(game.world.block_data(SPOT), 0);
+}

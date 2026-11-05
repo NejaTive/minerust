@@ -175,6 +175,25 @@ impl World {
         }
     }
 
+    /// Правый клик пустой рукой: земля, трава или тропинка с воздухом сверху становятся грядкой.
+    pub fn till(&mut self, pos: IVec3) -> Vec<IVec3> {
+        if !matches!(
+            self.block(pos),
+            Block::Grass | Block::Dirt | Block::GrassPath
+        ) || self.block(pos + IVec3::Y) != Block::Air
+        {
+            return Vec::new();
+        }
+        self.set_block_supported_with_data(pos, Block::Farmland, 0)
+    }
+
+    pub fn trample(&mut self, pos: IVec3) -> Vec<IVec3> {
+        if self.block(pos) != Block::Farmland {
+            return Vec::new();
+        }
+        self.set_block_supported(pos, Block::Dirt)
+    }
+
     fn has_solid_side(&self, pos: IVec3) -> bool {
         HORIZONTAL
             .iter()
@@ -223,6 +242,21 @@ impl World {
             ] {
                 let around = cell + dir;
                 let (neighbor, data) = (self.block(around), self.block_data(around));
+                if dir == IVec3::NEG_Y
+                    && neighbor.is_tilled_soil()
+                    && self.block(cell).is_solid()
+                    && self.set_block(around, Block::Dirt)
+                {
+                    changed.push(around);
+                    continue;
+                }
+                if dir == IVec3::Y
+                    && self.block(cell).is_tilled_soil()
+                    && neighbor.is_solid()
+                    && self.set_block(cell, Block::Dirt)
+                {
+                    continue;
+                }
                 if neighbor == Block::Vine {
                     let kept = self.vine_sides(around, data);
                     let moved = if kept == 0 {

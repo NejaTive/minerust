@@ -4,10 +4,10 @@ mod boxes;
 
 use crate::mesh::{POSITION_UNITS, Quad, day_shade, quantize_shade};
 use crate::templates::{
-    AO_BRIGHTNESS, CACTUS, COCOA, COCOA_PARTS, CROSS, CUBE_FACE, FACES, Face, LILY, LOG_BARK_X,
-    LOG_BARK_Z, RAIL, SNOW_SIDE, SNOW_TOP, SUNFLOWER_HEAD, TORCH_SIDE, TORCH_TOP, TORCH_WALL,
-    TORCH_WALL_PARTS, VINE, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW, WATER_SIDE_SLOPED,
-    WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
+    AO_BRIGHTNESS, CACTUS, COCOA, COCOA_PARTS, CROP, CROP_PARTS, CROSS, CUBE_FACE, FACES, Face,
+    LILY, LOG_BARK_X, LOG_BARK_Z, RAIL, SNOW_SIDE, SNOW_TOP, SUNFLOWER_HEAD, TORCH_SIDE, TORCH_TOP,
+    TORCH_WALL, TORCH_WALL_PARTS, VINE, WATER_BOTTOM, WATER_SIDE, WATER_SIDE_LOW,
+    WATER_SIDE_SLOPED, WATER_SURFACE_UNITS, WATER_TOP, WATER_TOP_SLOPED,
 };
 use world::block::{
     ATTACH_NEG_Z, ATTACH_POS_X, Block, COCOA_STAGE_SHIFT, COCOA_STAGES, Facing, FluidKind,
@@ -613,6 +613,20 @@ fn push_shaped(mesh: &mut MeshData, block: Block, data: u8, cell: [u8; 3], light
     };
     match block.shape() {
         Shape::Cube | Shape::Layer | Shape::Cactus | Shape::Boxes => {}
+        Shape::Crop => {
+            let Some(tile) = block.crop_tile(data) else {
+                return;
+            };
+            for part in 0..CROP_PARTS {
+                mesh.quads.push(Quad::extended(
+                    cell,
+                    CROP + part,
+                    tile.layer() as u16,
+                    light,
+                    [3; 4],
+                ));
+            }
+        }
         Shape::Rail => {
             let layer = if data >= RAIL_SOUTH_EAST {
                 Tile::RailTurned
