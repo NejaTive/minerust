@@ -19,6 +19,7 @@ const ENTITY_MOOSHROOM: &str = "assets/minecraft/textures/entity/cow/mooshroom.p
 const ENTITY_POLAR_BEAR: &str = "assets/minecraft/textures/entity/bear/polarbear.png";
 const ENTITY_WOLF: &str = "assets/minecraft/textures/entity/wolf/wolf.png";
 const BLOCK_MUSHROOM_RED: &str = "assets/minecraft/textures/blocks/mushroom_red.png";
+const CUTOUT_ALPHA: u8 = 128;
 const BLOCK_TNT: [&str; 3] = [
     "assets/minecraft/textures/blocks/tnt_top.png",
     "assets/minecraft/textures/blocks/tnt_bottom.png",
@@ -349,6 +350,11 @@ fn source(tile: Tile) -> (&'static str, [f32; 3], BiomeTint) {
         Tile::TntTop => ("tnt_top", WHITE, BiomeTint::None),
         Tile::TntBottom => ("tnt_bottom", WHITE, BiomeTint::None),
         Tile::TerracottaBlue => ("hardened_clay_stained_blue", WHITE, BiomeTint::None),
+        Tile::Lever => ("lever", WHITE, BiomeTint::None),
+        Tile::TripwireHook => ("trip_wire_source", WHITE, BiomeTint::None),
+        Tile::Tripwire => ("trip_wire", WHITE, BiomeTint::None),
+        Tile::DispenserFrontHorizontal => ("dispenser_front_horizontal", WHITE, BiomeTint::None),
+        Tile::DispenserFrontVertical => ("dispenser_front_vertical", WHITE, BiomeTint::None),
         tile if tile.bed_part().is_some() => (BED_SHEETS[bed_color(tile)], WHITE, BiomeTint::None),
         tile if chest::is_double_tile(tile) => (chest::ENTITY_DOUBLE, WHITE, BiomeTint::None),
         _ => (chest::ENTITY_SINGLE, WHITE, BiomeTint::None),
@@ -813,6 +819,11 @@ const BUILTIN: &[(&str, &[u8])] = builtin_files![
     "tnt_top.png",
     "tnt_bottom.png",
     "hardened_clay_stained_blue.png",
+    "lever.png",
+    "trip_wire_source.png",
+    "trip_wire.png",
+    "dispenser_front_horizontal.png",
+    "dispenser_front_vertical.png",
     "entity/chest/normal.png",
     "entity/chest/normal_double.png",
     "entity/bed/white.png",
@@ -1284,6 +1295,11 @@ fn build(
         if tile == Tile::Water {
             for p in texture.layers.as_chunks_mut::<4>().0 {
                 p[3] = p[3].min(WATER_MAX_ALPHA);
+            }
+        }
+        if tile.is_cutout() {
+            for p in texture.layers.as_chunks_mut::<4>().0 {
+                p[3] = if p[3] >= CUTOUT_ALPHA { 255 } else { 0 };
             }
         }
         tiles.push(texture);

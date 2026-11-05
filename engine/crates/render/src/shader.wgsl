@@ -131,7 +131,7 @@ struct TileAnim {
     tint: vec4<f32>,
 };
 @group(0) @binding(3)
-var<uniform> animation: array<TileAnim, 278>;
+var<uniform> animation: array<TileAnim, 283>;
 
 // Цвет травы, листвы (на BIOME_MAP_SIZE ниже) и воды (ещё на BIOME_MAP_SIZE ниже) на блок, тор BIOME_MAP_SIZE по x и z; пишет `Renderer::set_biome_column`, цвет уже смешан по соседям.
 @group(0) @binding(11)
@@ -182,7 +182,7 @@ struct Shape {
     shade: vec4<f32>,
 };
 struct ShapeTable {
-    shapes: array<Shape, 229>,
+    shapes: array<Shape, 441>,
     ao: vec4<f32>,
 };
 @group(1) @binding(1)
@@ -248,7 +248,13 @@ fn block_vertex(in: VertexIn) -> VertexOut {
     let w2 = quads[at + 2u];
     let flip = (w0 >> 17u) & 1u;
     let corner = ((in.vertex % 4u) + flip) & 3u;
-    let shape = ((w0 >> 12u) & 0x1Fu) | (((w0 >> 26u) & 7u) << 5u);
+    var shape = ((w0 >> 12u) & 0x1Fu) | (((w0 >> 26u) & 7u) << 5u);
+    // расширенный шаблон: флаг коробки и бит 31 в w2, старшие биты номера — 28..30; свет и AO как у коробки
+    let packed_light = ((w0 >> 29u) & 1u) == 1u;
+    let extended = packed_light && (w2 >> 31u) == 1u;
+    if extended {
+        shape |= ((w2 >> 28u) & 7u) << 8u;
+    }
     let packed = table.shapes[shape].corners[corner];
     let cell = vec3<f32>(f32(w0 & 0xFu), f32((w0 >> 4u) & 0xFu), f32((w0 >> 8u) & 0xFu));
     var offset = vec3<f32>(
@@ -258,8 +264,7 @@ fn block_vertex(in: VertexIn) -> VertexOut {
     );
     var u = f32((packed >> 15u) & 0x1Fu);
     var v = f32((packed >> 20u) & 0x1Fu);
-    let boxed = (w0 >> 29u) & 1u;
-    if boxed == 1u {
+    if packed_light && !extended {
         // коробка произвольного размера: шаблон — полная грань, прямоугольник и плоскость лежат в записи квада (`Quad::boxed`)
         let n = select(select(2u, 0u, shape < 4u), 1u, shape < 2u);
         let ua = select(0u, 2u, n == 0u);
@@ -307,8 +312,8 @@ fn block_vertex(in: VertexIn) -> VertexOut {
     var world_pos = in.origin + cell + offset / 16.0;
     let layer = ((w0 >> 18u) & 0xFFu) | ((w0 >> 30u) << 8u);
     world_pos += sway_offset(world_pos, sway_kind(animation[layer].timing.w), offset.y > 0.0);
-    let ao = select((w1 >> (2u * corner)) & 3u, (w1 >> (13u + 2u * corner)) & 3u, boxed == 1u);
-    let light_corner = select(corner, 0u, boxed == 1u);
+    let ao = select((w1 >> (2u * corner)) & 3u, (w1 >> (13u + 2u * corner)) & 3u, packed_light);
+    let light_corner = select(corner, 0u, packed_light);
     let sun = (w1 >> (8u + 5u * light_corner)) & 0x1Fu;
     let block = (w2 >> (5u * light_corner)) & 0x1Fu;
     var out: VertexOut;

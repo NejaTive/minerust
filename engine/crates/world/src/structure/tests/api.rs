@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use super::super::template::Template;
 use super::super::*;
 use super::dump::{dump, dump_below};
-use super::snapshots::{basement, desert_temple, hut, igloo_top};
+use super::snapshots::{basement, desert_temple, hut, igloo_top, jungle_temple};
 
 fn template_files() -> Vec<(String, String)> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/structure/templates");
@@ -65,6 +65,11 @@ fn rotated_parts_dump_the_same_in_local_axes() {
         assert_eq!(
             dump(&basement(5, facing)),
             dump(&basement(5, Facing::South)),
+            "{facing:?}"
+        );
+        assert_eq!(
+            dump_below(&jungle_temple(facing), 4),
+            dump_below(&jungle_temple(Facing::South), 4),
             "{facing:?}"
         );
         assert_eq!(

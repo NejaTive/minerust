@@ -230,5 +230,9 @@
   { "name": "brewing_stand", "label": "варочная стойка", "placeable": true },
   { "name": "tnt", "label": "динамит", "placeable": true },
   { "name": "stone_pressure_plate", "label": "каменная нажимная плита", "placeable": true },
-  { "name": "blue_terracotta", "label": "синяя терракота", "placeable": true }
+  { "name": "blue_terracotta", "label": "синяя терракота", "placeable": true },
+  { "name": "lever", "label": "рычаг", "placeable": true },
+  { "name": "tripwire_hook", "label": "крюк растяжки", "placeable": true },
+  { "name": "tripwire", "label": "нить растяжки", "placeable": true },
+  { "name": "dispenser", "label": "раздатчик", "placeable": true }
 ]

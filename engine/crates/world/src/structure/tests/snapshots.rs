@@ -70,3 +70,22 @@ fn desert_temple_snapshot() {
         &dump_below(&desert_temple(Facing::South), DESERT_TEMPLE_DEPTH_BELOW),
     );
 }
+
+const JUNGLE_TEMPLE_DEPTH_BELOW: i32 = 4;
+
+pub(super) fn jungle_temple(facing: Facing) -> Piece {
+    Piece {
+        bounds: BlockBox::from_local(IVec3::new(10, 30, 12), IVec3::new(12, 10, 15), facing),
+        facing,
+        kind: PieceKind::JungleTemple,
+        salt: 4242,
+    }
+}
+
+#[test]
+fn jungle_temple_snapshot() {
+    assert_snapshot(
+        "jungle_temple",
+        &dump_below(&jungle_temple(Facing::South), JUNGLE_TEMPLE_DEPTH_BELOW),
+    );
+}

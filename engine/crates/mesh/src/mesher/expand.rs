@@ -50,7 +50,7 @@ pub fn vertices(data: &MeshData) -> Vec<Vertex> {
     data.quads
         .iter()
         .flat_map(|quad| {
-            let template = &templates()[usize::from(quad.template())];
+            let template = &templates()[usize::from(quad.template_index())];
             let [cx, cy, cz] = quad.cell().map(|c| u16::from(c) * POSITION_UNITS as u16);
             let quad = *quad;
             std::array::from_fn::<_, 4, _>(move |i| {

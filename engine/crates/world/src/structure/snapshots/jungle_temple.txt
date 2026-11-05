@@ -1,0 +1,245 @@
+size 12 14 15
+legend
+. air
+_ keep
+A mossy_cobblestone
+B cobblestone
+C cobblestone_stairs front=-z
+D chest front=-x
+E tripwire_hook front=+x
+F tripwire
+G tripwire_hook front=-x
+H chest front=-z
+I lever front=+x
+J chiseled_stone_bricks
+K dispenser front=+x
+L dispenser front=-x
+M cobblestone_stairs front=+z
+N vine front=+z
+O vine front=-x
+P vine front=+x
+Q vine front=-z
+y -4
+ABBABABABAAA
+BAAAABBABBAB
+AABABBAAAAAB
+BAAABBAABAAB
+BAAABAABABAB
+AAAAAAAAAAAA
+ABABAABABAAA
+BBAAABAAAAAB
+AAABBAAAAABB
+AAAAABABAABB
+AAAAAABAAAAA
+ABABBABAAAAB
+ABABBABABAAA
+ABABAABBAAAA
+BBABBBBAAAAA
+y -3
+AAABABBABBAA
+ABABABBBBABA
+AAAABBAAABBA
+AAAABAABABAB
+BAAAAAABABAB
+AAABBBBBBBBB
+AABBBCCAABAA
+BAAA....B..B
+BBAB....B.DA
+AABA....A..A
+ABAAEFFGAAAB
+ABAB....AAAA
+AAAB....BABB
+AABA..H.AAAA
+AAAAABABAAAB
+y -2
+AAAABAAAABAA
+BBBABAABAAAA
+BABABBAAAABB
+BAAABBBAAAAB
+AAAAA..ABBAA
+AABBACCABAAA
+AAAAA..ABBBA
+BBABI...B..A
+ABAJI...B..A
+BAABI...B..A
+ABAA....AAAA
+ABAK....LBBA
+ABAB....ABAA
+AAAA....AABA
+AAAAAABABAAA
+y -1
+ABAAABBBAABA
+ABBBABBBAABA
+BAAAAABAAABA
+AABAABBBABAA
+AAAAACCBAAAB
+ABBAA..AAABA
+ABABA..ABAAB
+BBABAAAAAAAA
+AABBAABABAAA
+AABABBBBABBB
+BABBAABABAAA
+ABAAABBBBBAA
+BAABBABABABA
+AABBAABAAABB
+BABBABAAAABA
+y 0
+AAABMMMMABAA
+BAABAAABABBB
+BBBAABAAABAA
+AAABBCCAABAB
+ABBAA..BABBA
+BABBB..BAABA
+BAAAA..BAAAA
+AAABAABABABB
+AABAAAAABBBB
+BBAABABABABA
+AABBBABBABAB
+AABBBBAABABA
+AAAABAAABABA
+AABAAAABABBB
+BAAABABBAAAB
+y 1
+_____.._____
+_____.._____
+__ABB..BAB__
+__B......B__
+__B......A__
+__B......B__
+__B......B__
+__A......B__
+__A......A__
+__B......B__
+__A......A__
+__A......B__
+__AAABAAAA__
+____________
+____________
+y 2
+_____.._____
+_____.._____
+__ABA..BAA__
+__B......B__
+__B......B__
+A_A......A_A
+B_A......A_A
+__A......B__
+__A......B__
+A_A......A_A
+B_A......A_A
+__B......B__
+__ABA..ABB__
+____________
+____________
+y 3
+___N___N__N_
+_BAAAAAAAAA_
+_BABAABBABA_
+_AAABAABAABO
+_AABBABAAAA_
+_ABAAAABBAAO
+_BBA....BBAO
+_BAB....AAB_
+PBBA....BBBO
+PAAA....AAA_
+_ABBAAAAABB_
+_AABABBBABBO
+PBABAABBBBB_
+_BABAAAAAAA_
+_Q_QQ_QQ_QQ_
+y 4
+__A_AN_B_B__
+_BAABBABBBA_
+BA........BA
+PA........A_
+AB........AB
+_A........BO
+AA........AA
+PA........AO
+BA........AB
+PA........A_
+AA........AA
+_A........A_
+BA........AB
+_AAABBBBBBB_
+__B_BQ_AQB__
+y 5
+__A_B__A_BN_
+_AAAA..AABB_
+AB........BA
+_A........A_
+BA........BA
+_.........._
+BB........AA
+_B........AO
+BB........AA
+P..........O
+BA........AA
+_B........A_
+BA........AA
+_AAAB..AAAB_
+__A_A__AQB__
+y 6
+____NAA_N___
+_ABAABBBBBB_
+_BBBAABBBABO
+PABABBAAABAO
+_BBBBBABBAB_
+_AAB....AAAO
+PBBB....ABBO
+_AAB....ABA_
+_ABA....AAA_
+_BBA....ABAO
+PBBAAAABAAAO
+PABABAAABAAO
+PBBBBBABBAA_
+_AAAAABAAAB_
+_Q__QAA_QQQ_
+y 7
+____________
+____________
+____________
+___AAAABA___
+___ABABAA___
+___ABABBB___
+___AB..AA___
+___BB..AB___
+___BA..AB___
+___AAAAAA___
+___AAAABB___
+___BABAAA___
+____________
+____________
+____________
+y 8
+____________
+____________
+____________
+____________
+____AAAA____
+____ABBA____
+____BBAA____
+____AABA____
+____ABBB____
+____ABBA____
+____ABAB____
+____________
+____________
+____________
+____________
+y 9
+____________
+____________
+____________
+____________
+____________
+____________
+_____MM_____
+_____AA_____
+_____CC_____
+____________
+____________
+____________
+____________
+____________
+____________

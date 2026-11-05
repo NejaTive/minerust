@@ -2,7 +2,7 @@ use glam::IVec3;
 
 use super::piece::PieceWriter;
 use crate::bed::{COLOR_SHIFT, HEAD};
-use crate::block::{Block, CAULDRON_LEVELS, COLOR_COUNT};
+use crate::block::{Block, CAULDRON_LEVELS, COLOR_COUNT, LEVER_POWERED};
 use crate::chest;
 
 pub const X: IVec3 = IVec3::X;
@@ -59,6 +59,17 @@ impl Cell {
     /// Половина двойного сундука; правая — на `chest::right_of(front)` от левой.
     pub fn chest_half(front: IVec3, half: u8) -> Self {
         Self::with_data(Block::Chest, half << chest::HALF_SHIFT).front(front)
+    }
+
+    /// Лиана на клетке; `toward_wall` — куда от неё стена, к которой она прижата.
+    pub const fn vine(toward_wall: IVec3) -> Self {
+        Self::of(Block::Vine).front(toward_wall)
+    }
+
+    /// Рычаг на стене; `away` — от стены в комнату.
+    pub fn lever(away: IVec3, powered: bool) -> Self {
+        let data = if powered { LEVER_POWERED } else { 0 };
+        Self::with_data(Block::Lever, data).front(away)
     }
 
     /// Котёл с водой `level` от 0 до 3.

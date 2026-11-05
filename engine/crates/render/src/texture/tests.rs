@@ -3,7 +3,7 @@ use world::textures::{TextureSet, TileTexture};
 
 const TILE_SIZE: u32 = 32;
 const MIP_LEVELS: u32 = 6;
-const LAYER_COUNT: u32 = 347;
+const LAYER_COUNT: u32 = 352;
 
 fn standard() -> TextureSet {
     TextureSet::standard()
@@ -264,14 +264,18 @@ const STAGE_5C_BYTES: usize = 1501500;
 /// Плитки пустынного храма (динамит, синяя терракота) дописаны после 7b.
 const STAGE_7B_BYTES: usize = 1872780;
 
+/// Плитки храма в джунглях (рычаг, растяжка, раздатчик) дописаны после пустынного храма.
+const STAGE_DESERT_BYTES: usize = 1894620;
+
 #[test]
 fn builtin_set_output_matches_golden() {
     let data = generate_standard();
-    assert_eq!(data.len(), 1894620);
+    assert_eq!(data.len(), 1921920);
     assert_eq!(fnv(&data[..STAGE_5B_BYTES]), "814be0ac03d710b7");
     assert_eq!(fnv(&data[..STAGE_5C_BYTES]), "3b2695ba1985dff9");
     assert_eq!(fnv(&data[..STAGE_7B_BYTES]), "85a6b2192cdf78bb");
-    assert_eq!(fnv(&data), "c9320c9ccd95ed57");
+    assert_eq!(fnv(&data[..STAGE_DESERT_BYTES]), "c9320c9ccd95ed57");
+    assert_eq!(fnv(&data), "c96877ebfe34ce85");
 }
 
 #[test]

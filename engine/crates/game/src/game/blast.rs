@@ -3,6 +3,7 @@ use world::block::Block;
 use world::explosion::{TNT_POWER, destroy, destroyed_cells, knockback};
 use world::plates::{Body, Plates};
 use world::signal::Signal;
+use world::tripwires::Tripwires;
 
 use super::{Game, TntView};
 use crate::physics::EYE_HEIGHT;
@@ -17,6 +18,7 @@ const MOB_EYE_SHARE: f32 = 0.85;
 pub(super) struct Blasts {
     pub(super) signal: Signal,
     pub(super) plates: Plates,
+    pub(super) tripwires: Tripwires,
     pub(super) tnts: Vec<PrimedTnt>,
     acc: u32,
     rng: Rng,
@@ -27,6 +29,7 @@ impl Blasts {
         Self {
             signal: Signal::new(),
             plates: Plates::new(),
+            tripwires: Tripwires::new(),
             tnts: Vec::new(),
             acc: 0,
             rng: Rng::new(seed as u32 ^ 0x7F4A_7C15),
@@ -85,6 +88,8 @@ impl Game {
         bodies.extend(self.mobs.iter().map(|mob| mob.body.aabb()));
         let pressed = self.blasts.plates.tick(&mut self.world, &bodies);
         self.apply_pending(&pressed);
+        let tripped = self.blasts.tripwires.tick(&mut self.world, &bodies);
+        self.apply_pending(&tripped);
 
         let ignition = self.blasts.signal.step(&mut self.world);
         self.apply_pending(&ignition.changed);

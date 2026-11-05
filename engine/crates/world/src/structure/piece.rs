@@ -2,7 +2,7 @@ use glam::IVec3;
 
 use super::cell::{Cell, Selector};
 use super::template::{Entry, Template};
-use crate::block::{Block, facing_code};
+use crate::block::{Block, VINE_SIDES, facing_code};
 use crate::column::{Column, WORLD_HEIGHT};
 use crate::pos::ColumnPos;
 use crate::section::SECTION_SIZE;
@@ -146,6 +146,7 @@ pub enum PieceKind {
     SwampHut,
     Igloo,
     DesertTemple,
+    JungleTemple,
     /// Шахта и комната под иглу: число сегментов шахты.
     IglooBasement(u8),
     #[cfg(test)]
@@ -167,11 +168,19 @@ impl Piece {
             PieceKind::SwampHut => super::swamp_hut::place(writer),
             PieceKind::Igloo => super::igloo::place_top(writer),
             PieceKind::DesertTemple => super::desert_temple::place(writer),
+            PieceKind::JungleTemple => super::jungle_temple::place(writer),
             PieceKind::IglooBasement(segments) => super::igloo::place_basement(writer, segments),
             #[cfg(test)]
             PieceKind::Probe => super::tests::draw_probe(writer),
         }
     }
+}
+
+fn vine_side(toward_wall: IVec3) -> u8 {
+    VINE_SIDES
+        .iter()
+        .find_map(|&(bit, dir)| (dir == toward_wall).then_some(bit))
+        .unwrap_or(0)
 }
 
 /// Коробка в локальных координатах части, обе границы входят, как в 1.12.
@@ -246,6 +255,7 @@ impl<'a> PieceWriter<'a> {
     pub fn put(&mut self, x: i32, y: i32, z: i32, cell: impl Into<Cell>) {
         let cell = cell.into();
         let data = match cell.front {
+            Some(front) if cell.block == Block::Vine => vine_side(self.world_dir(front)),
             Some(front) => cell.data | facing_code(self.world_dir(front)),
             None => cell.data,
         };

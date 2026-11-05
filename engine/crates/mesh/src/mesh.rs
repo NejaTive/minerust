@@ -7,6 +7,8 @@ pub const POSITION_UNITS: i32 = 16;
 const LIGHT_MASK: u32 = 0x1F;
 const BOX_FLAG: u32 = 1 << 29;
 const BOX_AO_SHIFT: u32 = 13;
+const EXT_FLAG: u32 = 1 << 31;
+const EXT_SHIFT: u32 = 28;
 
 pub const MAX_LIGHT_HALVES: u8 = 2 * MAX_LIGHT;
 
@@ -34,7 +36,7 @@ pub struct Quad([u32; 3]);
 pub const QUAD_BYTES: usize = size_of::<Quad>();
 
 const _: () = assert!(QUAD_BYTES == 12);
-const _: () = assert!(crate::templates::TEMPLATE_COUNT <= 256);
+const _: () = assert!(crate::templates::TEMPLATE_COUNT <= 2048);
 
 impl Quad {
     pub fn new(
@@ -47,7 +49,7 @@ impl Quad {
         block: [u8; 4],
     ) -> Self {
         debug_assert!(cell.iter().all(|&c| c < 16), "{cell:?}");
-        debug_assert!(usize::from(template) < crate::templates::TEMPLATE_COUNT);
+        debug_assert!(usize::from(template) < crate::templates::TEMPLATE_COUNT.min(256));
         debug_assert!(corner_ao.iter().all(|&a| a < 4), "{corner_ao:?}");
         debug_assert!(sun.iter().chain(&block).all(|&l| l <= MAX_LIGHT_HALVES));
         let pack = |values: [u8; 4], bits: u32| {
@@ -111,6 +113,34 @@ impl Quad {
         quad
     }
 
+    /// Квад шаблона с номером до 2047: старшие биты номера лежат в `w2` вместе с флагом (его читает `vs_main`),
+    /// свет и AO — как у коробочной грани: один свет на квад, AO по углам.
+    pub fn extended(cell: [u8; 3], template: u16, layer: u16, light: [u8; 2], ao: [u8; 4]) -> Self {
+        debug_assert!(usize::from(template) < crate::templates::TEMPLATE_COUNT);
+        debug_assert!(ao.iter().all(|&a| a < 4), "{ao:?}");
+        let mut quad = Self::new(
+            cell,
+            (template & 0xFF) as u8,
+            false,
+            layer,
+            [0; 4],
+            [light[0], 0, 0, 0],
+            [light[1], 0, 0, 0],
+        );
+        quad.0[0] |= BOX_FLAG;
+        let ao = ao
+            .iter()
+            .enumerate()
+            .fold(0, |acc, (i, &a)| acc | u32::from(a) << (2 * i));
+        quad.0[1] |= ao << BOX_AO_SHIFT;
+        quad.0[2] |= EXT_FLAG | u32::from(template >> 8) << EXT_SHIFT;
+        quad
+    }
+
+    pub fn is_extended(self) -> bool {
+        self.0[0] & BOX_FLAG != 0 && self.0[2] & EXT_FLAG != 0
+    }
+
     /// Поворот текстуры коробочной грани на `turns` четвертей по часовой стрелке сверху; в записи `w2` биты 28–29.
     pub fn with_turn(mut self, turns: u8) -> Self {
         debug_assert!(self.is_boxed() && turns < 4);
@@ -123,6 +153,10 @@ impl Quad {
     }
 
     pub fn is_boxed(self) -> bool {
+        self.0[0] & BOX_FLAG != 0 && !self.is_extended()
+    }
+
+    fn single_light(self) -> bool {
         self.0[0] & BOX_FLAG != 0
     }
 
@@ -172,8 +206,18 @@ impl Quad {
         [a, a >> 4, a >> 8].map(|v| (v & 0xF) as u8)
     }
 
+    /// Младшие 8 бит номера шаблона: у расширенных квадов полный номер — [`Quad::template_index`].
     pub fn template(self) -> u8 {
         ((self.0[0] >> 12 & 0x1F) | (self.0[0] >> 26 & 7) << 5) as u8
+    }
+
+    pub fn template_index(self) -> u16 {
+        let high = if self.is_extended() {
+            self.0[2] >> EXT_SHIFT & 7
+        } else {
+            0
+        };
+        u16::from(self.template()) | (high as u16) << 8
     }
 
     pub fn flipped(self) -> bool {
@@ -185,21 +229,21 @@ impl Quad {
     }
 
     pub fn ao(self) -> [u8; 4] {
-        if self.is_boxed() {
+        if self.single_light() {
             return std::array::from_fn(|i| (self.0[1] >> (BOX_AO_SHIFT + 2 * i as u32) & 3) as u8);
         }
         std::array::from_fn(|i| (self.0[1] >> (2 * i) & 3) as u8)
     }
 
     pub fn sun_halves(self) -> [u8; 4] {
-        if self.is_boxed() {
+        if self.single_light() {
             return [(self.0[1] >> 8 & LIGHT_MASK) as u8; 4];
         }
         std::array::from_fn(|i| (self.0[1] >> (8 + 5 * i) & LIGHT_MASK) as u8)
     }
 
     pub fn block_halves(self) -> [u8; 4] {
-        if self.is_boxed() {
+        if self.single_light() {
             return [(self.0[2] & LIGHT_MASK) as u8; 4];
         }
         std::array::from_fn(|i| (self.0[2] >> (5 * i) & LIGHT_MASK) as u8)

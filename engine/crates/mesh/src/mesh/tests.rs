@@ -16,7 +16,7 @@ fn quad_is_twelve_bytes() {
 fn quad_fields_round_trip_at_bounds() {
     let q = Quad::new(
         [15, 0, 15],
-        (crate::templates::TEMPLATE_COUNT - 1) as u8,
+        crate::templates::POT_CROSS + crate::templates::POT_CROSS_PARTS - 1,
         false,
         255,
         [3, 0, 3, 1],
@@ -26,7 +26,7 @@ fn quad_fields_round_trip_at_bounds() {
     assert_eq!(q.cell(), [15, 0, 15]);
     assert_eq!(
         usize::from(q.template()),
-        crate::templates::TEMPLATE_COUNT - 1
+        usize::from(crate::templates::POT_CROSS + crate::templates::POT_CROSS_PARTS) - 1
     );
     assert!(!q.flipped());
     assert_eq!(q.layer(), 255);
@@ -122,4 +122,27 @@ fn boxed_quads_keep_rect_plane_and_the_other_fields() {
     }
     let plain = Quad::new([0; 3], 3, false, 1, [3; 4], [0; 4], [0; 4]);
     assert!(!plain.is_boxed());
+}
+
+#[test]
+fn extended_quads_keep_template_cell_light_and_ao() {
+    for template in [229, 300, 432] {
+        let quad = Quad::extended([3, 9, 15], template, 321, [7, 11], [3, 2, 1, 0]);
+        assert!(quad.is_extended() && !quad.is_boxed());
+        assert_eq!(quad.template_index(), template);
+        assert_eq!(quad.cell(), [3, 9, 15]);
+        assert_eq!(quad.layer(), 321);
+        assert_eq!(quad.ao(), [3, 2, 1, 0]);
+        assert_eq!(quad.sun_halves(), [7; 4]);
+        assert_eq!(quad.block_halves(), [11; 4]);
+    }
+}
+
+#[test]
+fn plain_and_boxed_quads_are_not_extended() {
+    let plain =
+        Quad::new([1, 2, 3], 17, false, 5, [3; 4], [4; 4], [5; 4]).with_heights([16, 9, 9, 16]);
+    assert!(!plain.is_extended() && plain.template() == 17);
+    let boxed = Quad::boxed([1, 2, 3], 2, (0, 16, 0, 16), 16, 5, [1, 2], [3; 4]).with_turn(3);
+    assert!(boxed.is_boxed() && !boxed.is_extended() && boxed.template() == 2);
 }

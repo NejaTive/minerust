@@ -870,6 +870,7 @@ impl Game {
                 continue;
             };
             self.blasts.plates.adopt_column(key, column);
+            self.blasts.tripwires.adopt_column(key, column);
             let populated = column.populated;
             let mut records = column.mobs.clone();
             if !populated {

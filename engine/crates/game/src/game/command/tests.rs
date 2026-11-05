@@ -411,7 +411,14 @@ fn locate_unbuilt_structures_are_reported_missing() {
     }
     assert_eq!(
         g.complete_command("/locate ").options,
-        ["biome", "Temple", "Desert_Pyramid", "Swamp_Hut", "Igloo"]
+        [
+            "biome",
+            "Temple",
+            "Desert_Pyramid",
+            "Jungle_Pyramid",
+            "Swamp_Hut",
+            "Igloo"
+        ]
     );
 }
 
@@ -427,6 +434,7 @@ fn locate_names_appear_once_the_structure_is_built() {
             "Village",
             "Temple",
             "Desert_Pyramid",
+            "Jungle_Pyramid",
             "Swamp_Hut",
             "Igloo"
         ]

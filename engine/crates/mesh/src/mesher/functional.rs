@@ -251,3 +251,54 @@ fn a_wall_face_shows_behind_a_ladder_or_an_open_trapdoor_but_not_under_a_carpet(
     assert!(stone_faces_toward(Block::IronBars, 0, IVec3::X));
     assert!(!stone_faces_toward(Block::Carpet, 0, IVec3::Y));
 }
+
+#[test]
+fn lever_draws_a_cobblestone_base_and_a_leaning_handle() {
+    use world::block::{FACING_POS_X, LEVER_POWERED};
+    let meshes = mesh(Block::Lever, FACING_POS_X);
+    let layers = |tile: Tile| {
+        meshes
+            .cutout
+            .quads
+            .iter()
+            .filter(|q| q.layer() == tile.layer() as u16)
+            .collect::<Vec<_>>()
+    };
+    assert!(!layers(Tile::Cobblestone).is_empty());
+    let handle = layers(Tile::Lever);
+    assert_eq!(handle.len(), 6);
+    assert!(handle.iter().all(|q| q.is_extended() && !q.is_boxed()));
+    let powered = mesh(Block::Lever, FACING_POS_X | LEVER_POWERED);
+    let first = |m: &SectionMeshes| {
+        m.cutout
+            .quads
+            .iter()
+            .find(|q| q.layer() == Tile::Lever.layer() as u16)
+            .unwrap()
+            .template_index()
+    };
+    assert_ne!(first(&meshes), first(&powered));
+}
+
+#[test]
+fn hook_draws_a_plank_plate_an_arm_and_a_ring_and_wire_two_faces() {
+    let hook = mesh(Block::TripwireHook, world::block::FACING_POS_X);
+    let count = |tile: Tile| {
+        hook.cutout
+            .quads
+            .iter()
+            .filter(|q| q.layer() == tile.layer() as u16)
+            .count()
+    };
+    assert_eq!(count(Tile::TripwireHook), 2);
+    assert_eq!(count(Tile::PlanksOak), 6 + 6);
+
+    let wire = mesh(Block::Tripwire, 0);
+    assert_eq!(wire.cutout.quads.len(), 2);
+    assert!(
+        wire.cutout
+            .quads
+            .iter()
+            .all(|q| q.layer() == Tile::Tripwire.layer() as u16)
+    );
+}

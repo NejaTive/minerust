@@ -194,6 +194,10 @@ pub enum Block {
     Tnt,
     StonePressurePlate,
     BlueTerracotta,
+    Lever,
+    TripwireHook,
+    Tripwire,
+    Dispenser,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -261,6 +265,9 @@ pub enum BoxKind {
     Trapdoor,
     BrewingStand,
     Plate,
+    Lever,
+    Hook,
+    Wire,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -289,9 +296,35 @@ pub enum DataKind {
     Trapdoor,
     Egg,
     Plate,
+    Lever,
+    Hook,
+    Dispenser,
 }
 
 pub const PLATE_POWERED: u8 = 1;
+
+pub const LEVER_FACING_MASK: u8 = 3;
+pub const LEVER_FLOOR: u8 = 4;
+pub const LEVER_CEILING: u8 = 8;
+pub const LEVER_MOUNT_MASK: u8 = 12;
+pub const LEVER_POWERED: u8 = 16;
+
+pub const HOOK_FACING_MASK: u8 = 3;
+pub const HOOK_POWERED: u8 = 4;
+
+pub const DISPENSER_UP: u8 = 4;
+pub const DISPENSER_DOWN: u8 = 5;
+
+const LEVER_STATES: [u8; 24] = {
+    let mut states = [0; 24];
+    let mut i = 0;
+    while i < 24 {
+        let mount = [0, LEVER_FLOOR, LEVER_CEILING][i / 8];
+        states[i] = (i % 4) as u8 | mount | if i / 4 % 2 == 1 { LEVER_POWERED } else { 0 };
+        i += 1;
+    }
+    states
+};
 const PLATE_INSET: u8 = 1;
 
 pub const SPAWNER_PIG: u8 = 0;
@@ -775,7 +808,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-const BASE_BLOCKS: [BlockDef; 182] = [
+const BASE_BLOCKS: [BlockDef; 186] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -1641,17 +1674,59 @@ const BASE_BLOCKS: [BlockDef; 182] = [
         )
     },
     BlockDef::uniform("blue_terracotta", "синяя терракота", Tile::TerracottaBlue),
+    BlockDef {
+        solid: false,
+        needs_support: true,
+        layer: RenderLayer::Cutout,
+        ..BlockDef::open_boxed(
+            "lever",
+            "рычаг",
+            BoxKind::Lever,
+            DataKind::Lever,
+            Tile::Lever,
+        )
+    },
+    BlockDef {
+        solid: false,
+        needs_support: true,
+        layer: RenderLayer::Cutout,
+        ..BlockDef::open_boxed(
+            "tripwire_hook",
+            "крюк растяжки",
+            BoxKind::Hook,
+            DataKind::Hook,
+            Tile::TripwireHook,
+        )
+    },
+    BlockDef {
+        solid: false,
+        needs_support: true,
+        layer: RenderLayer::Cutout,
+        ..BlockDef::open_boxed(
+            "tripwire",
+            "нить растяжки",
+            BoxKind::Wire,
+            DataKind::None,
+            Tile::Tripwire,
+        )
+    },
+    BlockDef {
+        data: DataKind::Dispenser,
+        top: Some(Tile::FurnaceTop),
+        bottom: Some(Tile::FurnaceTop),
+        ..BlockDef::uniform("dispenser", "раздатчик", Tile::DispenserFrontHorizontal)
+    },
 ];
 
 mod resistance;
 mod shapes;
 
-pub const BLOCKS: [BlockDef; 182] = resistance::BLOCKS_WITH_RESISTANCE;
+pub const BLOCKS: [BlockDef; 186] = resistance::BLOCKS_WITH_RESISTANCE;
 
 pub use shapes::{CAULDRON_LEVELS, POT_PLANTS};
 
 impl Block {
-    pub const ALL: [Block; 182] = [
+    pub const ALL: [Block; 186] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -1834,6 +1909,10 @@ impl Block {
         Block::Tnt,
         Block::StonePressurePlate,
         Block::BlueTerracotta,
+        Block::Lever,
+        Block::TripwireHook,
+        Block::Tripwire,
+        Block::Dispenser,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -2002,6 +2081,9 @@ impl Block {
                 [PLATE_INSET, 0, PLATE_INSET],
                 [16 - PLATE_INSET, 1, 16 - PLATE_INSET],
             ),
+            BoxKind::Lever => Self::lever_boxes(data),
+            BoxKind::Hook => Self::hook_boxes(data),
+            BoxKind::Wire => Self::wire_boxes(&around),
             BoxKind::Carpet => unit([0, 0, 0], [16, CARPET_UNITS, 16]),
             BoxKind::Slab => match data {
                 SLAB_DOUBLE => BoxList::of(&[VoxelBox::FULL]),
@@ -2106,6 +2188,16 @@ impl Block {
         if self.data_kind() == DataKind::Ladder {
             return Some(-self.facing_dir(data & GATE_FACING_MASK));
         }
+        if self.data_kind() == DataKind::Lever {
+            return Some(match data & LEVER_MOUNT_MASK {
+                LEVER_FLOOR => IVec3::NEG_Y,
+                LEVER_CEILING => IVec3::Y,
+                _ => -self.facing_dir(data & LEVER_FACING_MASK),
+            });
+        }
+        if self.data_kind() == DataKind::Hook {
+            return Some(-self.facing_dir(data & HOOK_FACING_MASK));
+        }
         if self.data_kind() != DataKind::Attachment {
             return Some(IVec3::NEG_Y);
         }
@@ -2128,7 +2220,14 @@ impl Block {
                 Some(facing_code(placement.look) | if upper { STAIRS_TOP } else { 0 })
             }
             DataKind::Gate | DataKind::Door => Some(facing_code(placement.look)),
-            DataKind::Chest | DataKind::Furnace => Some(facing_code(-placement.look)),
+            DataKind::Chest | DataKind::Furnace | DataKind::Dispenser => {
+                Some(facing_code(-placement.look))
+            }
+            DataKind::Lever => match placement.normal {
+                IVec3::Y => Some(LEVER_FLOOR | facing_code(placement.look)),
+                IVec3::NEG_Y => Some(LEVER_CEILING | facing_code(placement.look)),
+                normal => Some(facing_code(normal)),
+            },
             DataKind::Bed => Some(bed::data(placement.look, false, placement.variant)),
             DataKind::Egg => Some(placement.variant % EGG_VARIANTS.len() as u8),
             DataKind::Trapdoor => Some(if placement.normal.y == 0 {
@@ -2162,6 +2261,7 @@ impl Block {
             | DataKind::Hinge
             | DataKind::Chest
             | DataKind::Furnace
+            | DataKind::Dispenser
             | DataKind::Cauldron
             | DataKind::Pot
             | DataKind::Spawner
@@ -2170,6 +2270,15 @@ impl Block {
             | DataKind::Egg
             | DataKind::Plate
             | DataKind::Rail => Some(0),
+            DataKind::Lever => match normal {
+                IVec3::Y => Some(LEVER_FLOOR),
+                IVec3::NEG_Y => Some(LEVER_CEILING),
+                _ => Some(facing_code(normal)),
+            },
+            DataKind::Hook => match normal {
+                IVec3::X | IVec3::NEG_X | IVec3::Z | IVec3::NEG_Z => Some(facing_code(normal)),
+                _ => None,
+            },
             DataKind::Ladder => match normal {
                 IVec3::X | IVec3::NEG_X | IVec3::Z | IVec3::NEG_Z => Some(facing_code(normal)),
                 _ => None,
@@ -2243,6 +2352,9 @@ impl Block {
             DataKind::Bed => &BED_STATES,
             DataKind::Egg => &[0, 1, 2, 3, 4, 5],
             DataKind::Plate => &[0, PLATE_POWERED],
+            DataKind::Lever => &LEVER_STATES,
+            DataKind::Hook => &[0, 1, 2, 3, 4, 5, 6, 7],
+            DataKind::Dispenser => &[0, 1, 2, 3, DISPENSER_UP, DISPENSER_DOWN],
             DataKind::Trapdoor => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
@@ -2467,6 +2579,24 @@ impl Block {
     pub fn face_tile(self, facing: Facing, normal: IVec3, data: u8) -> Option<Tile> {
         match self {
             Block::Chest => return Some(chest::tile_for(data, normal)),
+            Block::Dispenser => {
+                let front = match data {
+                    DISPENSER_UP => IVec3::Y,
+                    DISPENSER_DOWN => IVec3::NEG_Y,
+                    _ => facing_dir_of(data & FACING_MASK_2BIT),
+                };
+                return Some(if normal == front {
+                    if front.y == 0 {
+                        Tile::DispenserFrontHorizontal
+                    } else {
+                        Tile::DispenserFrontVertical
+                    }
+                } else if facing == Facing::Side {
+                    Tile::FurnaceSide
+                } else {
+                    Tile::FurnaceTop
+                });
+            }
             Block::Furnace | Block::LitFurnace if facing == Facing::Side => {
                 return Some(if normal == facing_dir_of(data & FACING_MASK_2BIT) {
                     if self == Block::LitFurnace {

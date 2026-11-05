@@ -285,10 +285,15 @@ pub enum Tile {
     TntTop,
     TntBottom,
     TerracottaBlue,
+    Lever,
+    TripwireHook,
+    Tripwire,
+    DispenserFrontHorizontal,
+    DispenserFrontVertical,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 278] = [
+    pub const ALL: [Tile; 283] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -567,6 +572,11 @@ impl Tile {
         Tile::TntTop,
         Tile::TntBottom,
         Tile::TerracottaBlue,
+        Tile::Lever,
+        Tile::TripwireHook,
+        Tile::Tripwire,
+        Tile::DispenserFrontHorizontal,
+        Tile::DispenserFrontVertical,
     ];
 
     pub fn sway(self) -> f32 {
@@ -713,6 +723,9 @@ impl Tile {
                     | Tile::FlowerPot
                     | Tile::CauldronTop
                     | Tile::CauldronBottom
+                    | Tile::Lever
+                    | Tile::TripwireHook
+                    | Tile::Tripwire
             )
     }
 }
