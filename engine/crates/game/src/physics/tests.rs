@@ -1263,3 +1263,32 @@ fn a_web_slows_walking_and_falling() {
     let (free_run, webbed_run) = (free.feet.x - 0.5, webbed.feet.x - 0.5);
     assert!(webbed_run < free_run * 0.3, "{webbed_run} vs {free_run}");
 }
+
+#[test]
+fn landing_reports_the_fall_distance_once() {
+    let solid = world(&[]);
+    let mut player = Player::new(Vec3::new(0.5, GROUND + 3.0, 0.5), Mode::Walking);
+    let mut landings = Vec::new();
+    for _ in 0..120 {
+        player.step(&Input::default(), 0.0, &solid, |_| None);
+        landings.extend(player.landed);
+    }
+    assert_eq!(landings.len(), 1);
+    assert!((landings[0] - 3.0).abs() < 0.05, "{landings:?}");
+    assert_eq!(player.fall_distance, 0.0);
+}
+
+#[test]
+fn flying_and_swimming_do_not_accumulate_fall_distance() {
+    let solid = world(&[]);
+    let mut flyer = Player::new(Vec3::new(0.5, GROUND + 3.0, 0.5), Mode::Flying);
+    flyer.step(&Input::default(), 0.0, &solid, |_| None);
+    assert_eq!(flyer.fall_distance, 0.0);
+    let mut swimmer = Player::new(Vec3::new(0.5, GROUND + 3.0, 0.5), Mode::Walking);
+    for _ in 0..30 {
+        swimmer.step(&Input::default(), 0.0, &solid, |_| {
+            Some((FluidKind::Water, 1.0))
+        });
+    }
+    assert_eq!(swimmer.fall_distance, 0.0);
+}

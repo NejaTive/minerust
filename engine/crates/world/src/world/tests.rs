@@ -1,5 +1,7 @@
 use super::*;
-use crate::block::{ATTACH_FLOOR, ATTACH_NEG_X, ATTACH_NEG_Z, ATTACH_POS_X, ATTACH_POS_Z};
+use crate::block::{
+    ATTACH_FLOOR, ATTACH_NEG_X, ATTACH_NEG_Z, ATTACH_POS_X, ATTACH_POS_Z, FARMLAND_WET, Facing,
+};
 
 #[test]
 fn negative_coords_land_in_right_column() {
@@ -701,4 +703,124 @@ fn pressure_plate_needs_solid_floor_and_breaks_with_it() {
     let changed = world.set_block_supported(floor, Block::Air);
     assert_eq!(changed, vec![floor, above]);
     assert_eq!(world.block(above), Block::Air);
+}
+
+fn farm_world() -> World {
+    let mut world = World::new();
+    world.insert(ColumnPos::ZERO, Column::new());
+    for x in 0..8 {
+        world.set_block(IVec3::new(x, 9, 4), Block::Dirt);
+    }
+    world
+}
+
+#[test]
+fn crops_only_stand_on_farmland() {
+    let mut world = farm_world();
+    let (dirt, field) = (IVec3::new(1, 9, 4), IVec3::new(2, 9, 4));
+    world.set_block(field, Block::Farmland);
+    for crop in [
+        Block::Wheat,
+        Block::Carrots,
+        Block::Potatoes,
+        Block::Beetroots,
+    ] {
+        assert!(!world.can_place(dirt + IVec3::Y, crop), "{crop:?}");
+        assert!(world.can_place(field + IVec3::Y, crop), "{crop:?}");
+        assert!(!crop.is_solid() && crop.collision_height() == 0.0);
+    }
+}
+
+#[test]
+fn crop_goes_when_its_farmland_is_trampled_or_removed() {
+    let mut world = farm_world();
+    let field = IVec3::new(2, 9, 4);
+    world.set_block(field, Block::Farmland);
+    world.set_block_supported(field + IVec3::Y, Block::Wheat);
+    let changed = world.trample(field);
+    assert_eq!(world.block(field), Block::Dirt);
+    assert_eq!(world.block(field + IVec3::Y), Block::Air);
+    assert!(changed.contains(&field) && changed.contains(&(field + IVec3::Y)));
+    assert!(world.trample(field).is_empty());
+}
+
+#[test]
+fn solid_block_above_turns_farmland_and_path_into_dirt() {
+    let mut world = farm_world();
+    let (field, path) = (IVec3::new(2, 9, 4), IVec3::new(4, 9, 4));
+    world.set_block(field, Block::Farmland);
+    world.set_block(path, Block::GrassPath);
+    world.set_block_supported(field + IVec3::Y, Block::Stone);
+    world.set_block_supported(path + IVec3::Y, Block::OakPlanks);
+    assert_eq!(world.block(field), Block::Dirt);
+    assert_eq!(world.block(path), Block::Dirt);
+}
+
+#[test]
+fn farmland_placed_under_a_solid_block_becomes_dirt_at_once() {
+    let mut world = farm_world();
+    let pos = IVec3::new(3, 9, 4);
+    world.set_block(pos + IVec3::Y, Block::Stone);
+    world.set_block_supported(pos, Block::Farmland);
+    assert_eq!(world.block(pos), Block::Dirt);
+}
+
+#[test]
+fn plants_and_crops_do_not_press_the_soil() {
+    let mut world = farm_world();
+    let field = IVec3::new(2, 9, 4);
+    world.set_block(field, Block::Farmland);
+    world.set_block_supported(field + IVec3::Y, Block::Carrots);
+    assert_eq!(world.block(field), Block::Farmland);
+    world.set_block(IVec3::new(4, 9, 4), Block::GrassPath);
+    world.set_block_supported(IVec3::new(4, 10, 4), Block::Torch);
+    assert_eq!(world.block(IVec3::new(4, 9, 4)), Block::GrassPath);
+}
+
+#[test]
+fn till_turns_grass_dirt_and_path_into_dry_farmland_only_under_air() {
+    let mut world = farm_world();
+    for (x, block) in [(1, Block::Grass), (2, Block::Dirt), (3, Block::GrassPath)] {
+        let pos = IVec3::new(x, 9, 4);
+        world.set_block(pos, block);
+        assert!(!world.till(pos).is_empty(), "{block:?}");
+        assert_eq!(
+            (world.block(pos), world.block_data(pos)),
+            (Block::Farmland, 0)
+        );
+    }
+    let (covered, stone) = (IVec3::new(5, 9, 4), IVec3::new(6, 9, 4));
+    world.set_block(covered + IVec3::Y, Block::Poppy);
+    world.set_block(stone, Block::Stone);
+    assert!(world.till(covered).is_empty() && world.till(stone).is_empty());
+}
+
+#[test]
+fn soil_blocks_are_fifteen_sixteenths_tall() {
+    for block in [Block::Farmland, Block::GrassPath] {
+        let (min, max) = block.boxes(0, |_| (Block::Air, 0)).bounds();
+        assert_eq!((min.y, max.y), (0.0, 15.0 / 16.0), "{block:?}");
+    }
+}
+
+#[test]
+fn crop_stages_map_to_the_vanilla_textures() {
+    use crate::tile::Tile;
+    assert_eq!(Block::Wheat.crop_tile(7), Some(Tile::WheatStage7));
+    assert_eq!(Block::Wheat.crop_tile(3), Some(Tile::WheatStage3));
+    let carrots: Vec<_> = (0..8).map(|age| Block::Carrots.crop_tile(age)).collect();
+    assert_eq!(carrots[0], Some(Tile::CarrotsStage0));
+    assert_eq!(carrots[1], carrots[0]);
+    assert_eq!(carrots[4], Some(Tile::CarrotsStage2));
+    assert_eq!(carrots[7], Some(Tile::CarrotsStage3));
+    assert_eq!(Block::Potatoes.crop_tile(2), Some(Tile::PotatoesStage1));
+    assert_eq!(Block::Beetroots.crop_tile(3), Some(Tile::BeetrootsStage3));
+    assert_eq!(Block::Stone.crop_tile(0), None);
+    let top = |data| Block::Farmland.face_tile(Facing::Top, IVec3::Y, data);
+    assert_eq!(top(FARMLAND_WET), Some(Tile::FarmlandWet));
+    assert_eq!(top(3), Some(Tile::FarmlandDry));
+    assert_eq!(
+        Block::Farmland.face_tile(Facing::Side, IVec3::X, FARMLAND_WET),
+        Some(Tile::Dirt)
+    );
 }

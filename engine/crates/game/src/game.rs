@@ -51,6 +51,8 @@ fn cell_collision(world: &World, pos: IVec3) -> Collision {
 const REPEAT_S: f32 = 0.25;
 const DEFAULT_BLOCK: Block = Block::Grass;
 const MAX_DT: f32 = 0.1;
+const TRAMPLE_PROBE: f32 = 0.2;
+const TRAMPLE_FALL: f32 = 0.5;
 const DOUBLE_TAP_S: f32 = 0.3;
 const FLUID_STEP_TICKS: u32 = 15;
 const LAVA_STEP_TICKS: u32 = 30;
@@ -605,6 +607,17 @@ impl Game {
                     target = self.pick();
                 }
             }
+        } else if self.selected.is_none() {
+            if editable
+                && self.placing.fire_once()
+                && let Some(hit) = target
+                && hit.normal != IVec3::NEG_Y
+                && let changed = self.world.till(hit.block)
+                && !changed.is_empty()
+            {
+                self.apply_edit(&changed, &[], &mut dirty, &mut lit);
+                target = self.pick();
+            }
         } else if let Some(Held::Item(item)) = self.selected {
             if self.placing.fire_once()
                 && let Some(hit) = target
@@ -1013,6 +1026,9 @@ impl Game {
                 |pos| cell_collision(&self.world, pos),
                 |pos| self.world.fluid_height(pos),
             );
+            if let Some(distance) = self.player.landed.take() {
+                self.trample_under_player(distance);
+            }
             self.tick_mobs();
             self.push_entities();
         }
@@ -1020,6 +1036,20 @@ impl Game {
         let from = self.prev_feet - Vec3::Y * self.prev_step_offset;
         let to = self.player.feet - Vec3::Y * self.player.step_offset;
         self.camera.position = from.lerp(to, self.clock.alpha()) + Vec3::Y * EYE_HEIGHT;
+    }
+
+    /// `BlockFarmland.onFallenUpon`: шанс вытоптать грядку равен дальности падения минус полблока.
+    fn trample_under_player(&mut self, distance: f32) {
+        let below = (self.player.feet - Vec3::Y * TRAMPLE_PROBE)
+            .floor()
+            .as_ivec3();
+        if self.world.block(below) != Block::Farmland
+            || self.mob_rng.unit() >= distance - TRAMPLE_FALL
+        {
+            return;
+        }
+        let changed = self.world.trample(below);
+        self.apply_pending(&changed);
     }
 
     fn sync_prev(&mut self) {

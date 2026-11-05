@@ -198,6 +198,12 @@ pub enum Block {
     TripwireHook,
     Tripwire,
     Dispenser,
+    Farmland,
+    GrassPath,
+    Wheat,
+    Carrots,
+    Potatoes,
+    Beetroots,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -223,6 +229,12 @@ pub const CACTUS_INSET: f32 = CACTUS_INSET_UNITS as f32 / 16.0;
 pub const CACTUS_HEIGHT: f32 = 15.0 / 16.0;
 pub const LILY_UNITS: u8 = 1;
 pub const LILY_HEIGHT: f32 = LILY_UNITS as f32 / 16.0;
+pub const SOIL_UNITS: u8 = 15;
+pub const FARMLAND_WET: u8 = 7;
+pub const CROP_MAX_AGE: u8 = 7;
+pub const BEETROOT_MAX_AGE: u8 = 3;
+/// Номер текстуры стадии 0..=7 у моркови и картофеля (`BlockCarrot`, `BlockPotato` 1.12).
+const ROOT_CROP_TILES: [usize; 8] = [0, 0, 1, 1, 2, 2, 2, 3];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RenderLayer {
@@ -244,6 +256,7 @@ pub enum Shape {
     Cocoa,
     Boxes,
     Rail,
+    Crop,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -268,6 +281,7 @@ pub enum BoxKind {
     Lever,
     Hook,
     Wire,
+    Soil,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -299,6 +313,9 @@ pub enum DataKind {
     Lever,
     Hook,
     Dispenser,
+    Moisture,
+    Crop,
+    BeetrootCrop,
 }
 
 pub const PLATE_POWERED: u8 = 1;
@@ -786,6 +803,15 @@ impl BlockDef {
         }
     }
 
+    const fn crop(name: &'static str, label: &'static str, data: DataKind, tile: Tile) -> BlockDef {
+        BlockDef {
+            random_ticks: true,
+            data,
+            shape: Shape::Crop,
+            ..Self::plant(name, label, tile)
+        }
+    }
+
     const fn leaves(name: &'static str, label: &'static str, tile: Tile) -> BlockDef {
         BlockDef {
             opaque: false,
@@ -808,7 +834,7 @@ impl BlockDef {
 }
 
 /// формата сохранения: новые блоки только в конец, вместе с вариантом [`Block`] и
-const BASE_BLOCKS: [BlockDef; 186] = [
+const BASE_BLOCKS: [BlockDef; 192] = [
     BlockDef {
         name: "air",
         label: "воздух",
@@ -1716,17 +1742,48 @@ const BASE_BLOCKS: [BlockDef; 186] = [
         bottom: Some(Tile::FurnaceTop),
         ..BlockDef::uniform("dispenser", "раздатчик", Tile::DispenserFrontHorizontal)
     },
+    BlockDef {
+        random_ticks: true,
+        ..BlockDef::boxed(
+            "farmland",
+            "грядка",
+            BoxKind::Soil,
+            DataKind::Moisture,
+            (Tile::FarmlandDry, Tile::Dirt, Tile::Dirt),
+        )
+    },
+    BlockDef::boxed(
+        "grass_path",
+        "тропинка",
+        BoxKind::Soil,
+        DataKind::None,
+        (Tile::GrassPathTop, Tile::GrassPathSide, Tile::Dirt),
+    ),
+    BlockDef::crop("wheat", "пшеница", DataKind::Crop, Tile::WheatStage7),
+    BlockDef::crop("carrots", "морковь", DataKind::Crop, Tile::CarrotsStage3),
+    BlockDef::crop(
+        "potatoes",
+        "картофель",
+        DataKind::Crop,
+        Tile::PotatoesStage3,
+    ),
+    BlockDef::crop(
+        "beetroots",
+        "свёкла",
+        DataKind::BeetrootCrop,
+        Tile::BeetrootsStage3,
+    ),
 ];
 
 mod resistance;
 mod shapes;
 
-pub const BLOCKS: [BlockDef; 186] = resistance::BLOCKS_WITH_RESISTANCE;
+pub const BLOCKS: [BlockDef; 192] = resistance::BLOCKS_WITH_RESISTANCE;
 
 pub use shapes::{CAULDRON_LEVELS, POT_PLANTS};
 
 impl Block {
-    pub const ALL: [Block; 186] = [
+    pub const ALL: [Block; 192] = [
         Block::Air,
         Block::Grass,
         Block::Dirt,
@@ -1913,6 +1970,12 @@ impl Block {
         Block::TripwireHook,
         Block::Tripwire,
         Block::Dispenser,
+        Block::Farmland,
+        Block::GrassPath,
+        Block::Wheat,
+        Block::Carrots,
+        Block::Potatoes,
+        Block::Beetroots,
     ];
 
     pub fn def(self) -> &'static BlockDef {
@@ -2018,6 +2081,11 @@ impl Block {
             Shape::Boxes | Shape::Rail => self.boxes(data, |_| (Block::Air, 0)).bounds(),
             Shape::Layer => (Vec3::ZERO, Vec3::new(1.0, SNOW_HEIGHT, 1.0)),
             Shape::Lily => (Vec3::ZERO, Vec3::new(1.0, LILY_HEIGHT, 1.0)),
+            Shape::Crop => {
+                let age = f32::from(data.min(self.crop_max_age()));
+                let steps = f32::from(self.crop_max_age()) + 1.0;
+                (Vec3::ZERO, Vec3::new(1.0, (age + 1.0) / steps, 1.0))
+            }
             Shape::Cactus => (
                 Vec3::new(CACTUS_INSET, 0.0, CACTUS_INSET),
                 Vec3::new(1.0 - CACTUS_INSET, CACTUS_HEIGHT, 1.0 - CACTUS_INSET),
@@ -2084,6 +2152,7 @@ impl Block {
             BoxKind::Lever => Self::lever_boxes(data),
             BoxKind::Hook => Self::hook_boxes(data),
             BoxKind::Wire => Self::wire_boxes(&around),
+            BoxKind::Soil => unit([0, 0, 0], [16, SOIL_UNITS, 16]),
             BoxKind::Carpet => unit([0, 0, 0], [16, CARPET_UNITS, 16]),
             BoxKind::Slab => match data {
                 SLAB_DOUBLE => BoxList::of(&[VoxelBox::FULL]),
@@ -2269,6 +2338,9 @@ impl Block {
             | DataKind::Trapdoor
             | DataKind::Egg
             | DataKind::Plate
+            | DataKind::Moisture
+            | DataKind::Crop
+            | DataKind::BeetrootCrop
             | DataKind::Rail => Some(0),
             DataKind::Lever => match normal {
                 IVec3::Y => Some(LEVER_FLOOR),
@@ -2355,6 +2427,8 @@ impl Block {
             DataKind::Lever => &LEVER_STATES,
             DataKind::Hook => &[0, 1, 2, 3, 4, 5, 6, 7],
             DataKind::Dispenser => &[0, 1, 2, 3, DISPENSER_UP, DISPENSER_DOWN],
+            DataKind::Moisture | DataKind::Crop => &[0, 1, 2, 3, 4, 5, 6, 7],
+            DataKind::BeetrootCrop => &[0, 1, 2, 3],
             DataKind::Trapdoor => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             DataKind::Sides => &[VINE_POS_X, VINE_NEG_X, VINE_POS_Z, VINE_NEG_Z, VINE_TOP],
             DataKind::Fluid => &[
@@ -2463,6 +2537,36 @@ impl Block {
         matches!(self, Block::BrownMushroom | Block::RedMushroom)
     }
 
+    pub fn is_crop(self) -> bool {
+        self.shape() == Shape::Crop
+    }
+
+    pub fn crop_max_age(self) -> u8 {
+        if self == Block::Beetroots {
+            BEETROOT_MAX_AGE
+        } else {
+            CROP_MAX_AGE
+        }
+    }
+
+    /// Плитка стадии `age` культуры; у моркови и картофеля восемь стадий делят четыре текстуры.
+    pub fn crop_tile(self, age: u8) -> Option<Tile> {
+        let age = usize::from(age.min(self.crop_max_age()));
+        let (first, index) = match self {
+            Block::Wheat => (Tile::WheatStage0, age),
+            Block::Carrots => (Tile::CarrotsStage0, ROOT_CROP_TILES[age]),
+            Block::Potatoes => (Tile::PotatoesStage0, ROOT_CROP_TILES[age]),
+            Block::Beetroots => (Tile::BeetrootsStage0, age),
+            _ => return None,
+        };
+        Tile::ALL.get(first as usize + index).copied()
+    }
+
+    /// Грядка и тропинка: превращаются в землю под твёрдым блоком.
+    pub fn is_tilled_soil(self) -> bool {
+        matches!(self, Block::Farmland | Block::GrassPath)
+    }
+
     pub fn is_stackable_plant(self) -> bool {
         matches!(self, Block::Cactus | Block::Reeds)
     }
@@ -2485,6 +2589,9 @@ impl Block {
                     || matches!(support, Block::Dirt | Block::Grass)
             }
             Block::Waterlily => support == Block::Water,
+            Block::Wheat | Block::Carrots | Block::Potatoes | Block::Beetroots => {
+                support == Block::Farmland
+            }
             Block::Cocoa => support == Block::JungleLog,
             Block::Carpet => support != Block::Air,
             Block::Rail => support.is_solid() && support.shape() == Shape::Cube,
@@ -2578,6 +2685,9 @@ impl Block {
 
     pub fn face_tile(self, facing: Facing, normal: IVec3, data: u8) -> Option<Tile> {
         match self {
+            Block::Farmland if facing == Facing::Top && data == FARMLAND_WET => {
+                return Some(Tile::FarmlandWet);
+            }
             Block::Chest => return Some(chest::tile_for(data, normal)),
             Block::Dispenser => {
                 let front = match data {

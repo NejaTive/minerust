@@ -9,7 +9,7 @@ fn icon_pixels(block: Block) -> Option<Vec<u8>> {
     block.icon_pixels(&TextureSet::standard(), 0)
 }
 
-const ALL: [Block; 186] = Block::ALL;
+const ALL: [Block; 192] = Block::ALL;
 
 fn is_connected_family(block: Block) -> bool {
     block as usize >= Block::OakFence as usize
@@ -51,7 +51,7 @@ fn byte_round_trip() {
         assert_eq!(block as usize, i, "save numbers must not move");
         assert_eq!(Block::try_from(block as u8), Ok(block));
     }
-    assert_eq!(Block::try_from(186), Err(186));
+    assert_eq!(Block::try_from(192), Err(192));
     assert_eq!(Block::try_from(255), Err(255));
 }
 
@@ -574,6 +574,8 @@ fn states_cover_every_data_kind() {
             DataKind::Lever => 24,
             DataKind::Hook => 8,
             DataKind::Dispenser => 6,
+            DataKind::Moisture | DataKind::Crop => 8,
+            DataKind::BeetrootCrop => 4,
         };
         assert_eq!(states.len(), expected, "{block:?}");
         let mut unique = states.clone();

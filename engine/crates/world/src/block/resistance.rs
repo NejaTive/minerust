@@ -1,6 +1,6 @@
 use super::{BASE_BLOCKS, Block, BlockDef};
 
-pub(super) const fn with_blast_resistance(mut blocks: [BlockDef; 186]) -> [BlockDef; 186] {
+pub(super) const fn with_blast_resistance(mut blocks: [BlockDef; 192]) -> [BlockDef; 192] {
     let mut i = 0;
     while i < blocks.len() {
         blocks[i].blast_resistance = blast_resistance(Block::ALL[i]);
@@ -9,7 +9,7 @@ pub(super) const fn with_blast_resistance(mut blocks: [BlockDef; 186]) -> [Block
     blocks
 }
 
-pub(super) const BLOCKS_WITH_RESISTANCE: [BlockDef; 186] = with_blast_resistance(BASE_BLOCKS);
+pub(super) const BLOCKS_WITH_RESISTANCE: [BlockDef; 192] = with_blast_resistance(BASE_BLOCKS);
 
 /// Значение `Block.getExplosionResistance` 1.12 (внутреннее сопротивление, делённое на 5).
 const fn blast_resistance(block: Block) -> f32 {
@@ -20,9 +20,8 @@ const fn blast_resistance(block: Block) -> f32 {
         | SunflowerLower | SunflowerUpper | LilacLower | LilacUpper | RoseBushLower
         | RoseBushUpper | PeonyLower | PeonyUpper | Allium | BlueOrchid | Houstonia
         | OxeyeDaisy | RedTulip | OrangeTulip | WhiteTulip | PinkTulip | BrownMushroom
-        | RedMushroom | Waterlily | FlowerPot | RedstoneTorch | Tnt | TripwireHook | Tripwire => {
-            0.0
-        }
+        | RedMushroom | Waterlily | FlowerPot | RedstoneTorch | Tnt | TripwireHook | Tripwire
+        | Wheat | Carrots | Potatoes | Beetroots => 0.0,
         Snow | Carpet => 0.1,
         Leaves | BirchLeaves | SpruceLeaves | JungleLeaves | AcaciaLeaves | DarkOakLeaves
         | Vine | SnowBlock | BrownMushroomBlock | RedMushroomBlock | MushroomStem | Bed => 0.2,
@@ -30,7 +29,8 @@ const fn blast_resistance(block: Block) -> f32 {
         Cactus | Ladder => 0.4,
         Dirt | Sand | RedSand | Podzol | CoarseDirt | Ice | IcePacked | BrewingStand
         | StonePressurePlate | Lever => 0.5,
-        Grass | SnowyGrass | Gravel | Clay | Mycelium => 0.6,
+        Farmland | Grass | SnowyGrass | Gravel | Clay | Mycelium => 0.6,
+        GrassPath => 0.65,
         Rail => 0.7,
         MonsterEgg => 0.75,
         Wool | Sandstone | RedSandstone | ChiseledSandstone | SmoothSandstone

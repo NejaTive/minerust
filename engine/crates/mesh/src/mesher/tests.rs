@@ -1316,3 +1316,32 @@ fn sloped_quad_heights_survive_the_words_round_trip() {
         assert!(quad.heights().iter().all(|h| (1..=16).contains(h)));
     }
 }
+
+#[test]
+fn crop_is_a_lattice_of_four_double_sided_planes_in_its_stage_layer() {
+    let at = IVec3::new(5, 5, 5);
+    for age in [0, 7] {
+        let mut section = Section::new();
+        section.set_with_data(at, Block::Carrots, age);
+        let meshes = mesh_section(&section, air, full, AO);
+        assert!(meshes.solid.quads.is_empty());
+        assert_eq!(face_count(&meshes.cutout), 8);
+        let layer = Block::Carrots.crop_tile(age).unwrap().layer() as u16;
+        assert!(meshes.cutout.quads.iter().all(|q| q.layer() == layer));
+    }
+}
+
+#[test]
+fn farmland_and_path_are_fifteen_sixteenths_tall_boxes() {
+    for block in [Block::Farmland, Block::GrassPath] {
+        let mut section = Section::new();
+        section.set(IVec3::new(5, 5, 5), block);
+        let meshes = mesh_section(&section, air, full, AO);
+        assert_eq!(face_count(&meshes.solid), 6, "{block:?}");
+        let top = vertices(&meshes.solid)
+            .iter()
+            .map(|v| v.position()[1])
+            .fold(0.0, f32::max);
+        assert!((top - (5.0 + 15.0 / 16.0)).abs() < 1e-4, "{block:?} {top}");
+    }
+}

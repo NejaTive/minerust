@@ -149,6 +149,8 @@ pub struct Player {
     pub velocity: Vec3,
     pub mode: Mode,
     pub on_ground: bool,
+    pub fall_distance: f32,
+    pub landed: Option<f32>,
     pub sprinting: bool,
     pub auto_step: bool,
     pub step_offset: f32,
@@ -174,6 +176,8 @@ impl Player {
             velocity: Vec3::ZERO,
             mode,
             on_ground: false,
+            fall_distance: 0.0,
+            landed: None,
             sprinting: false,
             auto_step: true,
             step_offset: 0.0,
@@ -399,10 +403,13 @@ impl Player {
             self.velocity = Vec3::ZERO;
         }
         self.on_ground = false;
+        self.landed = None;
         if self.mode == Mode::Noclip {
             self.feet += delta;
+            self.fall_distance = 0.0;
             return;
         }
+        let start_y = self.feet.y;
         self.step_offset = (self.step_offset - TICK * STEP_HEIGHT / STEP_SMOOTH_TIME).max(0.0);
         let can_step = self.mode == Mode::Walking && immersion.is_none();
         let step_height = if self.auto_step {
@@ -418,6 +425,15 @@ impl Player {
                 blocked = !self.step_up(before, axis, delta[axis], step_height, &collision);
             }
             against_wall |= blocked && axis != 1;
+        }
+        if self.mode != Mode::Walking || immersion.is_some() {
+            self.fall_distance = 0.0;
+        } else {
+            self.fall_distance += (start_y - self.feet.y).max(0.0);
+            if self.on_ground {
+                self.landed = Some(self.fall_distance).filter(|&d| d > 0.0);
+                self.fall_distance = 0.0;
+            }
         }
         self.climb_contact = against_wall && self.on_ladder;
         if against_wall {

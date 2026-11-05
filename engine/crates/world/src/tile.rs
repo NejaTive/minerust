@@ -290,10 +290,34 @@ pub enum Tile {
     Tripwire,
     DispenserFrontHorizontal,
     DispenserFrontVertical,
+    FarmlandWet,
+    FarmlandDry,
+    GrassPathTop,
+    GrassPathSide,
+    WheatStage0,
+    WheatStage1,
+    WheatStage2,
+    WheatStage3,
+    WheatStage4,
+    WheatStage5,
+    WheatStage6,
+    WheatStage7,
+    CarrotsStage0,
+    CarrotsStage1,
+    CarrotsStage2,
+    CarrotsStage3,
+    PotatoesStage0,
+    PotatoesStage1,
+    PotatoesStage2,
+    PotatoesStage3,
+    BeetrootsStage0,
+    BeetrootsStage1,
+    BeetrootsStage2,
+    BeetrootsStage3,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 283] = [
+    pub const ALL: [Tile; 307] = [
         Tile::GrassTop,
         Tile::GrassSide,
         Tile::Dirt,
@@ -577,6 +601,30 @@ impl Tile {
         Tile::Tripwire,
         Tile::DispenserFrontHorizontal,
         Tile::DispenserFrontVertical,
+        Tile::FarmlandWet,
+        Tile::FarmlandDry,
+        Tile::GrassPathTop,
+        Tile::GrassPathSide,
+        Tile::WheatStage0,
+        Tile::WheatStage1,
+        Tile::WheatStage2,
+        Tile::WheatStage3,
+        Tile::WheatStage4,
+        Tile::WheatStage5,
+        Tile::WheatStage6,
+        Tile::WheatStage7,
+        Tile::CarrotsStage0,
+        Tile::CarrotsStage1,
+        Tile::CarrotsStage2,
+        Tile::CarrotsStage3,
+        Tile::PotatoesStage0,
+        Tile::PotatoesStage1,
+        Tile::PotatoesStage2,
+        Tile::PotatoesStage3,
+        Tile::BeetrootsStage0,
+        Tile::BeetrootsStage1,
+        Tile::BeetrootsStage2,
+        Tile::BeetrootsStage3,
     ];
 
     pub fn sway(self) -> f32 {
@@ -726,6 +774,27 @@ impl Tile {
                     | Tile::Lever
                     | Tile::TripwireHook
                     | Tile::Tripwire
+                    | Tile::GrassPathSide
+                    | Tile::WheatStage0
+                    | Tile::WheatStage1
+                    | Tile::WheatStage2
+                    | Tile::WheatStage3
+                    | Tile::WheatStage4
+                    | Tile::WheatStage5
+                    | Tile::WheatStage6
+                    | Tile::WheatStage7
+                    | Tile::CarrotsStage0
+                    | Tile::CarrotsStage1
+                    | Tile::CarrotsStage2
+                    | Tile::CarrotsStage3
+                    | Tile::PotatoesStage0
+                    | Tile::PotatoesStage1
+                    | Tile::PotatoesStage2
+                    | Tile::PotatoesStage3
+                    | Tile::BeetrootsStage0
+                    | Tile::BeetrootsStage1
+                    | Tile::BeetrootsStage2
+                    | Tile::BeetrootsStage3
             )
     }
 }

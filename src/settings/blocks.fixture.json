@@ -234,5 +234,11 @@
   { "name": "lever", "label": "рычаг", "placeable": true },
   { "name": "tripwire_hook", "label": "крюк растяжки", "placeable": true },
   { "name": "tripwire", "label": "нить растяжки", "placeable": true },
-  { "name": "dispenser", "label": "раздатчик", "placeable": true }
+  { "name": "dispenser", "label": "раздатчик", "placeable": true },
+  { "name": "farmland", "label": "грядка", "placeable": true },
+  { "name": "grass_path", "label": "тропинка", "placeable": true },
+  { "name": "wheat", "label": "пшеница", "placeable": true },
+  { "name": "carrots", "label": "морковь", "placeable": true },
+  { "name": "potatoes", "label": "картофель", "placeable": true },
+  { "name": "beetroots", "label": "свёкла", "placeable": true }
 ]

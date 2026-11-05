@@ -1,4 +1,5 @@
 use super::*;
+use crate::block::FARMLAND_WET;
 use crate::column::Column;
 use crate::terrain::Biome;
 
@@ -486,4 +487,179 @@ fn snow_settles_on_leaves_during_precipitation() {
     let (mut world, light) = weather_world(cold, Block::Leaves, false);
     weather_run(cold, &mut world, &light, true);
     assert!(count_at(&world, cold, GROUND + 1, Block::Snow) > 20);
+}
+
+const FARM_TICKS: usize = 4000;
+
+fn farm() -> (World, LightMap, RandomTicks) {
+    let (world, light) = world_of(&[ColumnPos::ZERO], Block::Farmland);
+    (world, light, RandomTicks::new(3))
+}
+
+fn tick_at(ticks: &mut RandomTicks, world: &mut World, light: &LightMap, pos: IVec3, rain: bool) {
+    ticks.tick(world, light, &terrain(), pos, rain, &mut Ticked::default());
+}
+
+fn plant(world: &mut World, pos: IVec3, crop: Block) {
+    world.set_block_supported(pos + IVec3::Y, crop);
+}
+
+#[test]
+fn farmland_near_water_gets_wet_and_far_one_dries_into_dirt() {
+    let (mut world, light, mut ticks) = farm();
+    world.set_block(at(8, 8), Block::Water);
+    let (near, far) = (at(12, 8), at(0, 0));
+    world.set_block_with_data(far, Block::Farmland, 2);
+    tick_at(&mut ticks, &mut world, &light, near, false);
+    assert_eq!(world.block_data(near), FARMLAND_WET);
+    for expected in [1, 0] {
+        tick_at(&mut ticks, &mut world, &light, far, false);
+        assert_eq!(world.block_data(far), expected);
+    }
+    tick_at(&mut ticks, &mut world, &light, far, false);
+    assert_eq!(world.block(far), Block::Dirt);
+}
+
+#[test]
+fn water_one_block_above_still_wets_but_five_blocks_away_does_not() {
+    let (mut world, light, mut ticks) = farm();
+    world.set_block(at(8, 8) + IVec3::Y, Block::Water);
+    tick_at(&mut ticks, &mut world, &light, at(4, 4), false);
+    assert_eq!(world.block_data(at(4, 4)), FARMLAND_WET);
+    world.set_block_with_data(at(3, 8), Block::Farmland, 1);
+    tick_at(&mut ticks, &mut world, &light, at(3, 8), false);
+    assert_eq!(world.block_data(at(3, 8)), 0);
+}
+
+#[test]
+fn dry_farmland_with_a_crop_stays_farmland() {
+    let (mut world, light, mut ticks) = farm();
+    plant(&mut world, at(5, 5), Block::Wheat);
+    for _ in 0..3 {
+        tick_at(&mut ticks, &mut world, &light, at(5, 5), false);
+    }
+    assert_eq!(world.block(at(5, 5)), Block::Farmland);
+    assert_eq!(world.block(at(5, 5) + IVec3::Y), Block::Wheat);
+}
+
+#[test]
+fn farmland_turned_to_dirt_takes_its_crop_with_it() {
+    let (mut world, light, mut ticks) = farm();
+    plant(&mut world, at(5, 5), Block::Carrots);
+    world.set_block(at(5, 5) + IVec3::Y, Block::Air);
+    tick_at(&mut ticks, &mut world, &light, at(5, 5), false);
+    assert_eq!(world.block(at(5, 5)), Block::Dirt);
+}
+
+fn lit(world: &World, key: ColumnPos) -> LightMap {
+    let mut light = LightMap::new();
+    light.add_column(world, key);
+    light
+}
+
+#[test]
+fn rain_wets_open_farmland_but_not_covered() {
+    let key = warm_key(&terrain());
+    let (mut world, _) = world_of(&[key], Block::Farmland);
+    let (open, covered) = (
+        key.origin() + IVec3::new(2, GROUND, 2),
+        key.origin() + IVec3::new(8, GROUND, 8),
+    );
+    world.set_block(covered + IVec3::Y * 2, Block::Stone);
+    let light = lit(&world, key);
+    let mut ticks = RandomTicks::new(1);
+    let mut ticked = Ticked::default();
+    for pos in [open, covered] {
+        ticks.tick(&mut world, &light, &terrain(), pos, true, &mut ticked);
+    }
+    assert_eq!(world.block_data(open), FARMLAND_WET);
+    assert_eq!(world.block_data(covered), 0);
+}
+
+#[test]
+fn every_crop_ripens_stage_by_stage_and_stops_at_its_last_stage() {
+    for crop in [
+        Block::Wheat,
+        Block::Carrots,
+        Block::Potatoes,
+        Block::Beetroots,
+    ] {
+        let (mut world, light, _) = farm();
+        world.set_block_with_data(at(5, 5), Block::Farmland, FARMLAND_WET);
+        plant(&mut world, at(5, 5), crop);
+        let mut ticks = RandomTicks::new(4);
+        let mut seen = vec![0];
+        for _ in 0..FARM_TICKS * 10 {
+            tick_at(&mut ticks, &mut world, &light, at(5, 5) + IVec3::Y, false);
+            let age = world.block_data(at(5, 5) + IVec3::Y);
+            if age != *seen.last().unwrap() {
+                seen.push(age);
+            }
+        }
+        let expected: Vec<u8> = (0..=crop.crop_max_age()).collect();
+        assert_eq!(seen, expected, "{crop:?}");
+        assert_eq!(world.block(at(5, 5) + IVec3::Y), crop);
+    }
+}
+
+#[test]
+fn crops_grow_faster_on_wet_farmland_and_slower_next_to_a_twin() {
+    let chance = |wet: u8, twin: bool| {
+        let (mut world, _, _) = farm();
+        world.set_block_with_data(at(5, 5), Block::Farmland, wet);
+        plant(&mut world, at(5, 5), Block::Wheat);
+        if twin {
+            plant(&mut world, at(6, 6), Block::Wheat);
+        }
+        growth_chance(&world, at(5, 5) + IVec3::Y, Block::Wheat)
+    };
+    assert!(chance(FARMLAND_WET, false) > chance(0, false));
+    assert_eq!(chance(0, true) * 2.0, chance(0, false));
+    assert_eq!(chance(0, false), 1.0 + 1.0 + 8.0 * 0.25);
+}
+
+#[test]
+fn crop_without_light_is_removed() {
+    let (mut world, _, mut ticks) = farm();
+    world.set_block_with_data(at(5, 5), Block::Farmland, FARMLAND_WET);
+    plant(&mut world, at(5, 5), Block::Wheat);
+    for z in 0..SECTION_SIZE {
+        for x in 0..SECTION_SIZE {
+            world.set_block(at(x, z) + IVec3::Y * 2, Block::Stone);
+        }
+    }
+    let dark = lit(&world, ColumnPos::ZERO);
+    tick_at(&mut ticks, &mut world, &dark, at(5, 5) + IVec3::Y, false);
+    assert_eq!(world.block(at(5, 5) + IVec3::Y), Block::Air);
+}
+
+#[test]
+fn beetroots_ripen_slower_than_wheat_in_the_same_light() {
+    let steps = |crop| {
+        let (mut world, light, _) = farm();
+        world.set_block_with_data(at(5, 5), Block::Farmland, FARMLAND_WET);
+        plant(&mut world, at(5, 5), crop);
+        let mut total = 0;
+        for seed in 0..40 {
+            world.set_block_with_data(at(5, 5) + IVec3::Y, crop, 0);
+            let mut ticks = RandomTicks::new(seed + 1);
+            let mut ticked = Ticked::default();
+            for step in 1..=FARM_TICKS * 10 {
+                ticks.tick(
+                    &mut world,
+                    &light,
+                    &terrain(),
+                    at(5, 5) + IVec3::Y,
+                    false,
+                    &mut ticked,
+                );
+                if world.block_data(at(5, 5) + IVec3::Y) >= 1 {
+                    total += step;
+                    break;
+                }
+            }
+        }
+        total
+    };
+    assert!(steps(Block::Beetroots) > steps(Block::Wheat));
 }
